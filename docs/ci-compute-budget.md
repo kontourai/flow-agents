@@ -13,23 +13,24 @@ contain no PR, ref, head or attempt identifier; the only run-derived input is
 the lane, described below. Admission happens in GitHub Actions, before a runner
 is assigned; there is no runner-held acquisition loop.
 
-## Why the groups are `-v2-`, and why there are four
+## Why there are four groups, named `-v2-`
 
-On 2026-11-03 the original groups, `flow-agents-compute-1` and
-`flow-agents-compute-2`, deadlocked. About 41 runs across all workflows sat
-`pending` with `pending` jobs while no run was `in_progress`, `queued`,
-`waiting` or `action_required`, and no cancelled run had unfinished jobs.
-GitHub Actions reported operational status and other repositories' CI ran
-normally. Cancelling the queue head and re-running a run did not release it: the
-groups held a lock with no visible owner. A concurrency group's state lives on
-the platform, so the only repair available from the repository is to stop using
-the stuck names. The base name is now `flow-agents-compute-v2-…`, which cannot
-collide with the retired names, and the policy refuses them if they reappear.
+On 2026-11-03 a stalled queue head in the single-occupancy groups
+`flow-agents-compute-1` and `flow-agents-compute-2` blocked every participating
+run for about an hour. About 41 runs across all workflows sat `pending` while no
+run was `in_progress`, `queued`, `waiting` or `action_required`. The queue
+resumed after the stuck head was cancelled; it was head-of-line blockage, not a
+permanent lock. The lesson is structural: with one occupant per group, one stuck
+run blocks the whole repository.
 
-The repository owner also decided (2026-11-03) to allow two concurrent
-admission units per slot, raising the repository-wide peak from 2 to 4 runners.
-The wider bound shortens queue waits; it also means one stuck group can no
-longer stall half of all participating work.
+The repository owner decided (2026-11-03) to split each slot into two lanes,
+allowing two concurrent admission units per slot and raising the repository-wide
+peak from 2 to 4 runners. That halves the exposure to any single stalled run
+(one stuck group stalls a quarter of participating work, not half) and doubles
+throughput. The groups were renamed to `flow-agents-compute-v2-…` so that runs
+created under the old workflow revisions, which may still be pending in the
+retired groups, cannot share a queue with the new ones; the policy refuses the
+retired names if they reappear.
 
 ### Lane assignment
 
