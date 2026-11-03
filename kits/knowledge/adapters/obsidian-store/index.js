@@ -42,6 +42,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { openCorpusStore, purgeUnavailable } from "../shared/corpus-store.js";
 
 import {
   missingEvidenceError,
@@ -90,8 +91,10 @@ export class ObsidianKnowledgeStore {
   /**
    * @param {{ storeRoot: string }} options
    */
-  constructor({ storeRoot, sourcesDir = "sources", dimensions = [] }) {
+  constructor({ storeRoot, sourcesDir = "sources", dimensions = [], corpusStore }) {
     if (!storeRoot) throw new Error("storeRoot is required");
+    const selected = openCorpusStore(corpusStore, { storeRoot, sourcesDir, dimensions }, "KitObsidianStoreAdapter");
+    if (selected) return selected;
     this._sourcesDir = sourcesDir;
     // Named dimensions for category segments AFTER the first (domain) segment,
     // written into frontmatter as derived fields so vault views can filter on
@@ -110,6 +113,8 @@ export class ObsidianKnowledgeStore {
     this._aliasPath = path.join(this._root, "alias-index.json");
     fs.mkdirSync(this._root, { recursive: true });
   }
+
+  async purge() { throw purgeUnavailable(); }
 
   // -------------------------------------------------------------------------
   // Record-identity resolution (short-id prefix + slug alias, issue #339)

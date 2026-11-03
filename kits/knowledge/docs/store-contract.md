@@ -53,7 +53,7 @@ body. Callers/flows must supply and check that evidence. Both adapters require
 | `aliases` | string[] | no | Human-readable, category-scoped slug aliases resolvable via `get`/`getLinks` (Addendum H). Append-only; never changes `id`. |
 | `links` | Link[] | no | Outbound links from this record (see §2). |
 | `provenance` | Provenance | yes | Immutable creation provenance (see §4); `agent` required, `source_ids`, `session_id`, `note` optional. |
-| `status` | `"active"` \| `"implemented"` \| `"retired"` | no | Created as active; absent means active. Change via `retire`, not `update` (§B). |
+| `status` | `"active"` \| `"implemented"` \| `"retired"` \| `"purged"` | no | Created as active; absent means active. Change via `retire`, not `update` (§B); `purged` is the privileged Corpus tombstone state (§M). |
 | `mutation_log` | MutationLogEntry[] | adapter-maintained | Empty at creation; append-only operation/evidence history (§4.2). |
 | `created_at` | ISO-8601 string | yes | Creation timestamp in UTC. |
 | `updated_at` | ISO-8601 string | yes | Last mutation timestamp in UTC. |
@@ -1945,10 +1945,46 @@ violate that requirement).
 ## Addendum M: Privileged purge (issue #1570)
 
 The owner approved an explicit erasure exception on 2026-11-02. The operation is
-owned by [Corpus Store](https://github.com/kontourai/corpus/blob/74f95d52fa529253316f68d051eb91423e5545ba/packages/store/README.md#owner-decisions);
-this kit must consume that operation rather than implement a second cascade.
-**Implementation status:** the bundled adapters in this revision do not yet
-implement this addendum. Hosts must not assume they support purge or erasure.
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/de8450e2906796e0019ed46bc73014a5d259bde8/packages/store/README.md#owner-decisions).
+Both bundled adapter entry points can explicitly select a host-supplied Corpus
+module. In that mode the returned store delegates **all** operations to the
+corresponding Corpus adapter; the kit does not implement a second cascade.
+Without that selection, the legacy adapter's `purge` always refuses with
+`READ_ONLY`.
+
+The host installs the published `@kontourai/corpus-store` package, stops all
+legacy readers and writers, migrates kit-v1 vaults using Corpus's documented offline
+migration, and supplies the same coordination directory, lock protocol and
+identity guard to every cooperating writer. The standalone lock is not
+interoperable with Station's lock. Corpus mode is explicit because a legacy
+writer does not participate in Corpus transactions; a boolean declaration is
+not proof that other processes have stopped. Do not mix modes on a live root.
+Compatibility changes and the vault migration are described by Corpus's store
+contract; Corpus mode is not a byte-for-byte replacement for all legacy inputs.
+
+```js
+import * as corpus from '@kontourai/corpus-store';
+const store = new DefaultKnowledgeStore({
+  storeRoot,
+  corpusStore: {
+    module: corpus,
+    legacyProcessesStopped: true,
+    services: { coordinationDirectory, lock, coordinationIdentity, allowPurge: true },
+  },
+});
+```
+
+The same selection is accepted by `ObsidianKnowledgeStore`. `allowPurge` is
+omitted or false unless the host authorizes the operation; the supplied agent
+name alone is not authorization. Pass the returned store to
+`new MarkdownVaultProvider({ store })` and pass that provider to
+`buildKnowledgeTrustBundle({ store: provider })`. Constructing a separate
+provider from `storeRoot` selects the legacy reader and is not coordinated with
+the Corpus-backed store. Host-controlled readers and projections must likewise
+use the coordinated store, not a concurrently opened legacy adapter. Before
+purge, the host must suspend and drain in-flight projection reads; a read already
+in progress can retain pre-purge content. Rebuild projections after the operation
+before admitting new reads.
 
 The privileged interface is separate from ordinary mutations: `purge(ids,
 { agent, rationale, note? })` requires an explicit host authorization decision,
@@ -1985,8 +2021,9 @@ The Corpus purge branch has incorporated create proposals: a pending proposal
 that rests only on erased sources is rejected and its candidate scrubbed; one
 with remaining support is blocked from application and returned for review. A
 blocked proposal retains its candidate, which may itself reproduce erased
-content, so the host must review it. The kit's bundled adapters have not yet
-adopted or qualified this behavior. Reverify against the merged package.
+content, so the host must review it. The Corpus-backed adapter mode adopts this
+behavior; the packed branch evidence must be repeated against the merged,
+published package before release.
 
 When a purged record is projected into a Surface claim, the Knowledge Surface
 adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
@@ -1994,13 +2031,12 @@ state `deleted` and a null claim value. It excludes evidence on the tombstone
 and does not quote a tombstoned linking record as evidence for a live target. Missing
 purge audit evidence fails the projection; no erasure actor or rationale is
 invented. Survivor content remains the producer's responsibility. To exercise
-the packed Corpus adapters through this projection before publication, install
-the scratch-built tarball outside the repository, build Surface with the erasure
-cascade, and run:
+the packed Corpus-backed adapters through this projection before publication,
+install the scratch-built tarball outside the repository and run:
 
 ```sh
 CORPUS_STORE_ENTRY=/absolute/path/to/installed/package/dist/index.js \
-SURFACE_ENTRY=/absolute/path/to/surface/dist/src/index.js \
+SURFACE_ENTRY=/absolute/path/to/installed/surface/dist/src/index.js \
   node --test kits/knowledge/providers/surface-adapter/packed-purge.test.mjs
 ```
 
@@ -2014,7 +2050,5 @@ from that bundle and may conservatively reduce a survivor's derived status to
 `unknown`; request all relevant inputs for a complete trace. The purge
 result and retained `support-purged` entries also identify survivors for producer
 review, including content that might reproduce erased material.
-Surface erasure interpretation requires a released `@kontourai/surface` containing
-the erasure cascade and a consumer dependency update. The currently pinned
-version validates the bundle shape but does not interpret `surfaceRetention` as
-deleted; the mapping alone is not a runtime erasure-recomputation guarantee.
+The kit pins `@kontourai/surface` 6.3.0, which interprets the deleted retention
+fact. This does not prove that other hosts have refreshed their own projections.

@@ -433,3 +433,43 @@ test("self-source references do not prevent projecting other records", async () 
   const other = bundle.claims.find((claim) => claim.subjectId === "other");
   assert.deepEqual(self.derivedFrom, [other.id]);
 });
+
+for (const versioned of [false, true]) {
+  test(`${versioned ? "versioned" : "unversioned"} post-mutation reads do not join an older in-flight fetch`, async () => {
+    let releaseOld;
+    let startedOld;
+    const oldStarted = new Promise((resolve) => { startedOld = resolve; });
+    const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+    let first = true;
+    let version = 1;
+    let body = "OLD_ERASED_CONTENT";
+    const source = {
+      ...(versioned ? { getCacheVersion: () => version } : {}),
+      async listByType(type) {
+        if (type !== "raw") return [];
+        const snapshot = body;
+        if (first) { first = false; startedOld(); await oldGate; }
+        return [{ id: "record", type: "raw", title: "record", body: snapshot,
+          category: "test", provenance: { agent: "test" } }];
+      },
+    };
+    const provider = new MarkdownVaultProvider({ store: source });
+    const oldRead = provider.readNodes();
+    await oldStarted;
+    body = "new content";
+    version += 1;
+    let timer;
+    try {
+      const newRead = await Promise.race([
+        provider.readNodes(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("post-mutation read joined old fetch")), 2000); }),
+      ]);
+      assert.equal(newRead[0].body, "new content");
+    } finally {
+      clearTimeout(timer);
+      releaseOld();
+    }
+    await oldRead;
+    assert.equal((await provider.readNodes())[0].body, "new content");
+  });
+}

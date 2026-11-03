@@ -15,6 +15,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { openCorpusStore, purgeUnavailable } from "../shared/corpus-store.js";
 
 // Record-identity resolution layer (short-id prefix + slug aliases, issue #339).
 // Both bundled adapters share identity resolution and frontmatter parsing.
@@ -227,8 +228,10 @@ export class DefaultKnowledgeStore {
   /**
    * @param {{ storeRoot: string }} options
    */
-  constructor({ storeRoot }) {
+  constructor({ storeRoot, corpusStore }) {
     if (!storeRoot) throw new Error("storeRoot is required");
+    const selected = openCorpusStore(corpusStore, { storeRoot }, "KitDefaultStoreAdapter");
+    if (selected) return selected;
     this._root = path.resolve(storeRoot);
     this._recordsDir = path.join(this._root, "records");
     this._graphPath = path.join(this._root, "graph-index.json");
@@ -237,6 +240,8 @@ export class DefaultKnowledgeStore {
     fs.mkdirSync(this._recordsDir, { recursive: true });
     this._initCacheVersion();
   }
+
+  async purge() { throw purgeUnavailable(); }
 
   _initCacheVersion() {
     if (!fs.existsSync(this._cacheVersionPath)) {

@@ -60,7 +60,7 @@ export class MarkdownVaultProvider {
     // _allRecords() below — covers readNodes/readEdges/readGraph/queryByType
     // (they all funnel through _allRecords()).
     this._recordsMemo = null; // { version, records } | null
-    this._inFlightFetch = null; // single-flight guard, see _allRecords()
+    this._inFlightFetch = null; // { version, promise } or null
   }
 
   capabilities() {
@@ -85,20 +85,19 @@ export class MarkdownVaultProvider {
       return this._recordsMemo.records;
     }
 
-    // Single-flight: concurrent callers on a cold/invalidated memo (e.g.
-    // readGraph()'s Promise.all(readNodes(), readEdges())) must share ONE
-    // underlying fetch across all ALL_RECORD_TYPES, not each independently
-    // re-fetch. Everything above this point (the memo check) and the
-    // assignment below run synchronously (no `await` yet), so a second
-    // concurrent call always observes the in-flight promise already set by
-    // the first. Cleared on rejection (via .finally()) so the next call
-    // retries rather than being permanently stuck.
-    if (this._inFlightFetch) return this._inFlightFetch;
+    // Unversioned stores cannot prove an in-flight read predates no mutation.
+    // In particular, a read after purge must not join a pre-purge fetch.
+    if (currentVersion === undefined) return this._fetchAllRecords(undefined);
 
-    this._inFlightFetch = this._fetchAllRecords(currentVersion).finally(() => {
-      this._inFlightFetch = null;
+    // Only share a fetch from the same observed version. A late completion
+    // must not clear a newer flight.
+    if (this._inFlightFetch?.version === currentVersion) return this._inFlightFetch.promise;
+    const flight = { version: currentVersion, promise: null };
+    flight.promise = this._fetchAllRecords(currentVersion).finally(() => {
+      if (this._inFlightFetch === flight) this._inFlightFetch = null;
     });
-    return this._inFlightFetch;
+    this._inFlightFetch = flight;
+    return flight.promise;
   }
 
   async _fetchAllRecords(currentVersion) {

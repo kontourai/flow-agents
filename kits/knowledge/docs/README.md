@@ -207,6 +207,10 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `supersede(newId, supersededIds, evidence)` → `Promise<void>`
 - `retire(id, targetStatus, evidence)` → `Promise<void>`
 - `reindex()` → derived graph-index recovery report
+- `purge(ids, evidence)` → a Corpus purge result in explicitly selected
+  Corpus-backed mode; legacy mode rejects it with `READ_ONLY`. See
+  [Addendum M](store-contract.md#addendum-m-privileged-purge-issue-1570)
+  for authorization, coordination and migration requirements.
 
 ---
 
