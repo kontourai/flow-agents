@@ -329,7 +329,12 @@ function collectAssignments(text, edits, urlRanges) {
     for (let key = inner.exec(text); key !== null && key.index < end; key = inner.exec(text)) {
       if (!isSecretName(key[0])) continue;
       const nested = assignmentValue(text, key.index + key[0].length, run);
-      if (nested !== null && nested.end > end) end = Math.min(nested.end, limit);
+      if (nested !== null && nested.end > end) {
+        // Same rule as for the outer value: an unquoted nested value stops at the password, a quoted
+        // one is a single string and keeps its whole span.
+        const nestedQuoted = text[nested.start] === '"' || text[nested.start] === "'";
+        end = nestedQuoted ? nested.end : Math.min(nested.end, limit);
+      }
     }
     // A separator when the next character is not a value terminator, so the placeholder can
     // never fuse with what follows it (which a second pass would read as one longer value).

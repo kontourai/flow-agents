@@ -939,6 +939,8 @@ describe("review round 1 regressions (PR #1575)", () => {
       ["user@host.example.com and https://a:b12345@c.example.org", "<EMAIL> and https://a:<SECRET>@c.example.org"],
       // a key AFTER the "@" is in the host/path/query, not the password: still found
       ["https://u:pw@h/x?token=xZebraCanary7319", "https://u:<SECRET>@h/x?token=<SECRET>"],
+      // a nested UNQUOTED value stops at the password too
+      ["https://u:token=password=abcd@localhost/path", "https://u:<SECRET>@localhost/path"],
       // an empty value in a password leaves the "@" alone
       ["https://u:token=@localhost/path", "https://u:<SECRET>@localhost/path"],
       // a quoted value is one string even when its closing quote comes after the "@"
@@ -953,6 +955,10 @@ describe("review round 1 regressions (PR #1575)", () => {
     // prose longer than the shift a wrong mask length would cause: it must come through byte for byte
     const prose = "this sentence is ordinary prose and must not be touched. ".repeat(6);
     assert.equal(scrubResidueText(`${"\u{1F600}".repeat(101)} ${prose}mail a@b.example.com`), `<BLOB> ${prose}mail <EMAIL>`);
+    // a nested QUOTED value is one string, even when it holds the "@" that opens the host
+    const nestedQuoted = scrubResidueText(`https://u:token=password="abc@host/path ${canary}"`);
+    assert.equal(nestedQuoted.includes(canary), false);
+    assert.equal(scrubResidueText(nestedQuoted), nestedQuoted);
     // a real URL password and a real scheme are still found
     assert.equal(scrubResidueText(`(ftp://u:p${canary}@h/x) and HTTPS://a:b@c`), "(ftp://u:<SECRET>@h/x) and HTTPS://a:<SECRET>@c");
   });
