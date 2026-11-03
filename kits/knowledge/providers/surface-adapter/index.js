@@ -61,7 +61,9 @@ function compactMutationLog(mutationLog) {
 // must fail closed instead of becoming apparently live claims.
 function deletedRetention(mutationLog) {
   const entry = Array.isArray(mutationLog) && mutationLog.find((e) => e?.op === "purged");
-  if (!entry || typeof entry.at !== "string" || !Number.isFinite(Date.parse(entry.at)) ||
+  if (!entry || typeof entry.at !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(entry.at) ||
+      !Number.isFinite(Date.parse(entry.at)) ||
       typeof entry.agent !== "string" || !entry.agent.trim() ||
       typeof entry.rationale !== "string" || !entry.rationale.trim()) {
     throw new Error("purged record lacks valid erasure audit evidence");
@@ -126,10 +128,11 @@ export async function buildKnowledgeTrustBundle(options = {}) {
 
   const builder = new TrustBundleBuilder({ source: "knowledge-kit" });
 
-  // nodeId -> claimId, populated as claims are emitted below. Used both to
-  // replace O(n^2) node lookups and to skip identity links whose endpoints
-  // never received a claim.
-  const claimIdByNodeId = new Map();
+  // Assign IDs before emitting claims so support can point to later nodes.
+  const claimIdByNodeId = new Map(filteredNodes.map((node) => {
+    const { record_type, category: cat, status } = node.attributes;
+    return [node.id, `knowledge:${record_type}.${status === "purged" ? "purged" : cat || "uncategorized"}#${node.id}`];
+  }));
 
   // Nodes → Claims
   for (const node of filteredNodes) {
@@ -145,9 +148,17 @@ export async function buildKnowledgeTrustBundle(options = {}) {
     } = node.attributes;
 
     const deleted = status === "purged";
-    const claimId = `knowledge:${record_type}.${deleted ? "purged" : cat || "uncategorized"}#${node.id}`;
+    const claimId = claimIdByNodeId.get(node.id);
     const claimStatus = statusFor(status);
-    claimIdByNodeId.set(node.id, claimId);
+
+    // Corpus defines support as source_ids and source links. Only project
+    // references with claims in this bundle; category/type filtering may hide
+    // other inputs, so consumers requiring a complete trace must request them.
+    const sourceIds = new Set([
+      ...(Array.isArray(node.attributes.record_provenance?.source_ids) ? node.attributes.record_provenance.source_ids : []),
+      ...edges.filter((edge) => edge.from === node.id && edge.attributes?.vault_link_kind === "source").map((edge) => edge.to),
+    ]);
+    const derivedFrom = [...sourceIds].map((id) => claimIdByNodeId.get(id)).filter(Boolean);
 
     const createdAt = created_at || node.provenance?.retrieved_at || nowIso;
     const updatedAt = updated_at || node.provenance?.retrieved_at || nowIso;
@@ -176,10 +187,12 @@ export async function buildKnowledgeTrustBundle(options = {}) {
       ...(!deleted && ttl_seconds !== undefined && ttl_seconds !== null ? { ttlSeconds: ttl_seconds } : {}),
       impactLevel: "medium",
       metadata,
+      ...(!deleted && derivedFrom.length ? { derivedFrom } : {}),
     });
 
-    // Surface refuses evidence attached to deleted claims. A tombstoned source
-    // also cannot be republished as an excerpt on a surviving claim.
+    // Surface refuses evidence attached to deleted claims. The provider directs
+    // evidence-of edges from a linking record to its target; do not quote a
+    // deleted linking record as evidence on a surviving target either.
     if (deleted) continue;
 
     // Evidence: source links (raw → compiled, etc.)

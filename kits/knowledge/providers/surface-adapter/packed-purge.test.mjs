@@ -63,6 +63,8 @@ for (const profile of ["KitDefaultStoreAdapter", "KitObsidianStoreAdapter"]) {
         await store.listByCategory("private", { includeHistory: true }),
       ];
       assert.ok(!JSON.stringify(reads).includes("PURGE_SURFACE_SECRET"));
+      // Purge itself must leave the graph safe; a repair must not mask a stale index.
+      assert.ok(!JSON.stringify(await provider.readGraph()).includes("PURGE_SURFACE_SECRET"));
       await store.reindex();
       assert.ok(!JSON.stringify(await provider.readGraph()).includes("PURGE_SURFACE_SECRET"));
       const after = JSON.parse(JSON.stringify(await buildKnowledgeTrustBundle({ store: provider, includeRetired: true })));
@@ -75,6 +77,11 @@ for (const profile of ["KitDefaultStoreAdapter", "KitObsidianStoreAdapter"]) {
       assert.equal(surface.isDeletedClaim(after.claims.find((item) => item.subjectId === dependent)), true);
       assert.equal(surface.isDeletedClaim(after.claims.find((item) => item.subjectId === survivor)), false);
       surface.validateTrustBundle(after);
+      const report = surface.buildTrustReport(after);
+      const survivorClaim = after.claims.find((item) => item.subjectId === survivor);
+      assert.ok(report.changeRecords.some((record) => record.claimId === survivorClaim.id &&
+        record.reason === "input-deleted" && record.inputClaimIds.includes(claim.id)),
+      "survivor must carry Surface's deletion review signal");
       assert.ok(!JSON.stringify(after).includes("PURGE_SURFACE_SECRET"));
       assert.ok(after.evidence.every((item) => item.claimId !== claim.id));
     } finally {

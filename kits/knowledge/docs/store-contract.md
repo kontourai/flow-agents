@@ -963,8 +963,8 @@ Retired records MUST remain reachable from:
 These are normative retention requirements. The bundled Obsidian
 [archive collision gap](#known-obsidian-archive-retention-gap) can violate full-record
 retrieval and original-byte retention; a surviving source id or graph link does not
-cure it. No deletion or overwrite of retained records is authorized. Physical purge
-(if ever needed) is a separate, future policy hook not defined in this version.
+cure it. Retirement does not authorize deletion or overwrite of retained records.
+The separately privileged purge exception is specified in Addendum K.
 
 ### B.7 Proposal-Artifact Lifecycle (close-on-apply)
 
@@ -1980,11 +1980,15 @@ transaction. Corpus also documents an interrupted-write journal window containin
 before-images until recovery; purge is not a secure-erasure guarantee. A completed
 integration must test each adapter and each actual read path, including a fault
 that skips the cascade and makes conformance fail.
+Create proposals can contain complete candidate records outside the working set.
+Corpus's purge branch is reconciling with its create-proposal operation; until
+that resolution is adopted and tested, no claim is made that purge erases
+proposal content or settles proposals supported by purged sources.
 
 When a purged record is projected into a Surface claim, the Knowledge Surface
 adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
 state `deleted` and a null claim value. It excludes evidence on the tombstone
-and does not quote a tombstoned source as evidence for a surviving claim. Missing
+and does not quote a tombstoned linking record as evidence for a live target. Missing
 purge audit evidence fails the projection; no erasure actor or rationale is
 invented. Survivor content remains the producer's responsibility. To exercise
 the packed Corpus adapters through this projection before publication, install
@@ -1996,3 +2000,17 @@ CORPUS_STORE_ENTRY=/absolute/path/to/installed/package/dist/index.js \
 SURFACE_ENTRY=/absolute/path/to/surface/dist/src/index.js \
   node --test kits/knowledge/providers/surface-adapter/packed-purge.test.mjs
 ```
+
+Corpus tombstones have category `purged`, so a projection filtered by an earlier
+category will not include their deletion facts. Hosts that need a deletion trace
+must account for those tombstones independently. The Surface adapter projects
+`source_ids` and `source` links to derivation inputs when the input has a claim
+in the selected bundle. Surface's erasure recomputation can then report deletion
+pressure on survivors. Filtering and external or missing inputs can omit support
+from that bundle; request all relevant inputs for a complete trace. The purge
+result and retained `support-purged` entries also identify survivors for producer
+review, including content that might reproduce erased material.
+Surface erasure interpretation requires a released `@kontourai/surface` containing
+the erasure cascade and a consumer dependency update. The currently pinned
+version validates the bundle shape but does not interpret `surfaceRetention` as
+deleted; the mapping alone is not a runtime erasure-recomputation guarantee.
