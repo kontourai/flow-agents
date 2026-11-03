@@ -703,8 +703,10 @@ The explicit `runPromote({ target: "store", ... })` path accepts a complete
 for that same root with host-owned locking and coordination. The host supplies
 the root name explicitly. This path does not discover or authorize paths or
 edit an MCP registry itself. The host's registration implementation determines whether its
-MCP server lists the root. The host must refuse name collisions instead of
-silently replacing a registered root.
+MCP server lists the root. The host must refuse registration when an existing name points to a different
+root; re-registering the same name and root is allowed. The reference host
+registry does not yet enforce this: its collision handling remains unverified
+until the host protocol in #753 is implemented.
 
 Each candidate is sent through `proposeCreate(candidate, proposerId, evidence)`.
 The candidate provenance note encodes the session ID, transcript reference,
