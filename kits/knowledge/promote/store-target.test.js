@@ -88,8 +88,9 @@ test('registration failure stops before Corpus; an uncertain proposal failure is
   third.opts.store.proposeCreate = async () => { throw Object.assign(new Error('conflict'), { code: 'REQUEST_KEY_CONFLICT' }); };
   await assert.rejects(runPromote(third.opts), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 0 && /^knowledge\.promote:[a-f0-9]{64}$/.test(error.requestKey));
   const fourth = setup();
-  fourth.opts.store.proposeCreate = async () => { throw Object.assign(new Error('invalid'), { code: 'MISSING_EVIDENCE' }); };
-  await assert.rejects(runPromote(fourth.opts), (error) => error.code === 'MISSING_EVIDENCE' && /refused/.test(error.message));
+  let refusedKey;
+  fourth.opts.store.proposeCreate = async (_candidate, _proposer, _evidence, options) => { refusedKey = options.requestKey; throw Object.assign(new Error('invalid'), { code: 'MISSING_EVIDENCE' }); };
+  await assert.rejects(runPromote(fourth.opts), (error) => error.code === 'MISSING_EVIDENCE' && /refused/.test(error.message) && error.requestKey === refusedKey);
 });
 
 
