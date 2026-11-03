@@ -930,6 +930,20 @@ describe("review round 1 regressions (PR #1575)", () => {
     // directly, so this is not a credential and the text is left as it was.
     assert.equal(scrubResidueText("https://u:ab\u00a0cd@h/x"), "https://u:ab\u00a0cd@h/x");
     assert.equal(scrubResidueText("https://us\u3000er:pw@h/x"), "https://us\u3000er:pw@h/x");
+    // the host and path after a URL password are not secret, whatever else matches there
+    for (const [input, expected] of [
+      ["https://u:abcd@db.example.com/project", "https://u:<SECRET>@db.example.com/project"],
+      ["https://u:token=abcd@localhost/path", "https://u:<SECRET>@localhost/path"],
+      ["https://u:token='ok'x@db.example.com/path", "https://u:<SECRET>@db.example.com/path"],
+      ["mail jane@example.com about https://x:pw1234@host.io/a?b=c", "mail <EMAIL> about https://x:<SECRET>@host.io/a?b=c"],
+      ["user@host.example.com and https://a:b12345@c.example.org", "<EMAIL> and https://a:<SECRET>@c.example.org"],
+    ]) {
+      assert.equal(scrubResidueText(input), expected, input);
+      assert.equal(scrubResidueText(expected), expected, `${input}: idempotent`);
+    }
+    // offsets survive a blob of astral characters (UTF-16 length, not code points), so prose after it is untouched
+    assert.equal(scrubResidueText(`${"\u{1F600}".repeat(101)} then prose, mail a@b.example.com`), "<BLOB> then prose, mail <EMAIL>");
+    assert.equal(scrubResidueText(`${"\u{1F600}".repeat(101)} keep this sentence intact. a@b.example.com`), "<BLOB> keep this sentence intact. <EMAIL>");
     // a real URL password and a real scheme are still found
     assert.equal(scrubResidueText(`(ftp://u:p${canary}@h/x) and HTTPS://a:b@c`), "(ftp://u:<SECRET>@h/x) and HTTPS://a:<SECRET>@c");
   });
