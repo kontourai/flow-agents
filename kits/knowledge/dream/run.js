@@ -289,10 +289,16 @@ export async function runDream(host, options = {}) {
     // the same slot rules locally (kontourai/flow-agents#1584).
     const askHost = async (claim, slotClaims) => {
       const stated = slotClaims.filter((c) => c.posture === "stated");
+      const known = new Set(slotClaims.map((c) => c.id));
+      const invalid = (reason) => ({ outcome: "invalid", reason: String(reason).slice(0, 200), candidateClaimIds: slotClaims.map((c) => c.id).sort(), gapCodes: ["projection-failed"] });
       try {
-        return memoryAccumulationFact(await host.project({ query: memoryAccumulationQuery(claim, now()), claims: memoryAccumulationClaims(stated, knownClaims.concat(stated)) }));
+        const fact = memoryAccumulationFact(await host.project({ query: memoryAccumulationQuery(claim, now()), claims: memoryAccumulationClaims(stated, knownClaims.concat(stated)) }));
+        // The projection and the store must be talking about the same slot: a candidate the run never saw cannot be shown
+        // to a reviewer, so the slot cannot be called answered.
+        const strangers = fact.candidateClaimIds.filter((id) => !known.has(id));
+        return strangers.length ? invalid(`the projection names claims outside the slot: ${strangers.slice(0, 3).join(", ")}`) : fact;
       } catch (error) {
-        return { outcome: "invalid", reason: String(error?.message ?? error).slice(0, 200), candidateClaimIds: slotClaims.map((c) => c.id).sort(), gapCodes: ["projection-failed"] };
+        return invalid(error?.message ?? error);
       }
     };
     const factFor = async (claim, siblings) => {
@@ -324,17 +330,20 @@ export async function runDream(host, options = {}) {
       const { fact: accumulation, cut } = boundFact(full, claim.id, rivalIds);
       if (cut > 0) report.claims.facts_truncated += 1;
       const base = { type: "claim", claim, agreement, accumulation, sourceVisibility: options.visibility ?? null };
-      const alone = routeMemoryChange({ ...base, current: [] }, policy);
+      // The peers the projection names must all be in `current` (the claims the fact is about), rivals first. Others join
+      // only if they change the decision (a peer the claim would be wider than), and only while there is room.
       const named = new Set(accumulation?.candidateClaimIds ?? []);
-      const relevant = candidates.filter((peer) => {
-        if (named.has(peer.id)) return true;
-        const withPeer = routeMemoryChange({ ...base, current: [peer] }, policy);
-        return withPeer.outcome !== alone.outcome || withPeer.reasons.length !== alone.reasons.length;
-      });
-      if (relevant.length > MAX_RELEVANT_PEERS) report.claims.peers_capped += 1; // reported, never silent
-      // Rivals first: a peer that holds a different value is what the review item exists to show.
-      const ordered = [...relevant].sort((a, b) => (canonicalJson(a.value) !== mine) === (canonicalJson(b.value) !== mine) ? 0 : canonicalJson(a.value) !== mine ? -1 : 1);
-      return routeMemoryChange({ ...base, current: ordered.slice(0, MAX_RELEVANT_PEERS) }, policy);
+      const rivalsFirst = (list) => [...list].sort((a, b) => (canonicalJson(a.value) !== mine) === (canonicalJson(b.value) !== mine) ? 0 : canonicalJson(a.value) !== mine ? -1 : 1);
+      const required = rivalsFirst(candidates.filter((peer) => named.has(peer.id)));
+      if (required.length > MAX_RELEVANT_PEERS) report.claims.peers_capped += 1; // reported, never silent
+      const chosen = required.slice(0, MAX_RELEVANT_PEERS);
+      const without = routeMemoryChange({ ...base, current: chosen }, policy);
+      for (const peer of candidates) {
+        if (named.has(peer.id) || chosen.length >= MAX_RELEVANT_PEERS) continue;
+        const withPeer = routeMemoryChange({ ...base, current: [...chosen, peer] }, policy);
+        if (withPeer.outcome !== without.outcome || withPeer.reasons.length !== without.reasons.length) chosen.push(peer);
+      }
+      return chosen.length === required.slice(0, MAX_RELEVANT_PEERS).length ? without : routeMemoryChange({ ...base, current: chosen }, policy);
     };
 
     if (dryRun) {
