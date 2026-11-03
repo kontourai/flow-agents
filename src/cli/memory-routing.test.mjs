@@ -7,7 +7,7 @@ import {
 } from "@kontourai/survey/review-workbench";
 import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
 import {
-  DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
+  DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
   memoryReviewItemName, presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
 } from "@kontourai/flow-agents/memory-routing";
 import { SCHEMAS, distillFixtureSitting, loadEntityProposals, matchesFixture, readJson } from "./memory-claims-support.mjs";
@@ -42,6 +42,8 @@ function contradictionAmong(supporting, position) {
   throw new Error(`no contradicting record sorts ${position}; widen the search`);
 }
 const lateContradiction = supporting => contradictionAmong(supporting, "last");
+const PUBLIC = { kind: "public" };
+const only = (...audiences) => ({ kind: "restricted", audiences });
 const rulesOf = decision => decision.reasons.map(reason => reason.rule);
 
 // ---------------------------------------------------------------------------
@@ -127,20 +129,25 @@ const RULE_CASES = {
     ],
   },
   "visibility-widening": {
-    routes: () => change(make({ audience: ["user:brian", "team:platform"] }), { sourceAudience: ["user:brian"] }),
+    routes: () => change(make({ visibility: only("user:brian", "team:platform") }), { sourceVisibility: only("user:brian") }),
     passes: [
-      ["no audience requested: inherits the source, omission never widens", () => change(make(), { sourceAudience: ["user:brian"] })],
-      ["an audience within the source's", () => change(make({ audience: ["user:brian"] }), { sourceAudience: ["user:brian", "team:platform"] })],
-      ["an audience equal to the source's", () => change(make({ audience: ["user:brian"] }), { sourceAudience: ["user:brian"] })],
-      ["inheriting a source that fits inside the current claim's audience", () => change(make({ source: { ...base.source, ref: "s2" } }), { current: [make({ audience: ["user:brian", "team:platform"] })], sourceAudience: ["user:brian"] })],
-      ["nobody declares an audience anywhere: nothing to compare, nothing widened", () => change(make({ source: { ...base.source, ref: "s2" } }), { current: [make({})] })],
+      ["no visibility declared: it reads as sealed, so omission can only narrow, never widen", () => change(make(), { sourceVisibility: PUBLIC })],
+      ["a subset of the source's audiences", () => change(make({ visibility: only("user:brian") }), { sourceVisibility: only("user:brian", "team:platform") })],
+      ["the same audiences as the source, in another order", () => change(make({ visibility: only("user:brian", "team:platform") }), { sourceVisibility: only("team:platform", "user:brian") })],
+      ["public from a public source", () => change(make({ visibility: PUBLIC }), { sourceVisibility: PUBLIC })],
+      ["restricted from a public source: narrower", () => change(make({ visibility: only("user:brian") }), { sourceVisibility: PUBLIC })],
+      ["sealed is the narrowest and fits inside anything, even an undeclared bound", () => change(make({ visibility: only() }))],
+      ["inside every current claim in the slot", () => change(make({ visibility: only("user:brian") }), { sourceVisibility: only("user:brian", "team:platform"), current: [make({ visibility: only("user:brian", "team:platform"), source: { ...base.source, ref: "s2" } })] })],
+      ["nobody declares anything anywhere: all sealed, nothing wider than sealed", () => change(make({ source: { ...base.source, ref: "s2" } }), { current: [make({})] })],
     ],
     alsoRoutes: [
-      ["inheriting a source wider than a current claim in the slot: omission is not exempt", () => change(make({ value: "PostgreSQL 15", source: { ...base.source, ref: "s2" } }), { current: [make({ audience: ["user:brian"] })], sourceAudience: ["user:brian", "public"] })],
-      ["inheriting an unknown audience cannot be shown to fit a declared one", () => change(make({ source: { ...base.source, ref: "s2" } }), { current: [make({ audience: ["user:brian"] })] })],
-      ["asking for an audience when a current claim in the slot declares none fails closed", () => change(make({ value: "PostgreSQL 15", source: { ...base.source, ref: "s2" }, audience: ["user:brian"] }), { sourceAudience: ["user:brian"], current: [make({})] })],
-      ["an unknown source audience fails closed", () => change(make({ audience: ["user:brian"] }))],
-      ["wider than a narrower current claim in the slot", () => change(make({ value: "PostgreSQL 15", audience: ["user:brian", "team:platform"] }), { sourceAudience: ["user:brian", "team:platform"], current: [make({ audience: ["user:brian"] })] })],
+      ["public from a restricted source", () => change(make({ visibility: PUBLIC }), { sourceVisibility: only("user:brian") })],
+      ["public from an undeclared source: undeclared is sealed", () => change(make({ visibility: PUBLIC }))],
+      ["a declared visibility from an undeclared source: undeclared is sealed, not 'anything'", () => change(make({ visibility: only("user:brian") }))],
+      ["one extra audience beyond the source's", () => change(make({ visibility: only("user:brian", "team:other") }), { sourceVisibility: only("user:brian", "team:platform") })],
+      ["wider than a narrower current claim in the slot", () => change(make({ value: "PostgreSQL 15", visibility: only("user:brian", "team:platform") }), { sourceVisibility: only("user:brian", "team:platform"), current: [make({ visibility: only("user:brian"), source: { ...base.source, ref: "s2" } })] })],
+      ["declared, against a current claim that declares none (sealed)", () => change(make({ value: "PostgreSQL 15", visibility: only("user:brian"), source: { ...base.source, ref: "s2" } }), { sourceVisibility: only("user:brian"), current: [make({})] })],
+      ["a bound that is not a readable visibility is sealed, never wider", () => change(make({ visibility: only("user:brian") }), { sourceVisibility: { kind: "restricted", audiences: "user:brian" } })],
     ],
   },
 };
@@ -184,8 +191,8 @@ test("uncontested claims are recorded as proposed, and every claim rule is shown
 });
 
 test("a change that trips several rules records every reason, in rule order", () => {
-  const claim = make({ value: "PostgreSQL 16", audience: ["user:brian", "team:platform"] });
-  const decision = routeMemoryChange(change(claim, { current: [current], agreement: { passes: 2, agreeing: 1 }, sourceAudience: ["user:brian"], verifications: [verification(claim, "contradicted")] }));
+  const claim = make({ value: "PostgreSQL 16", visibility: only("user:brian", "team:platform") });
+  const decision = routeMemoryChange(change(claim, { current: [current], agreement: { passes: 2, agreeing: 1 }, sourceVisibility: only("user:brian"), verifications: [verification(claim, "contradicted")] }));
   assert.deepEqual(rulesOf(decision), ["contradicted-by-verification", "conflicting-current-values", "low-extraction-agreement", "visibility-widening"]);
 });
 
@@ -230,7 +237,7 @@ test("stored inputs with a shape the rules would misread are refused by recomput
   for (const [what, mutate] of [
     ["current is not a list", d => { d.input.current = "none"; }],
     ["baselines are not a list", d => { d.input.baselines = null; }],
-    ["a baseline audience is not a list", d => { d.input.baselines[0].audience = "alice"; }],
+    ["a baseline visibility is not a visibility", d => { d.input.baselines[0].visibility = { kind: "restricted", audiences: "alice" }; }],
     ["an unknown input type", d => { d.input.type = "other"; }],
   ]) {
     const d = plain(good);
@@ -291,9 +298,9 @@ test("recomputation detects an edited outcome, an edited input, a changed policy
   assert.match(recomputeMemoryRouting(tampered).mismatches.join("\n"), /id is not the digest/);
 });
 
-test("a stored input may not drop a peer's audience baseline to clear a widening", () => {
-  const narrow = make({ audience: ["user:brian"] });
-  const wide = routeMemoryChange(change(make({ value: "PostgreSQL 15", source: { ...base.source, ref: "s2" }, audience: ["user:brian", "public"] }), { current: [narrow], sourceAudience: ["user:brian", "public"] }));
+test("a stored input may not drop a peer's visibility baseline to clear a widening", () => {
+  const narrow = make({ visibility: only("user:brian") });
+  const wide = routeMemoryChange(change(make({ value: "PostgreSQL 15", source: { ...base.source, ref: "s2" }, visibility: only("user:brian", "public") }), { current: [narrow], sourceVisibility: only("user:brian", "public") }));
   assert.deepEqual(rulesOf(wide), ["visibility-widening"]);
   const edited = plain(wide);
   edited.input.baselines = edited.input.baselines.filter(base => base.ref === "source");
@@ -303,13 +310,33 @@ test("a stored input may not drop a peer's audience baseline to clear a widening
   assert.match(check.mismatches.join("\n"), /baselines do not match the embedded current claims/);
 });
 
-test("one claim has one decision id, however its audience or edges were ordered", () => {
-  const a = routeMemoryChange(change(make({ audience: ["b", "a"] }), { sourceAudience: ["b", "a"] }));
-  const b = routeMemoryChange(change(make({ audience: ["a", "b", "a"] }), { sourceAudience: ["a", "b"] }));
+test("one claim has one decision id, however its audiences or edges were ordered", () => {
+  const a = routeMemoryChange(change(make({ visibility: only("b", "a") }), { sourceVisibility: only("b", "a") }));
+  const b = routeMemoryChange(change(make({ visibility: only("a", "b", "a") }), { sourceVisibility: only("a", "b") }));
   assert.equal(a.id, b.id);
   const edges = [{ claimId: make({ value: "x" }).id, kind: "succession", reason: "r" }, { claimId: make({ value: "y" }).id, kind: "correction", reason: "r" }];
   assert.equal(routeMemoryChange(change(make({ supersedes: edges }))).id, routeMemoryChange(change(make({ supersedes: [...edges].reverse() }))).id);
 });
+
+test("the Kit's visibility order is Surface's lattice: Surface's own meet vectors, and the real function once it is installed", async () => {
+  const sealed = only();
+  const vectors = [[PUBLIC, PUBLIC, true], [only("a"), PUBLIC, true], [PUBLIC, only("a"), false], [only("a"), only("a", "b"), true], [only("a", "b"), only("a"), false],
+    [only("a"), only("b"), false], [sealed, only("a"), true], [sealed, sealed, true], [only("a"), sealed, false], [sealed, PUBLIC, true], [PUBLIC, sealed, false],
+    // unreadable is sealed on either side, never wider
+    [{ kind: "restricted", audiences: [1] }, only("a"), true], [only("a"), { kind: "restricted", audiences: [1] }, false], [undefined, only("a"), true], [only("a"), undefined, false], [undefined, undefined, true], [PUBLIC, undefined, false]];
+  for (const [inner, outer, within] of vectors) assert.equal(memoryVisibilityWithin(inner, outer), within, `${JSON.stringify(inner)} within ${JSON.stringify(outer)}`);
+  const surface = await import("@kontourai/surface");
+  if (typeof surface.meetVisibility !== "function") {
+    // Surface #356 is merged but unreleased. When the pinned Surface has it, this block checks the Kit against it.
+    assert.equal(typeof surface.meetVisibility, "undefined");
+    return;
+  }
+  const grid = [PUBLIC, sealed, only("a"), only("b"), only("a", "b"), only("a", "b", "c"), { kind: "restricted", audiences: [1] }, undefined];
+  for (const inner of grid) for (const outer of grid) {
+    assert.equal(memoryVisibilityWithin(inner, outer), JSON.stringify(surface.meetVisibility(inner ?? sealed, outer ?? sealed)) === JSON.stringify(surface.meetVisibility(inner ?? sealed)), `${JSON.stringify(inner)} / ${JSON.stringify(outer)}`);
+  }
+});
+
 
 test("a conflicting peer is found wherever it sorts among the peers", () => {
   const claim = make({ value: "PostgreSQL 16" });
@@ -392,12 +419,12 @@ test("a routed claim becomes a Survey current/proposed ReviewItem; verification 
 // End to end over the real distill fixtures
 
 const POLICY = { consequential: { properties: ["primary database"], subjectTypes: [] } };
-const SOURCE_AUDIENCE = ["user:fixture"];
+const SOURCE_VISIBILITY = only("user:fixture");
 
 async function endToEnd() {
   const earlier = await distillFixtureSitting(0);
   const later = await distillFixtureSitting(1, { current: earlier.result.claims });
-  const changesFor = (result, currentClaims) => result.claims.map(claim => change(claim, { current: currentClaims, agreement: result.agreement[claim.id], sourceAudience: SOURCE_AUDIENCE }));
+  const changesFor = (result, currentClaims) => result.claims.map(claim => change(claim, { current: currentClaims, agreement: result.agreement[claim.id], sourceVisibility: SOURCE_VISIBILITY }));
   const first = routeMemoryChanges(changesFor(earlier.result, []), POLICY);
   const second = routeMemoryChanges(changesFor(later.result, earlier.result.claims), POLICY);
   return { earlier, later, first, second };
@@ -479,7 +506,7 @@ test("metrics: proposed count, routed share, reviewer decisions and review time,
 test("a claim routed twice in one run is counted once, with its later decision; its one review is not double-counted", async () => {
   const { second } = await endToEnd();
   const first = byProperty(second, "retry budget");
-  const again = routeMemoryChange(change(first.input.claim, { current: first.input.current, agreement: AGREED, sourceAudience: SOURCE_AUDIENCE }), { minAgreement: 0.5 });
+  const again = routeMemoryChange(change(first.input.claim, { current: first.input.current, agreement: AGREED, sourceVisibility: SOURCE_VISIBILITY }), { minAgreement: 0.5 });
   assert.notEqual(again.id, first.id, "a different decision about the same claim");
   assert.equal(again.changeId, first.changeId);
   const item = buildMemoryReviewItem(first);

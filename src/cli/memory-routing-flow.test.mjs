@@ -148,7 +148,7 @@ test("one run, end to end: decisions are recorded before anything is queued, ite
   const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES(), queue });
   assert.deepEqual(run.decisions.map(decision => decision.outcome), ["proposed", "routed", "routed"]);
   assert.equal(run.items.length, 1, "the routed claim");
-  assert.deepEqual(run.entityProposals, [loadEntityProposals().merge.id], "Survey owns the entity item; the host is told which proposal to review");
+  assert.deepEqual(run.entityProposals, [loadEntityProposals().merge], "Survey owns the entity item; the host gets the proposal itself to pass to it");
   assert.deepEqual(published, [[run.items[0].metadata.name, run.decisions[1].id]]);
   assert.deepEqual(run.published, [run.items[0].metadata.name]);
   const metrics = (await readLatestMemoryMetrics("run-1", cwd)).value;

@@ -20,7 +20,7 @@ import { MemoryClaimError } from "./memory-claims.js";
 import type { ReviewDecision, ReviewItem, ReviewSessionEvent } from "@kontourai/survey";
 import {
   MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
-  type MemoryChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics,
+  type MemoryChange, type MemoryEntityChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics, type SurveyEntityProposalLike,
 } from "./memory-routing.js";
 
 export const MEMORY_ROUTING_EVIDENCE_KIND = "memory.routing-decisions";
@@ -177,8 +177,11 @@ export interface MemoryRoutingRun {
   decisions: MemoryRoutingDecision[];
   /** Survey review items for the routed claim changes, in decision order. */
   items: ReviewItem[];
-  /** Survey entity proposals the host must review itself: Survey owns that item. */
-  entityProposals: string[];
+  /**
+   * The Survey entity proposals the routing sent to review, as given. Survey owns their review item: pass each to
+   * Survey's `entityProposalToReviewItem`, and record the outcome with its `entityOutcomeFromDecision`.
+   */
+  entityProposals: SurveyEntityProposalLike[];
   /** Item names handed to the queue. Empty when no queue was given: the items exist but nobody has been asked. */
   published: string[];
   routing: FlowEvidenceEntry;
@@ -207,10 +210,10 @@ export async function runMemoryRouting(input: Location & {
     const recorded = await recordRouting({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
     return { routing: recorded.entry, metrics: await refreshMetrics(input) };
   });
-  const items: ReviewItem[] = [], entityProposals: string[] = [], published: string[] = [];
-  for (const decision of decisions) {
+  const items: ReviewItem[] = [], entityProposals: SurveyEntityProposalLike[] = [], published: string[] = [];
+  for (const [index, decision] of decisions.entries()) {
     if (decision.outcome !== "routed") continue;
-    if (decision.input.type === "entity") { entityProposals.push(decision.input.proposalRef); continue; }
+    if (decision.input.type === "entity") { entityProposals.push((input.changes[index] as MemoryEntityChange).proposal); continue; }
     const item = buildMemoryReviewItem(decision)!;
     items.push(item);
     if (input.queue) { await input.queue.publish(item, decision.id); published.push(item.metadata.name); }

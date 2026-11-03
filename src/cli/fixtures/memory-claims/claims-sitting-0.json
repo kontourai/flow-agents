@@ -1,14 +1,14 @@
 {
   "agreement": {
-    "sha256:3cc2519625fce91a9bdc7eaee9102827348196d9387863523dbb0a740cad39e1": {
-      "agreeing": 1,
-      "passes": 2
-    },
-    "sha256:e11334e44332ae7753e778a2cb9c1cfda988e4aec79f84bb64294adb361bb2a0": {
+    "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:e5b3f02afbbfa07b66a3b4e198a3ca2dd014b381ac86f20cfbd812f2ccad5876": {
+    "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": {
+      "agreeing": 1,
+      "passes": 2
+    },
+    "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": {
       "agreeing": 2,
       "passes": 2
     }
@@ -16,7 +16,7 @@
   "claims": [
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:e5b3f02afbbfa07b66a3b4e198a3ca2dd014b381ac86f20cfbd812f2ccad5876",
+      "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
       "posture": "stated",
       "property": "primary database",
       "schema_version": "1.0",
@@ -34,11 +34,17 @@
         "label": "widget service",
         "type": "service"
       },
-      "value": "PostgreSQL 15"
+      "value": "PostgreSQL 15",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:e11334e44332ae7753e778a2cb9c1cfda988e4aec79f84bb64294adb361bb2a0",
+      "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
       "posture": "stated",
       "property": "on-call owner",
       "schema_version": "1.0",
@@ -56,11 +62,17 @@
         "label": "widget service",
         "type": "service"
       },
-      "value": "Maya Chen"
+      "value": "Maya Chen",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:3cc2519625fce91a9bdc7eaee9102827348196d9387863523dbb0a740cad39e1",
+      "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
       "posture": "stated",
       "property": "retry budget",
       "schema_version": "1.0",
@@ -78,7 +90,13 @@
         "label": "widget service",
         "type": "service"
       },
-      "value": "5 attempts per request"
+      "value": "5 attempts per request",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     }
   ]
 }

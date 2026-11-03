@@ -199,6 +199,10 @@
       "types": "./build/src/memory-claims.d.ts",
       "import": "./build/src/memory-claims.js"
     },
+    "./memory-entity": {
+      "types": "./build/src/memory-entity.d.ts",
+      "import": "./build/src/memory-entity.js"
+    },
     "./memory-routing": {
       "types": "./build/src/memory-routing.d.ts",
       "import": "./build/src/memory-routing.js"

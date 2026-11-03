@@ -54,10 +54,13 @@ export function traverseExtract(provider) {
   };
 }
 
+/** What the host says the fixture sittings may be shown to. Every distilled fixture claim carries it. */
+export const FIXTURE_VISIBILITY = { kind: "restricted", audiences: ["user:fixture"] };
+
 export async function distillFixtureSitting(index, options = {}) {
   const sitting = loadSittings()[index];
   const provider = scriptedProvider(loadScript().sittings[index].passes);
-  const result = await distillMemoryClaims({ sitting, extract: traverseExtract(provider), ...options });
+  const result = await distillMemoryClaims({ sitting, extract: traverseExtract(provider), visibility: FIXTURE_VISIBILITY, ...options });
   return { sitting, provider, result };
 }
 

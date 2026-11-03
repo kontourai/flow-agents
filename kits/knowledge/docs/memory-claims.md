@@ -15,8 +15,8 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | Claim shape, routing policy, run metrics | This Kit. |
 | Support verification, review items, reviewer decisions | Survey. |
 | Which claims are current in a slot, supersession over time | Surface. The design is merged ([Surface knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md)); the projection is not implemented, so the caller passes the current claims. |
-| Entity merge, split and alias review | Survey (`kontourai/survey#243`). The Kit routes an entity change to it by reference. |
-| Visibility lattice | Surface (`kontourai/surface#350`). The Kit compares audiences by set inclusion. |
+| Entity merge, split and alias review | Survey (`kontourai/survey#243`, merged in survey#358). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
+| Visibility lattice | Surface ([Surface derived visibility](https://github.com/kontourai/surface/blob/18e3570636cdb5f9e73d38d9274a2bcd1dc04b9f/docs/decisions/derived-visibility.md), merged in surface#356). A claim's `visibility` is Surface's form and the Kit's order is Surface's meet. |
 | Gates and evidence | Flow. |
 
 ## The claim
@@ -32,7 +32,7 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | `speaker`, `source` | Who asserted it, and where it is grounded: source ref, `chars:<start>-<end>` locator, the verbatim excerpt, the instant of the turn, and its role. The Kit derives `source` from Traverse's verified provenance and the turn the locator falls in; the model does not supply it. |
 | `posture` | How the speaker asserted it: `stated`, `proposed`, `hypothetical` or `retracted`. It is a typed field, not a text prefix. |
 | `supersedes` | Edges to the current claims this one replaces (`succession`) or retracts (`correction`). |
-| `audience` | Principals who may see it. Absent inherits the source's audience. The `visibility-widening` rule checks what the claim would be visible to, requested or inherited, against the source and the current claims in its slot (see below). |
+| `visibility` | Who may see the claim, in Surface's lattice: `{kind: "public"}` or `{kind: "restricted", audiences: [...]}` (restricted with none is sealed). **Absent is sealed**, not inherited and not public, as in Surface: omission cannot widen access. `distillMemoryClaims` stamps the sitting's visibility, which only the host knows, on every claim it makes; the extractor is never asked. |
 
 `posture` is how the speaker spoke. It is not whether anyone has reviewed the claim;
 that is derived (see [Recall](#recall)). `retracted` posture is the speaker withdrawing
@@ -48,7 +48,7 @@ receiver-recorded knowledge instant Surface's projection takes as its own input.
 
 `MEMORY_CLAIM_TARGET_SCHEMA` is the `TargetFieldSchema[]` the Kit gives Traverse:
 `subject`, `subjectType`, `property`, `value`, `speaker`, `posture`, `validFrom`,
-`validUntil` (exclusive), `replacesPrior`. It deliberately asks for no audience and no
+`validUntil` (exclusive), `replacesPrior`. It deliberately asks for no visibility and no
 consequence flag; those belong to the host and the policy, not to a model.
 
 `distillMemoryClaims({sitting, extract, passes})` formats a runtime-session sitting
@@ -89,7 +89,7 @@ also becomes a Survey review item that a person decides. Review never blocks rec
 | `consequential-supersession` | A claim carries a `supersedes` edge and its property or subject type is in `policy.consequential` (`"*"` matches all). Retractions count. Empty by default, so a host that has not said what is consequential routes none; set it. |
 | `entity-identity-change` | Any Survey entity proposal (`merge`, `split`, `alias`, and also `same-as`, `related-to` and `domain:*`, which Survey reviews the same way). They always go to review; no similarity score promotes an identity. The change is Survey's own `EntityProposal`, read by structure; the decision records its id, operations and subjects. |
 | `low-extraction-agreement` | Fewer than `minPasses` passes were measured, or fewer than `minAgreement` of them produced the claim. Unmeasured is not agreed. |
-| `visibility-widening` | What the claim would be visible to is wider than a bound. That audience is the one it requests, else the one it inherits from its source. A requested audience must fit inside its source's (an unknown source audience fails closed) and inside every current claim in its slot (a peer that declares no audience fails closed for a claim that asks for one). A claim that only inherits is compared with the peers that declare an audience; an undeclared peer gives it nothing to compare with, and a host that records no audiences does not have everything routed. |
+| `visibility-widening` | The claim's visibility is not within a bound, in Surface's order (`meet(claim, bound) == claim`). The bounds are its source's visibility and the visibility of every current claim in its slot, so the slot never becomes visible to someone who could not see it before. Undeclared is sealed on every side: a claim with no visibility can never widen anything, and a bound with none admits only a sealed claim, so a claim that declares a visibility fails closed against an undeclared source or peer. A host that declares nothing anywhere has nothing routed here and nothing visible. |
 
 `hypothetical` and `proposed` claims never conflict and never supersede: they assert
 nothing about the present. They are still subject to agreement and visibility.
@@ -101,7 +101,7 @@ they are `multiValued` and the fixed structural-equality rule of policy version 
 ### Recomputable
 
 Each decision embeds its exact `input` (the claim, the same-slot current claims, the
-applicable verification records, the agreement counts, the audience baselines) and
+applicable verification records, the agreement counts, the visibility baselines) and
 the `policy`. `recomputeMemoryRouting(decision)` re-runs the rules over that and
 reports any difference in outcome, reasons, rule list or digest, so an edited
 outcome, a changed policy, or a rule set that has drifted since is visible. The rules
@@ -109,13 +109,21 @@ are pure; there is no clock and no model call.
 
 ### Review items
 
-`runMemoryRouting` does the whole run: it decides each change, records the decisions and the metrics as one serialised unit, then hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`; the key is the decision id, which does not depend on the order of a claim's audience or edges, so a retry is a no-op). Decisions are recorded before anything is queued; if the queue fails, the decisions are already recorded and a retry publishes again with the same keys. `published` lists only items the queue accepted. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
+`runMemoryRouting` does the whole run: it decides each change, records the decisions and the metrics as one serialised unit, then hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`; the key is the decision id, which does not depend on the order of a claim's audiences or edges, so a retry is a no-op). Decisions are recorded before anything is queued; if the queue fails, the decisions are already recorded and a retry publishes again with the same keys. `published` lists only items the queue accepted. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
 a current/proposed pair when the decision names a current claim it conflicts with or
 replaces, otherwise one proposed candidate. Run a Survey `SupportVerifier` against the
 review candidate with `verifyMemoryClaimAgainstCurrent`, so Survey's workbench shows
 the record on the candidate. Entity changes get no item here: build it with Survey's
 `entityProposalToReviewItem` (its review item is named by the proposal id, which is how the
 decision and the metrics find it).
+
+`memoryEntityProposalInput` emits a merge, split or alias candidate in Survey's `EntityProposalInput`
+(survey#358): the two subjects, the operation, and as evidence the exact spans of the memory claims that
+ground it, each with the source's content hash and a stance (`supports`, `contradicts`, `context`). The Kit
+does not decide that two subjects are one; confidence components are descriptive and never accept anything.
+Pass the result to Survey's `createEntityProposal`, route the proposal with `routeMemoryChange`, and
+`runMemoryRouting` returns the proposals it sent to review for the host to turn into Survey review items.
+Detecting which subjects to propose is the host's (or a later lane's) candidate generation, not this PR's.
 
 ## Flow evidence
 
@@ -182,10 +190,11 @@ through this function or enforce the same rule.
 ## Storing proposed claims
 
 Not built here. Per the decision recorded on `kontourai/corpus#40`, a `proposed` claim is
-stored with the store's `proposeCreate` as a pending create proposal; applying it needs a
-reviewer distinct from the proposer, which is where a routed claim's Survey decision
-lands. `proposeCreate` is not on corpus `main` and its lane branch is unpublished, so this
-Kit does not call it or assume its input shape.
+stored with the store's `proposeCreate` as a pending create proposal. `applyCreate` creates the record
+and needs a reviewer distinct from the proposer, which is where a routed claim's Survey decision lands;
+`rejectCreate` keeps the proposal as rejected with a rationale (the amendment on the issue renamed the
+verbs from `apply` and `reject`). `proposeCreate` is not on corpus `main` (corpus#42, `feat/40-create-proposals`, is open),
+so this Kit does not call it or assume its input shape.
 
 One consequence needs deciding before recall is wired: that decision keeps pending
 proposals out of the default working set and ordinary reads, but a `proposed` claim must
@@ -200,7 +209,13 @@ consumed here, and `presentMemoryClaims` does not apply it.
 - Writing claims to the personal store (`#670`) and the dream pipeline's use of them
   (`#671`). Claims are returned and recorded as evidence; staging into a store is the
   next lane.
-- Survey's entity review (`survey#243`, unreleased) and Surface's current-state projection
-  (the design is merged; the projection is not). The Kit reads Survey's `EntityProposal` by
-  structure and does not import the unreleased package; it takes the current claims as input.
+- Importing Surface's visibility lattice and Survey's entity review. Both are merged (surface#356,
+  survey#358) but in no published release (npm has Surface 6.2.1 and Survey 8.2.1; this package pins 5.0.0
+  and 8.2.0). Until they ship, the Kit holds two thin stand-ins and nothing else of theirs:
+  `memoryVisibilityWithin`, one function stating Surface's order, and `SurveyEntityProposalLike`, a structural
+  type for the part of `EntityProposal` it reads. Tests pin the first against Surface's own meet vectors and,
+  as soon as the installed Surface exports `meetVisibility`, against the real function; the second against a
+  proposal made by Survey's `createEntityProposal`. Delete both when the packages are bumped.
+- Surface's current-state projection (the design is merged; the projection is not): the Kit takes the
+  current claims as input.
 - A Flow gate that requires this evidence.
