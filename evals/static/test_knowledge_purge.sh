@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/knowledge-purge-gate.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
-CORPUS_REV=de8450e2906796e0019ed46bc73014a5d259bde8
+CORPUS_REV=e63bbd091fe45b75295795e5f9835d7c552d77c4
 
 git clone --quiet --no-checkout https://github.com/kontourai/corpus.git "$WORK_DIR/corpus"
 git -C "$WORK_DIR/corpus" checkout --quiet --detach "$CORPUS_REV"

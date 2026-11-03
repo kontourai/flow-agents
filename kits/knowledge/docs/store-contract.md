@@ -1945,7 +1945,7 @@ violate that requirement).
 ## Addendum M: Privileged purge (issue #1570)
 
 The owner approved an explicit erasure exception on 2026-11-02. The operation is
-owned by [Corpus Store](https://github.com/kontourai/corpus/blob/de8450e2906796e0019ed46bc73014a5d259bde8/packages/store/README.md#owner-decisions).
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/e63bbd091fe45b75295795e5f9835d7c552d77c4/packages/store/README.md#owner-decisions).
 Both bundled adapter entry points can explicitly select a host-supplied Corpus
 module. In that mode the returned store delegates **all** operations to the
 corresponding Corpus adapter; the kit does not implement a second cascade.
@@ -1992,13 +1992,15 @@ The privileged interface is separate from ordinary mutations: `purge(ids,
 The audit records the operation and its actor and rationale; it must not put erased
 content into the evidence. Supersede remains the default for ordinary changes.
 
-A tombstone retains the stable id, type, creation time, provenance identity
+A full tombstone retains the stable id, type, creation time, provenance identity
 (`agent`, `session_id`, `source_ids`), link targets and kinds, and a sanitized
 identity-oriented mutation log including `purged`. It has status and category
 `purged`, a fixed title, an empty body, and no aliases, tags, link labels,
 provenance note, expiry, unknown content-bearing fields, or content digest. Purge
 audit rationale and optional note remain, so callers must keep erased content out
-of them. Its id cannot be
+of them. Near the vault's note-size limit, Corpus may emit a compact or minimal
+tombstone that omits some audit prose or identity references and records the
+omissions; see its owner decision for the bounded fallback. Its id cannot be
 reused and mutations of it and new support links to it are refused.
 
 Support comprises provenance `source_ids` and links of kind `source`. The Corpus
@@ -2030,7 +2032,9 @@ adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
 state `deleted` and a null claim value. It excludes evidence on the tombstone
 and does not quote a tombstoned linking record as evidence for a live target. Missing
 purge audit evidence fails the projection; no erasure actor or rationale is
-invented. Survivor content remains the producer's responsibility. To exercise
+invented. This includes a compact vault tombstone whose purge rationale was
+omitted: its Surface projection fails closed rather than fabricating a rationale.
+Survivor content remains the producer's responsibility. To exercise
 the packed Corpus-backed adapters through this projection before publication,
 install the scratch-built tarball outside the repository and run:
 

@@ -393,6 +393,10 @@ test("purged graph records without valid audit evidence fail closed", async () =
     record.attributes.mutation_log = [{ op: "purged", at, agent: "owner", rationale: "request" }];
     await assert.rejects(() => buildKnowledgeTrustBundle({ store }), /lacks valid erasure audit evidence/);
   }
+  // Corpus's size-bounded vault fallback can omit the rationale. Surface
+  // requires it, so do not invent one when projecting that valid tombstone.
+  record.attributes.mutation_log = [{ op: "purged", at: "2026-11-02T12:00:00.000Z", agent: "owner", evidence: { compact: true } }];
+  await assert.rejects(() => buildKnowledgeTrustBundle({ store }), /lacks valid erasure audit evidence/);
 });
 
 test("Surface derivation inputs use provenance source ids and source links, not example links", async () => {
