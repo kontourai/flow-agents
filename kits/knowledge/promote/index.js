@@ -372,13 +372,14 @@ function publishProposals(sessionDir, requestedOutDir, linked, healthResult, res
  */
 export async function runPromote(opts = {}) {
   if (opts.target === "store") {
-    for (const key of ["outDir", "sessionDir", "repoRoot", "provenance", "decided", "agent"]) {
-      if (opts[key] !== undefined) throw new Error(`${key} is only valid for the repo-docs target`);
+    const allowed = new Set(["target", "residue", "candidates", "proposerId", "store", "registerRoot", "root", "rootName", "write"]);
+    for (const key of Object.keys(opts)) {
+      if (!allowed.has(key)) throw new Error(`${key} is not valid for the store target`);
     }
     const { proposeMemory } = await import("./store-target.js");
     return proposeMemory(opts);
   }
-  if (opts.target !== undefined && opts.target !== "repo-docs") throw new Error(`unknown promote target: ${JSON.stringify(opts.target)}`);
+  if (opts.target !== undefined && opts.target !== "repo-docs") throw new Error(`unknown promote target: ${JSON.stringify(String(opts.target))}`);
   for (const key of ["residue", "candidates", "proposerId", "store", "registerRoot", "root", "rootName"]) {
     if (opts[key] !== undefined) throw new Error(`${key} is only valid for the store target`);
   }
