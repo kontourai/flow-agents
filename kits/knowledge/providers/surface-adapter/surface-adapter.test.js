@@ -345,3 +345,45 @@ describe("MarkdownVaultProvider: version-keyed read memoization (wave 2 / findin
     }
   });
 });
+
+test("purged graph records round-trip as Surface deleted claims without content or evidence", async () => {
+  const at = "2026-11-02T12:00:00.000Z";
+  const erased = {
+    id: "opaque-erased-id", type: "note", title: "must-not-escape-title", body: "must-not-escape-body",
+    attributes: {
+      record_type: "raw", category: "purged", status: "purged", created_at: at, updated_at: at,
+      mutation_log: [{ op: "purged", at, agent: "owner", rationale: "erasure request" }],
+    },
+    provenance: { source: "knowledge:opaque-erased-id", retrieved_at: at },
+  };
+  const live = {
+    id: "live-id", type: "note", title: "Live", body: "remaining support",
+    attributes: { record_type: "concept", category: "safe", status: "active", created_at: at, updated_at: at },
+    provenance: { source: "knowledge:live-id", retrieved_at: at },
+  };
+  const store = { readGraph: async () => ({
+    nodes: [erased, live],
+    edges: [
+      { from: "live-id", to: "opaque-erased-id", type: "evidence-of" },
+      { from: "opaque-erased-id", to: "live-id", type: "evidence-of" },
+    ],
+  }) };
+  const bundle = JSON.parse(JSON.stringify(await buildKnowledgeTrustBundle({ store, includeRetired: true })));
+  const claim = bundle.claims.find((c) => c.subjectId === erased.id);
+  assert.equal(claim.value, null);
+  assert.deepEqual(claim.metadata.surfaceRetention, {
+    state: "deleted", erasedAt: at, actor: "owner", rationale: "erasure request",
+  });
+  assert.ok(!JSON.stringify(bundle).includes("must-not-escape"));
+  assert.ok(bundle.evidence.every((e) => e.claimId !== claim.id && !e.sourceRef.includes(erased.id)));
+  const { validateTrustBundle } = await import("@kontourai/surface");
+  validateTrustBundle(bundle);
+});
+
+test("purged graph records without valid audit evidence fail closed", async () => {
+  const store = { readGraph: async () => ({ nodes: [{
+    id: "erased", type: "note", title: "erased", attributes: { record_type: "raw", status: "purged" },
+    provenance: { source: "knowledge:erased", retrieved_at: "2026-11-02T12:00:00.000Z" },
+  }], edges: [] }) };
+  await assert.rejects(() => buildKnowledgeTrustBundle({ store }), /lacks valid erasure audit evidence/);
+});

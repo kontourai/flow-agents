@@ -56,6 +56,19 @@ function compactMutationLog(mutationLog) {
   }));
 }
 
+// Corpus keeps the erasure audit entry on the tombstone. Never fabricate one:
+// Surface requires a dated, attributed deletion fact, so malformed tombstones
+// must fail closed instead of becoming apparently live claims.
+function deletedRetention(mutationLog) {
+  const entry = Array.isArray(mutationLog) && mutationLog.find((e) => e?.op === "purged");
+  if (!entry || typeof entry.at !== "string" || !Number.isFinite(Date.parse(entry.at)) ||
+      typeof entry.agent !== "string" || !entry.agent.trim() ||
+      typeof entry.rationale !== "string" || !entry.rationale.trim()) {
+    throw new Error("purged record lacks valid erasure audit evidence");
+  }
+  return { state: "deleted", erasedAt: entry.at, actor: entry.agent, rationale: entry.rationale };
+}
+
 /**
  * Build a TrustBundle from Knowledge Kit graph data.
  *
@@ -131,19 +144,20 @@ export async function buildKnowledgeTrustBundle(options = {}) {
       updated_at,
     } = node.attributes;
 
-    const claimId = `knowledge:${record_type}.${cat || "uncategorized"}#${node.id}`;
+    const deleted = status === "purged";
+    const claimId = `knowledge:${record_type}.${deleted ? "purged" : cat || "uncategorized"}#${node.id}`;
     const claimStatus = statusFor(status);
     claimIdByNodeId.set(node.id, claimId);
 
     const createdAt = created_at || node.provenance?.retrieved_at || nowIso;
     const updatedAt = updated_at || node.provenance?.retrieved_at || nowIso;
 
-    const metadata = {
+    const metadata = deleted ? { surfaceRetention: deletedRetention(mutation_log) } : {
       knowledgeRecordType: record_type,
       knowledgeCategory: cat,
       knowledgeStatus: status,
     };
-    if (Array.isArray(mutation_log) && mutation_log.length) {
+    if (!deleted && Array.isArray(mutation_log) && mutation_log.length) {
       metadata.knowledgeMutationLog = compactMutationLog(mutation_log);
     }
 
@@ -154,21 +168,25 @@ export async function buildKnowledgeTrustBundle(options = {}) {
       facet: `knowledge.${record_type}`,
       claimType: claimTypeFor(record_type),
       fieldOrBehavior: "content",
-      value: node.body || node.title,
+      value: deleted ? null : node.body || node.title,
       status: claimStatus,
       createdAt,
       updatedAt,
-      ...(expires_at ? { expiresAt: expires_at } : {}),
-      ...(ttl_seconds !== undefined && ttl_seconds !== null ? { ttlSeconds: ttl_seconds } : {}),
+      ...(!deleted && expires_at ? { expiresAt: expires_at } : {}),
+      ...(!deleted && ttl_seconds !== undefined && ttl_seconds !== null ? { ttlSeconds: ttl_seconds } : {}),
       impactLevel: "medium",
       metadata,
     });
+
+    // Surface refuses evidence attached to deleted claims. A tombstoned source
+    // also cannot be republished as an excerpt on a surviving claim.
+    if (deleted) continue;
 
     // Evidence: source links (raw → compiled, etc.)
     const sourceEdges = filteredEdges.filter((e) => e.to === node.id && e.type === "evidence-of");
     for (const edge of sourceEdges) {
       const sourceNode = nodeById.get(edge.from);
-      if (!sourceNode) continue;
+      if (!sourceNode || sourceNode.attributes.status === "purged") continue;
 
       const evidenceId = `${claimId}.evidence.${sourceNode.id}`;
       builder.addEvidence({

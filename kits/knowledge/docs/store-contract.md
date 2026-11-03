@@ -1980,3 +1980,19 @@ transaction. Corpus also documents an interrupted-write journal window containin
 before-images until recovery; purge is not a secure-erasure guarantee. A completed
 integration must test each adapter and each actual read path, including a fault
 that skips the cascade and makes conformance fail.
+
+When a purged record is projected into a Surface claim, the Knowledge Surface
+adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
+state `deleted` and a null claim value. It excludes evidence on the tombstone
+and does not quote a tombstoned source as evidence for a surviving claim. Missing
+purge audit evidence fails the projection; no erasure actor or rationale is
+invented. Survivor content remains the producer's responsibility. To exercise
+the packed Corpus adapters through this projection before publication, install
+the scratch-built tarball outside the repository, build Surface with the erasure
+cascade, and run:
+
+```sh
+CORPUS_STORE_ENTRY=/absolute/path/to/installed/package/dist/index.js \
+SURFACE_ENTRY=/absolute/path/to/surface/dist/src/index.js \
+  node --test kits/knowledge/providers/surface-adapter/packed-purge.test.mjs
+```
