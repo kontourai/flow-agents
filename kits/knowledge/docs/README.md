@@ -709,7 +709,7 @@ referenced Claude Code project JSONL or Codex rollout. Then it:
   thinking and reasoning, images, sidechains and subagent rollouts, meta and
   compact-summary entries, and harness-originated entries such as task
   notifications. It also drops harness tags, such as `<system-reminder>` and
-  `<environment_context>`, and any block wrapped in the injected-memory marker
+  `<environment_context>`, Codex developer instructions, and any block wrapped in the injected-memory marker
   (`INJECTED_MEMORY_OPEN`/`INJECTED_MEMORY_CLOSE`,
   `<flow-agents-injected-memory>`). Injection (#672) must use that marker, so
   memory it injects can never be re-ingested as conversation;
@@ -741,16 +741,36 @@ Ownership boundaries:
   file) is left for the next run. A truncated, rotated or rewritten telemetry
   file makes the prefix digest mismatch, so the run blocks and the cursor stays
   where it was.
-- Unknown record *types* are ignored, because both runtimes add metadata types.
-  Drift means a conversation record this parser cannot read, or a file in a
-  different format from the one its telemetry runtime names. Drift is reported
-  as `UNKNOWN_TRANSCRIPT_FORMAT` and never crashes the run.
+- **Ferry parses; Knowledge filters.** Transcripts are read by
+  [`@kontourai/ferry`](https://github.com/kontourai/thread)'s Claude Code and
+  Codex importers into canonical [`@kontourai/thread`](https://github.com/kontourai/thread)
+  messages. Sitting splitting, tag and marker filtering, and the scrub work over
+  those messages; the kit has no transcript parser of its own. Ferry already
+  drops tool results, thinking, `isMeta` entries and Claude sidechains.
+  Drift means Ferry reports skipping a record, or the file reads as a different
+  format from the one its telemetry runtime names (Ferry's `detectFormat`), or a
+  Claude transcript has no `sessionId`, or a Codex rollout does not open with a
+  `session_meta`. Drift is reported as `UNKNOWN_TRANSCRIPT_FORMAT`, holds the
+  cursor, and never crashes the run.
+- **Temporary shims** (`promote/runtime-ferry-shims.js`) cover what the Thread
+  does not carry yet, each tied to an upstream issue and to be deleted when it
+  ships: Claude `origin.kind` other than `human`, compact summaries and
+  transcript-only entries ([thread#76](https://github.com/kontourai/thread/issues/76));
+  Codex `session_meta` branch and the subagent marker
+  ([thread#77](https://github.com/kontourai/thread/issues/77)); Codex
+  `developer`-role items that Ferry imports as `user` messages, and the
+  harness-tag list ([thread#78](https://github.com/kontourai/thread/issues/78)).
+  Provenance cwd and branch are session-level (Ferry's Thread metadata), not
+  tracked per sitting.
 
 Out of scope here: store writes (#670), scheduling or dreaming (#671),
 injection (#672), OpenCode and pi transcripts, and telemetry schema changes.
 Known gaps: the cursor does not drain a rotated telemetry predecessor (a
-rotation blocks until an operator resets the cursor), and the map of sitting
-hashes is never pruned.
+rotation blocks until an operator resets the cursor); the map of sitting
+hashes is never pruned; a transcript whose conversation records were renamed
+wholesale (so Ferry sees no conversation and warns about nothing) is
+indistinguishable from a bookkeeping-only file, so it is skipped and reported
+as `NO_CONVERSATION` rather than blocked as drift.
 
 ## Reviewed learning lifecycle
 

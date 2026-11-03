@@ -195,13 +195,16 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
       startedAt: "2026-10-30T09:00:02.000Z",
       endedAt: "2026-10-30T09:06:00.000Z",
     });
-    assert.equal(second.provenance.gitBranch, "feat/retry-budget-test");
+    // Branch and cwd are session-level (Ferry's Thread metadata), the same on every sitting.
+    assert.equal(second.provenance.gitBranch, "feat/retry-budget");
     assert.equal(second.provenance.startedAt, "2026-10-30T10:30:00.000Z");
     assert.deepEqual(first.turns.map((t) => t.role), ["user", "assistant", "user", "assistant"]);
     assert.match(first.turns[0].text, /^The retry budget in the widget service resets too early\./);
     assert.match(first.turns[2].text, /Ok, make it reset only after a successful call\.$/);
     assert.match(first.contentHash, /^sha256:[0-9a-f]{64}$/);
     assert.equal(first.complete, true);
+    // `origin: {kind: "human"}` is a real prompt; only non-human origins are harness entries.
+    assert.match(second.turns[0].text, /^Back again\./);
 
     const all = JSON.stringify(residues);
     for (const dropped of [
@@ -212,7 +215,8 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
       "cat config/.env", // tool_use input
       "SIDECHAIN_ONLY_MARKER", // isSidechain
       "<task-id>", // harness-originated task notification
-      "COMPACT_SUMMARY_MARKER", // compact summary
+      "COMPACT_SUMMARY_MARKER", // compact summary (thread#76 shim)
+      "PEER_ORIGIN_MARKER", // origin.kind "peer" (thread#76 shim)
       "PRIOR MEMORY", // our injected-memory block
       "seeded queue text", // queue-operation
       "Fix retry budget reset", // ai-title
@@ -245,6 +249,9 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
       "CUSTOM_OUTPUT_MARKER",
       "INTER_AGENT_MARKER",
       "BASE_INSTRUCTIONS_MARKER",
+      "AGENTS_FILE_MARKER", // "# AGENTS.md instructions" user message
+      "CODEX_INTERNAL_MARKER",
+      "# AGENTS.md",
       "data:image",
       "SUBAGENT_ROLLOUT_MARKER",
     ]) {
@@ -286,6 +293,66 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
     const { residues, report } = run(box);
     assert.equal(report.blocked.length, 0);
     assert.equal(JSON.stringify(residues).includes("PARTIAL_LINE"), false);
+  });
+
+  test("transcript drift and shape faults block with a reason instead of yielding residue", () => {
+    const claudeLine = (extra = {}) =>
+      JSON.stringify({
+        parentUuid: null, isSidechain: false, type: "user", uuid: "u", timestamp: "2026-10-30T09:00:01.000Z",
+        cwd: "/w", sessionId: CLAUDE_SESSION, version: "9.0.0", gitBranch: "main",
+        message: { role: "user", content: "hello there" }, ...extra,
+      });
+    const codexMeta = JSON.stringify({ timestamp: "2026-10-31T14:00:00.000Z", type: "session_meta", payload: { id: CODEX_SESSION, cwd: "/w" } });
+    const codexUser = JSON.stringify({
+      timestamp: "2026-10-31T14:00:01.000Z", type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] },
+    });
+    const faults = {
+      // a non-JSON line in the middle of a Claude transcript: Ferry skips and warns
+      "claude malformed line": ["claude-code", [claudeLine(), "{not json", claudeLine({ uuid: "v" })].join("\n")],
+      // conversation record Ferry cannot read
+      "claude unreadable record": ["claude-code", claudeLine({ message: { role: "user", content: { blocks: [] } } })],
+      // no record carries a sessionId, so Ferry would invent a shared thread id
+      "claude without sessionId": ["claude-code", claudeLine({ sessionId: undefined, parentUuid: "p" })],
+      "codex without session_meta first": ["codex", [codexUser, codexMeta].join("\n")],
+      "codex malformed line": ["codex", [codexMeta, codexUser, "{not json", codexUser].join("\n")],
+      "unrecognized format": ["claude-code", JSON.stringify({ hello: "world" })],
+    };
+    for (const [name, [runtime, body]] of Object.entries(faults)) {
+      const box = sandbox();
+      const file = path.join(box.roots[0], `${name.replace(/ /g, "-")}.jsonl`);
+      fs.writeFileSync(file, `${body}\n`);
+      appendTelemetry(box, event(runtime, file));
+      const { residues, report, candidateCursor } = run(box);
+      assert.equal(residues.length, 0, name);
+      assert.equal(report.blocked.length, 1, name);
+      assert.equal(report.blocked[0].reason, "UNKNOWN_TRANSCRIPT_FORMAT", name);
+      assert.equal(candidateCursor.telemetry.offset, 0, `${name}: cursor must not pass the unread transcript`);
+    }
+
+    // The same bodies, well-formed, are readable: the faults above are what blocks them.
+    const box = sandbox();
+    const ok = path.join(box.roots[0], "ok.jsonl");
+    fs.writeFileSync(ok, `${claudeLine()}\n`);
+    appendTelemetry(box, event("claude-code", ok));
+    assert.equal(run(box).residues.length, 1);
+  });
+
+  test("an empty or bookkeeping-only transcript is skipped, not blocked", () => {
+    const box = sandbox();
+    const empty = path.join(box.roots[0], "empty.jsonl");
+    const bookkeeping = path.join(box.roots[0], "bookkeeping.jsonl");
+    fs.writeFileSync(empty, "");
+    fs.writeFileSync(
+      bookkeeping,
+      `${JSON.stringify({ type: "ai-title", aiTitle: "t", sessionId: CLAUDE_SESSION })}\n`,
+    );
+    appendTelemetry(box, event("claude-code", empty), event("claude-code", bookkeeping));
+    const { residues, report, candidateCursor } = run(box);
+    assert.equal(residues.length, 0);
+    assert.equal(report.blocked.length, 0);
+    assert.deepEqual(report.skipped.map((s) => s.reason), ["NO_CONVERSATION", "NO_CONVERSATION"]);
+    assert.equal(candidateCursor.telemetry.offset, fs.statSync(box.telemetryFile).size);
   });
 
   test("other runtimes, missing refs, out-of-root and deleted transcripts are skipped and reported", () => {

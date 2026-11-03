@@ -1,25 +1,30 @@
 /**
- * Runtime transcript parsers for the `runtime-session` residue source (#669).
+ * Runtime transcript reading for the `runtime-session` residue source (#669).
  *
- * Reads Claude Code project JSONL and Codex rollout JSONL and keeps only the
- * conversation: user and assistant TEXT. Everything else is dropped by design —
- * tool calls and tool results, thinking/reasoning, images, subagent sidechains,
- * meta/compact-summary entries, harness-originated user entries (task
- * notifications), harness-injected tags such as `<system-reminder>`, and any
- * block wrapped in the injected-memory marker (so #672's injected memory can
- * never be re-ingested as new conversation).
+ * Parsing is `@kontourai/ferry`'s: its Claude Code and Codex importers turn a
+ * runtime transcript into a canonical `@kontourai/thread` Thread. This module
+ * only works over those canonical messages: it keeps user and assistant TEXT,
+ * drops harness-injected tags and any block wrapped in the injected-memory
+ * marker, and splits the result into sittings.
  *
- * Unknown record TYPES are ignored (both runtimes add metadata record types
- * often). Drift is detected on the records this parser depends on: a
- * conversation record whose shape it cannot read, a non-JSON line, or a file
- * that is not the format its telemetry runtime claims. Drift throws
- * `TranscriptFormatError`; the caller reports it and holds its cursor.
+ * Ferry already drops tool results/calls (separate `tool` messages and
+ * non-text parts), thinking, Claude `isMeta` entries and Claude sidechains.
+ * What it does not yet expose is handled by the marked shims in
+ * runtime-ferry-shims.js (kontourai/thread#76, #77, #78) and by the tag list
+ * below (#78).
  *
- * Only newline-terminated lines are read: a trailing partial line is a write in
- * progress and is left for the next run.
+ * Drift: a transcript that is not the format its telemetry runtime claims, or
+ * one that Ferry reports skipping records from, throws `TranscriptFormatError`.
+ * The caller reports it and holds its cursor. Only newline-terminated lines are
+ * read: a trailing partial line is a write in progress and is left for the next
+ * run.
  *
  * @module promote/runtime-transcript
  */
+
+import { createClaudeCodeImporter, createCodexImporter, detectFormat } from "@kontourai/ferry";
+
+import { claudeHarnessEntryIds, codexDeveloperPartKeys, codexSessionMeta, partKey } from "./runtime-ferry-shims.js";
 
 /**
  * Wrapper the injection slice (#672) must place around any memory it injects
@@ -29,7 +34,11 @@
 export const INJECTED_MEMORY_OPEN = "<flow-agents-injected-memory>";
 export const INJECTED_MEMORY_CLOSE = "</flow-agents-injected-memory>";
 
-/** Harness-injected tags removed (with their content) from user/assistant text. */
+/**
+ * Harness-injected tags removed (with their content) from user/assistant text.
+ * Names observed in real transcripts. SHIM until kontourai/thread#78 marks
+ * harness-injected messages on the Thread.
+ */
 export const HARNESS_TAGS = Object.freeze([
   // Claude Code
   "system-reminder",
@@ -46,10 +55,20 @@ export const HARNESS_TAGS = Object.freeze([
   "bash-stderr",
   // Codex
   "environment_context",
+  "codex_internal_context",
+  "subagent_notification",
   "user_instructions",
+  "INSTRUCTIONS",
   "turn_aborted",
   "user_shell_command",
 ]);
+
+// Codex's AGENTS.md message: a one-line header followed by an <INSTRUCTIONS> block.
+const AGENTS_HEADER = /^# AGENTS\.md instructions for [^\n]*\n?/;
+
+// Ferry's thread id when a Claude Code transcript carries no sessionId.
+const FERRY_CLAUDE_FALLBACK_ID = "claude-code-session";
+const FERRY_EMPTY_THREAD = /no (?:importable messages|Claude Code conversation events)/i;
 
 export class TranscriptFormatError extends Error {
   constructor(reason, message) {
@@ -79,160 +98,140 @@ const MEMORY_BLOCK = new RegExp(
 export function stripInjectedContent(text) {
   let out = String(text).replace(MEMORY_BLOCK, "");
   for (const pattern of TAG_BLOCKS) out = out.replace(pattern, "");
-  return out.trim();
+  return out.replace(AGENTS_HEADER, "").trim();
 }
 
 /**
- * Split a Buffer into parsed JSON objects for each newline-terminated line.
- * A trailing line with no newline is ignored (write in progress).
+ * Newline-terminated lines of a transcript. A trailing line with no newline is
+ * a write in progress and is ignored. This splits; it does not parse.
+ * @param {Buffer} buffer
+ * @returns {string[]}
  */
-export function parseCompleteJsonLines(buffer) {
-  const records = [];
-  let position = 0;
-  let lineNumber = 0;
-  while (position < buffer.length) {
-    const newline = buffer.indexOf(0x0a, position);
-    if (newline === -1) break;
-    const raw = buffer.subarray(position, newline).toString("utf8").replace(/\r$/, "");
-    position = newline + 1;
-    lineNumber += 1;
-    if (raw.trim() === "") continue;
-    let value;
-    try {
-      value = JSON.parse(raw);
-    } catch {
-      throw new TranscriptFormatError("TRANSCRIPT_MALFORMED", `line ${lineNumber} is not valid JSON`);
-    }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw drift(`line ${lineNumber} is not a JSON object`);
-    }
-    records.push(value);
+export function completeLines(buffer) {
+  const text = buffer.toString("utf8");
+  const end = text.lastIndexOf("\n");
+  if (end === -1) return [];
+  return text
+    .slice(0, end)
+    .split("\n")
+    .map((line) => line.replace(/\r$/, ""))
+    .filter((line) => line.trim() !== "");
+}
+
+/** Run a Ferry incremental importer over complete lines; any Ferry warning is drift. */
+function importThread(createImporter, lines) {
+  const warnings = [];
+  const importer = createImporter({ onWarn: (message) => warnings.push(message) });
+  importer.pushLines(lines);
+  importer.finalize();
+  let thread = null;
+  try {
+    thread = importer.thread();
+  } catch (error) {
+    if (!(error instanceof Error) || !FERRY_EMPTY_THREAD.test(error.message)) throw error;
   }
-  return records;
+  // Ferry's warnings name the format already ("claude-code: skipped 1 …").
+  if (warnings.length > 0) throw drift(warnings.join("; "));
+  return thread;
 }
 
-function parseTimestamp(value, where) {
-  const ms = typeof value === "string" ? Date.parse(value) : Number.NaN;
-  if (!Number.isFinite(ms)) throw drift(`${where} has no readable timestamp`);
-  return ms;
-}
-
-function textParts(content, textType, where) {
-  if (typeof content === "string") return [content];
-  if (!Array.isArray(content)) throw drift(`${where} content is neither a string nor an array`);
+/** User/assistant text parts of one canonical message that survive `dropPart`. */
+function messageText(message, dropPart) {
+  if (!Array.isArray(message.content)) return "";
   const texts = [];
-  for (const part of content) {
-    if (!part || typeof part !== "object" || typeof part.type !== "string") {
-      throw drift(`${where} has a content part without a type`);
-    }
-    if (part.type !== textType) continue;
-    if (typeof part.text !== "string") throw drift(`${where} ${textType} part has no text`);
+  for (const part of message.content) {
+    if (part.type !== "text" || typeof part.text !== "string") continue;
+    if (dropPart(part.text, message)) continue;
     texts.push(part.text);
   }
-  return texts;
+  return stripInjectedContent(texts.join("\n\n"));
+}
+
+function conversationFromThread(thread, dropMessage, dropPart) {
+  const messages = [];
+  for (const message of thread.messages) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    if (message.metadata?.sidechain === true || dropMessage(message)) continue;
+    const text = messageText(message, dropPart);
+    if (text) messages.push({ role: message.role, text, timestampMs: message.timestamp });
+  }
+  return messages;
 }
 
 /**
- * Claude Code project JSONL (`~/.claude/projects/<project>/<session>.jsonl`).
- * @returns {{ sessionId: string, turns: Array<{role, text, timestampMs, cwd, gitBranch}> }}
+ * Read a runtime transcript into canonical conversation messages.
+ *
+ * @param {"claude-code" | "codex"} harness  the runtime telemetry says wrote it
+ * @param {Buffer} content  the whole transcript file
+ * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
+ *   gitBranch: string | null, messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}> }}
+ * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
-export function parseClaudeProjectTranscript(records) {
-  let sessionId = null;
-  const turns = [];
-  records.forEach((record, index) => {
-    if (record.type !== "user" && record.type !== "assistant") return;
-    const where = `record ${index + 1} (${record.type})`;
-    if (typeof record.sessionId !== "string" || record.sessionId === "") {
-      throw drift(`${where} has no sessionId`);
-    }
-    sessionId = sessionId || record.sessionId;
-    const message = record.message;
-    if (!message || typeof message !== "object" || message.role !== record.type) {
-      throw drift(`${where} has no message with a matching role`);
-    }
-    const timestampMs = parseTimestamp(record.timestamp, where);
-    // Sidechains are subagent conversations; meta, compact summaries and
-    // transcript-only entries are harness-authored; a non-null `origin` marks a
-    // harness-originated user entry (e.g. a task notification).
-    if (record.isSidechain === true || record.isMeta === true) return;
-    if (record.isCompactSummary === true || record.isVisibleInTranscriptOnly === true) return;
-    if (record.origin !== undefined && record.origin !== null) return;
-    const text = stripInjectedContent(textParts(message.content, "text", where).join("\n\n"));
-    if (!text) return;
-    turns.push({
-      role: record.type,
-      text,
-      timestampMs,
-      cwd: typeof record.cwd === "string" ? record.cwd : null,
-      gitBranch: typeof record.gitBranch === "string" && record.gitBranch ? record.gitBranch : null,
-    });
-  });
-  if (records.length > 0 && !records.some((r) => typeof r.sessionId === "string")) {
-    throw drift("no record carries a Claude Code sessionId");
+export function readConversation(harness, content) {
+  const lines = completeLines(content);
+  const empty = { sessionId: null, sidechain: false, cwd: null, gitBranch: null, messages: [] };
+  if (lines.length === 0) return empty;
+
+  const detected = detectFormat(lines.slice(0, 200).join("\n"));
+  if (detected !== harness) {
+    throw drift(`telemetry says ${harness} but the transcript reads as ${detected ?? "an unrecognized format"}`);
   }
-  if (!sessionId) {
-    sessionId = records.find((r) => typeof r.sessionId === "string")?.sessionId ?? null;
+
+  if (harness === "claude-code") {
+    const thread = importThread(createClaudeCodeImporter, lines);
+    if (!thread) return empty;
+    if (thread.id === FERRY_CLAUDE_FALLBACK_ID) throw drift("claude-code: no record carries a sessionId");
+    const harnessEntries = claudeHarnessEntryIds(lines);
+    return {
+      sessionId: thread.id,
+      sidechain: false,
+      cwd: thread.metadata?.cwd ?? null,
+      gitBranch: thread.metadata?.git?.branch ?? null,
+      messages: conversationFromThread(thread, (message) => harnessEntries.has(message.id), () => false),
+    };
   }
-  return { sessionId, sidechain: false, turns };
+
+  const meta = codexSessionMeta(lines);
+  if (!meta) throw drift("codex: first record is not a session_meta with an id");
+  if (meta.sidechain) return { ...empty, sessionId: meta.id, sidechain: true };
+  const thread = importThread(createCodexImporter, lines);
+  if (!thread) return { ...empty, sessionId: meta.id, gitBranch: meta.gitBranch };
+  const developerParts = codexDeveloperPartKeys(lines);
+  return {
+    sessionId: meta.id,
+    sidechain: false,
+    cwd: thread.metadata?.cwd ?? null,
+    gitBranch: meta.gitBranch,
+    messages: conversationFromThread(
+      thread,
+      () => false,
+      (text, message) => developerParts.has(partKey(message.timestamp, text)),
+    ),
+  };
 }
 
 /**
- * Codex rollout JSONL (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`).
- * The first record must be `session_meta`. Subagent rollouts are sidechains.
+ * Split ordered messages into sittings: a new sitting starts when the gap since
+ * the previous kept message exceeds `idleGapMs`. Consecutive same-role messages
+ * in a sitting are merged.
  */
-export function parseCodexRollout(records) {
-  const first = records[0];
-  if (!first || first.type !== "session_meta" || !first.payload || typeof first.payload !== "object") {
-    throw drift("first record is not a Codex session_meta");
-  }
-  const meta = first.payload;
-  if (typeof meta.id !== "string" || meta.id === "") throw drift("session_meta has no id");
-  const sidechain =
-    meta.thread_source === "subagent" ||
-    (meta.source !== null && typeof meta.source === "object" && "subagent" in meta.source);
-  const cwd = typeof meta.cwd === "string" ? meta.cwd : null;
-  const gitBranch = meta.git && typeof meta.git.branch === "string" && meta.git.branch ? meta.git.branch : null;
-  const turns = [];
-  if (sidechain) return { sessionId: meta.id, sidechain, turns };
-  records.forEach((record, index) => {
-    if (record.type !== "response_item") return;
-    const payload = record.payload;
-    if (!payload || typeof payload !== "object") throw drift(`record ${index + 1} response_item has no payload`);
-    if (payload.type !== "message") return;
-    if (payload.role !== "user" && payload.role !== "assistant") return;
-    const where = `record ${index + 1} (${payload.role} message)`;
-    const timestampMs = parseTimestamp(record.timestamp, where);
-    if (!Array.isArray(payload.content)) throw drift(`${where} content is not an array`);
-    const textType = payload.role === "user" ? "input_text" : "output_text";
-    const text = stripInjectedContent(textParts(payload.content, textType, where).join("\n\n"));
-    if (!text) return;
-    turns.push({ role: payload.role, text, timestampMs, cwd, gitBranch });
-  });
-  return { sessionId: meta.id, sidechain, turns };
-}
-
-/**
- * Split ordered turns into sittings: a new sitting starts when the gap since
- * the previous kept turn exceeds `idleGapMs`. Consecutive same-role turns in a
- * sitting are merged (Claude writes one record per content block).
- */
-export function splitSittings(turns, idleGapMs) {
+export function splitSittings(messages, idleGapMs) {
   const sittings = [];
   let current = null;
   let previousMs = null;
-  for (const turn of turns) {
-    if (!current || turn.timestampMs - previousMs > idleGapMs) {
+  for (const message of messages) {
+    if (!current || message.timestampMs - previousMs > idleGapMs) {
       current = { turns: [] };
       sittings.push(current);
     }
-    previousMs = turn.timestampMs;
+    previousMs = message.timestampMs;
     const last = current.turns[current.turns.length - 1];
-    if (last && last.role === turn.role) {
-      last.text = `${last.text}\n\n${turn.text}`;
-      last.endMs = turn.timestampMs;
+    if (last && last.role === message.role) {
+      last.text = `${last.text}\n\n${message.text}`;
+      last.endMs = message.timestampMs;
       continue;
     }
-    current.turns.push({ ...turn, endMs: turn.timestampMs });
+    current.turns.push({ ...message, endMs: message.timestampMs });
   }
   return sittings;
 }

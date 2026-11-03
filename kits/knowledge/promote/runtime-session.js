@@ -28,13 +28,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { scrubResidueText } from "./runtime-redaction.js";
-import {
-  TranscriptFormatError,
-  parseClaudeProjectTranscript,
-  parseCodexRollout,
-  parseCompleteJsonLines,
-  splitSittings,
-} from "./runtime-transcript.js";
+import { TranscriptFormatError, readConversation, splitSittings } from "./runtime-transcript.js";
 
 export const RUNTIME_CURSOR_SCHEMA_VERSION = "1.0";
 export const TELEMETRY_SCHEMA_VERSION = "0.3.0";
@@ -151,8 +145,9 @@ function readTranscript(transcriptPath, roots, maxBytes) {
   }
 }
 
+// cwd and branch are session-level (Ferry's Thread metadata), not per sitting.
 function buildSittingResidues(harness, parsed, transcriptRef, idleGapMs, now) {
-  return splitSittings(parsed.turns, idleGapMs).map((sitting, n) => {
+  return splitSittings(parsed.messages, idleGapMs).map((sitting, n) => {
     const sittingId = `${harness}:${parsed.sessionId}:${n}`;
     const turns = sitting.turns.map((turn) => ({
       role: turn.role,
@@ -171,25 +166,14 @@ function buildSittingResidues(harness, parsed, transcriptRef, idleGapMs, now) {
         harness,
         sessionId: parsed.sessionId,
         transcriptRef: scrubResidueText(transcriptRef),
-        cwd: first.cwd === null ? null : scrubResidueText(first.cwd),
-        gitBranch: first.gitBranch === null ? null : scrubResidueText(first.gitBranch),
+        cwd: parsed.cwd === null ? null : scrubResidueText(parsed.cwd),
+        gitBranch: parsed.gitBranch === null ? null : scrubResidueText(parsed.gitBranch),
         startedAt: new Date(first.timestampMs).toISOString(),
         endedAt: new Date(endMs).toISOString(),
       },
       turns,
     };
   });
-}
-
-function parseTranscript(harness, content) {
-  const records = parseCompleteJsonLines(content);
-  if (harness === "claude-code") {
-    if (records[0]?.type === "session_meta") {
-      throw new TranscriptFormatError("UNKNOWN_TRANSCRIPT_FORMAT", "telemetry says claude-code but transcript is a Codex rollout");
-    }
-    return parseClaudeProjectTranscript(records);
-  }
-  return parseCodexRollout(records);
 }
 
 /**
@@ -292,9 +276,11 @@ export function ingestRuntimeSessions(options = {}) {
     if (!outcome) {
       try {
         const { content, ref } = readTranscript(transcriptPath, roots, limits.maxTranscriptBytes);
-        const parsed = parseTranscript(harness, content);
+        const parsed = readConversation(harness, content);
         if (parsed.sidechain) {
           outcome = { kind: "skip", reason: "SIDECHAIN_TRANSCRIPT" };
+        } else if (parsed.messages.length === 0) {
+          outcome = { kind: "skip", reason: "NO_CONVERSATION" };
         } else {
           outcome = { kind: "ok", residues: buildSittingResidues(harness, parsed, ref, idleGapMs, now) };
         }
