@@ -641,13 +641,17 @@ test("two spellings of one instant are a tie, and a tie keeps the later entry", 
 test("review time comes from the session that submitted this decision, not the highest sequence number", () => {
   const { decision, item, session, made } = twoDecisions(["reject-proposed", "2026-11-01T10:00:00.000Z"], ["reject-proposed", "2026-11-02T10:00:00.000Z"]);
   const events = (name, verdict, selectedAt, submittedAt, shift) => buildReviewSessionEvents(session(verdict, selectedAt), name).map(event => ({ ...event, spec: { ...event.spec, sequence: event.spec.sequence + shift, occurredAt: event.spec.eventType === "decision-submitted" ? submittedAt : selectedAt } }));
+  // Sequence numbers are per session, so either session may have the higher ones: neither highest nor lowest picks the right one.
+  for (const [olderShift, newerShift] of [[3, 0], [0, 3]]) {
+    const older = events("session-old", "reject-proposed", "2026-11-01T10:00:00.000Z", "2026-11-01T10:01:40.000Z", olderShift);
+    const newer = events("session-new", "reject-proposed", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:10.000Z", newerShift);
+    for (const order of [[...older, ...newer], [...newer, ...older]]) {
+      const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made, reviewEvents: order });
+      assert.equal(metrics.reviewSeconds, 10, `older shifted ${olderShift}, newer shifted ${newerShift}`);
+    }
+  }
   const older = events("session-old", "reject-proposed", "2026-11-01T10:00:00.000Z", "2026-11-01T10:01:40.000Z", 3);
   const newer = events("session-new", "reject-proposed", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:10.000Z", 0);
-  assert.ok(Math.max(...older.map(e => e.spec.sequence)) > Math.max(...newer.map(e => e.spec.sequence)), "the older session has the higher sequence numbers");
-  for (const order of [[...older, ...newer], [...newer, ...older]]) {
-    const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made, reviewEvents: order });
-    assert.equal(metrics.reviewSeconds, 10);
-  }
   assert.ok(item);
   // A submission that names a different decision is not this decision's time.
   const other = newer.map(event => event.spec.eventType === "decision-submitted" ? { ...event, spec: { ...event.spec, reviewDecisionName: "someone-elses" } } : event);
