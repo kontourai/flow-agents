@@ -13,13 +13,18 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:daaa8ac0baf00b0fb575d9e65a39e82eb56ed628ce75b52aa4ed3fb14338bf88",
+      "id": "sha256:a0dfd93e1e8db57cbc82660df768ea5dfc51e25ac50d2061ab2de19624574575",
       "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current"
+        },
         "agreement": {
           "agreeing": 2,
           "passes": 2
@@ -88,13 +93,18 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:a1b62fcfe586752930c9abc1f245a8557982c622feeb390f201d69fe92f02f8a",
+      "id": "sha256:1deedaf9719e1021f8c614011d19fdcf0160dc44ff1bef6a64d73da0f8ad6813",
       "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current"
+        },
         "agreement": {
           "agreeing": 2,
           "passes": 2
@@ -163,13 +173,18 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:c994d68fe6e81a74b4c0c17fa3c86811cf9d7bcb45be3ddceaea17ce9017a9a7",
+      "id": "sha256:e09398851a7e4f314440cd8e6366414ab39b2135864ff518840ffbecdb09e8d3",
       "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current"
+        },
         "agreement": {
           "agreeing": 1,
           "passes": 2
@@ -250,13 +265,24 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:8ef191a0a0d7fb9c8034b30e43f41874fb38761b098c180a2e2ea56bc6d77f3c",
+      "id": "sha256:b447ea4717e2b5d97014fbd2b674800856230a8cf9138069835c147ced538d24",
       "input": {
+        "accumulation": {
+          "candidateClaimIds": [
+            "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+            "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+          ],
+          "gapCodes": [
+            "contested-value",
+            "supersession-pending"
+          ],
+          "outcome": "contested"
+        },
         "agreement": {
           "agreeing": 2,
           "passes": 2
@@ -368,6 +394,20 @@
       "reasons": [
         {
           "detail": {
+            "candidateClaimIds": [
+              "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+              "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+            ],
+            "gapCodes": [
+              "contested-value",
+              "supersession-pending"
+            ],
+            "outcome": "contested"
+          },
+          "rule": "contested-by-accumulation"
+        },
+        {
+          "detail": {
             "property": "primary database",
             "subjectType": "service",
             "supersedes": [
@@ -387,13 +427,23 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:a8d742a9bc3e5b70e2f652439ec0854a61c96feba606dc6b364cd95fcb0151ce",
+      "id": "sha256:98bcc8a28f78e28600572ba368e05eed51033e3e8da522f61daad941eebb7022",
       "input": {
+        "accumulation": {
+          "candidateClaimIds": [
+            "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+            "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
+          ],
+          "gapCodes": [
+            "contested-value"
+          ],
+          "outcome": "contested"
+        },
         "agreement": {
           "agreeing": 2,
           "passes": 2
@@ -495,14 +545,16 @@
       "reasons": [
         {
           "detail": {
-            "with": [
-              {
-                "claimId": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
-                "value": "5 attempts per request"
-              }
-            ]
+            "candidateClaimIds": [
+              "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+              "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
+            ],
+            "gapCodes": [
+              "contested-value"
+            ],
+            "outcome": "contested"
           },
-          "rule": "conflicting-current-values"
+          "rule": "contested-by-accumulation"
         }
       ],
       "schema_version": "1.0"
@@ -512,13 +564,14 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:e5506aaed95602e2de2d7c226820d5620bc330e462c743db50ab0df2223c792b",
+      "id": "sha256:39a5a364ebbae9bf23adb28dcf200c6fcb5cb174f1884f7f4b2b930b05128753",
       "input": {
+        "accumulation": null,
         "agreement": {
           "agreeing": 2,
           "passes": 2
@@ -632,13 +685,14 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:6af10790aed78a7f234607a89dad12eaadb88f2ed07f918fe69717a765c99269",
+      "id": "sha256:cfe002abd94b5c483b621fa9e3a778b3c71ae4af05005c2071b2c8387193193f",
       "input": {
+        "accumulation": null,
         "agreement": {
           "agreeing": 2,
           "passes": 2
@@ -707,13 +761,18 @@
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
-        "conflicting-current-values",
+        "contested-by-accumulation",
         "consequential-supersession",
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:81baed490246220148a1edcab32bf3678c06a99a2cb4c34f0dc5a3acd02f9ba2",
+      "id": "sha256:ea05d2e6a60b2afc38f1e7ddc03bf98b30bffc224bd6ace20e7f1503dedd6cd6",
       "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current"
+        },
         "agreement": {
           "agreeing": 1,
           "passes": 2

@@ -1,0 +1,961 @@
+{
+ "source": "kontourai/surface@b7d932b8b496bb01af7437df5325f0e0b1fecd51 projectAccumulation over the Kit's mapped claims",
+ "now": "2026-11-02T00:00:00Z",
+ "scenarios": {
+  "sitting0": {
+   "bundles": [
+    {
+     "schemaVersion": 5,
+     "source": "host:s0",
+     "producerId": "host:fixture",
+     "claims": [
+      {
+       "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "on-call owner",
+       "value": "Maya Chen",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:01:10.000Z",
+       "updatedAt": "2026-10-28T09:01:10.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+          "extractor": "scripted-replay",
+          "locator": "chars:220-279",
+          "observedAt": "2026-10-28T09:01:10.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       }
+      },
+      {
+       "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "retry budget",
+       "value": "5 attempts per request",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:01:10.000Z",
+       "updatedAt": "2026-10-28T09:01:10.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Our retry budget is 5 attempts per request.",
+          "extractor": "scripted-replay",
+          "locator": "chars:280-323",
+          "observedAt": "2026-10-28T09:01:10.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       }
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "primary database",
+       "value": "PostgreSQL 15",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:00:00.000Z",
+       "updatedAt": "2026-10-28T09:00:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+          "extractor": "scripted-replay",
+          "locator": "chars:32-94",
+          "observedAt": "2026-10-28T09:00:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       }
+      }
+     ],
+     "evidence": [],
+     "policies": [],
+     "events": []
+    }
+   ],
+   "facts": {
+    "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": {
+     "outcome": "current",
+     "candidateClaimIds": [],
+     "gapCodes": []
+    },
+    "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": {
+     "outcome": "current",
+     "candidateClaimIds": [],
+     "gapCodes": []
+    },
+    "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": {
+     "outcome": "current",
+     "candidateClaimIds": [],
+     "gapCodes": []
+    }
+   }
+  },
+  "sitting1": {
+   "bundles": [
+    {
+     "schemaVersion": 5,
+     "source": "host:s0",
+     "producerId": "host:fixture",
+     "claims": [
+      {
+       "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "on-call owner",
+       "value": "Maya Chen",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:01:10.000Z",
+       "updatedAt": "2026-10-28T09:01:10.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+          "extractor": "scripted-replay",
+          "locator": "chars:220-279",
+          "observedAt": "2026-10-28T09:01:10.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       }
+      },
+      {
+       "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "retry budget",
+       "value": "5 attempts per request",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:01:10.000Z",
+       "updatedAt": "2026-10-28T09:01:10.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Our retry budget is 5 attempts per request.",
+          "extractor": "scripted-replay",
+          "locator": "chars:280-323",
+          "observedAt": "2026-10-28T09:01:10.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       }
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "primary database",
+       "value": "PostgreSQL 15",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:00:00.000Z",
+       "updatedAt": "2026-10-28T09:00:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+          "extractor": "scripted-replay",
+          "locator": "chars:32-94",
+          "observedAt": "2026-10-28T09:00:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       }
+      }
+     ],
+     "evidence": [],
+     "policies": [],
+     "events": []
+    },
+    {
+     "schemaVersion": 5,
+     "source": "host:s1",
+     "producerId": "host:fixture",
+     "claims": [
+      {
+       "id": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "primary database",
+       "value": "PostgreSQL 16",
+       "status": "proposed",
+       "createdAt": "2026-10-30T14:00:00.000Z",
+       "updatedAt": "2026-10-30T14:00:00.000Z",
+       "impactLevel": "medium",
+       "validTime": {
+        "from": "2026-10-30T00:00:00.000Z"
+       },
+       "supersedes": [
+        {
+         "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+         "kind": "succession",
+         "reason": "the speaker presented the value as replacing the earlier one"
+        }
+       ],
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+          "extractor": "scripted-replay",
+          "locator": "chars:32-128",
+          "observedAt": "2026-10-30T14:00:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+          "role": "user"
+         }
+        }
+       }
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "primary database",
+       "value": "PostgreSQL 15",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:00:00.000Z",
+       "updatedAt": "2026-10-28T09:00:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+          "extractor": "scripted-replay",
+          "locator": "chars:32-94",
+          "observedAt": "2026-10-28T09:00:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       }
+      },
+      {
+       "id": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "retry budget",
+       "value": "8 attempts per request",
+       "status": "proposed",
+       "createdAt": "2026-10-30T14:02:00.000Z",
+       "updatedAt": "2026-10-30T14:02:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Actually the retry budget is 8 attempts per request.",
+          "extractor": "scripted-replay",
+          "locator": "chars:253-305",
+          "observedAt": "2026-10-30T14:02:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+          "role": "user"
+         }
+        }
+       }
+      },
+      {
+       "id": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
+       "subjectType": "team",
+       "subjectId": "platform team",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "lead",
+       "value": "Priya Rao",
+       "status": "proposed",
+       "createdAt": "2026-10-30T14:02:00.000Z",
+       "updatedAt": "2026-10-30T14:02:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Priya Rao leads the platform team.",
+          "extractor": "scripted-replay",
+          "locator": "chars:446-480",
+          "observedAt": "2026-10-30T14:02:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+          "role": "user"
+         }
+        }
+       }
+      }
+     ],
+     "evidence": [],
+     "policies": [],
+     "events": []
+    }
+   ],
+   "facts": {
+    "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": {
+     "fact": {
+      "outcome": "contested",
+      "candidateClaimIds": [
+       "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+      ],
+      "gapCodes": [
+       "contested-value",
+       "supersession-pending"
+      ]
+     },
+     "edges": [
+      {
+       "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "byClaimId": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "state": "pending"
+      }
+     ],
+     "status": {
+      "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": "proposed",
+      "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": "proposed",
+      "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": "proposed",
+      "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": "proposed",
+      "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": "proposed",
+      "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": "proposed"
+     }
+    },
+    "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": {
+     "fact": {
+      "outcome": "contested",
+      "candidateClaimIds": [
+       "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
+      ],
+      "gapCodes": [
+       "contested-value"
+      ]
+     },
+     "edges": [],
+     "status": {
+      "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": "proposed",
+      "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": "proposed",
+      "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": "proposed",
+      "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": "proposed",
+      "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": "proposed",
+      "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": "proposed"
+     }
+    },
+    "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": {
+     "fact": {
+      "outcome": "current",
+      "candidateClaimIds": [],
+      "gapCodes": []
+     },
+     "edges": [],
+     "status": {
+      "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": "proposed",
+      "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": "proposed",
+      "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": "proposed",
+      "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": "proposed",
+      "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": "proposed",
+      "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": "proposed"
+     }
+    }
+   }
+  },
+  "afterReview": {
+   "bundles": [
+    {
+     "schemaVersion": 5,
+     "source": "host:s0",
+     "producerId": "host:fixture",
+     "claims": [
+      {
+       "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "on-call owner",
+       "value": "Maya Chen",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:01:10.000Z",
+       "updatedAt": "2026-10-28T09:01:10.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+          "extractor": "scripted-replay",
+          "locator": "chars:220-279",
+          "observedAt": "2026-10-28T09:01:10.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       },
+       "verificationPolicyId": "policy.fact"
+      },
+      {
+       "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "retry budget",
+       "value": "5 attempts per request",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:01:10.000Z",
+       "updatedAt": "2026-10-28T09:01:10.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Our retry budget is 5 attempts per request.",
+          "extractor": "scripted-replay",
+          "locator": "chars:280-323",
+          "observedAt": "2026-10-28T09:01:10.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       },
+       "verificationPolicyId": "policy.fact"
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "primary database",
+       "value": "PostgreSQL 15",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:00:00.000Z",
+       "updatedAt": "2026-10-28T09:00:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+          "extractor": "scripted-replay",
+          "locator": "chars:32-94",
+          "observedAt": "2026-10-28T09:00:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       },
+       "verificationPolicyId": "policy.fact"
+      }
+     ],
+     "evidence": [
+      {
+       "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb.evidence",
+       "claimId": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+       "evidenceType": "source_excerpt",
+       "method": "extraction",
+       "sourceRef": "source:sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+       "excerptOrSummary": "Source states on-call owner",
+       "observedAt": "2026-10-28T09:01:10.000Z",
+       "collectedBy": "collector",
+       "passing": true
+      },
+      {
+       "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02.evidence",
+       "claimId": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "evidenceType": "source_excerpt",
+       "method": "extraction",
+       "sourceRef": "source:sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "excerptOrSummary": "Source states retry budget",
+       "observedAt": "2026-10-28T09:01:10.000Z",
+       "collectedBy": "collector",
+       "passing": true
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c.evidence",
+       "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "evidenceType": "source_excerpt",
+       "method": "extraction",
+       "sourceRef": "source:sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "excerptOrSummary": "Source states primary database",
+       "observedAt": "2026-10-28T09:00:00.000Z",
+       "collectedBy": "collector",
+       "passing": true
+      }
+     ],
+     "policies": [
+      {
+       "id": "policy.fact",
+       "claimType": "knowledge.memory-claim",
+       "requiredEvidence": [
+        "source_excerpt"
+       ],
+       "acceptanceCriteria": [
+        "the cited source states the value"
+       ],
+       "reviewAuthority": "producer review",
+       "validityRule": {
+        "kind": "historical"
+       },
+       "stalenessTriggers": [],
+       "conflictRules": [],
+       "impactLevel": "medium"
+      }
+     ],
+     "events": [
+      {
+       "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb.verified",
+       "claimId": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+       "status": "verified",
+       "actor": "producer-review",
+       "method": "review",
+       "evidenceIds": [
+        "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb.evidence"
+       ],
+       "createdAt": "2026-10-28T09:01:10.000Z"
+      },
+      {
+       "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02.verified",
+       "claimId": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "status": "verified",
+       "actor": "producer-review",
+       "method": "review",
+       "evidenceIds": [
+        "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02.evidence"
+       ],
+       "createdAt": "2026-10-28T09:01:10.000Z"
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c.verified",
+       "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "status": "verified",
+       "actor": "producer-review",
+       "method": "review",
+       "evidenceIds": [
+        "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c.evidence"
+       ],
+       "createdAt": "2026-10-28T09:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "schemaVersion": 5,
+     "source": "host:s1",
+     "producerId": "host:fixture",
+     "claims": [
+      {
+       "id": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "primary database",
+       "value": "PostgreSQL 16",
+       "status": "proposed",
+       "createdAt": "2026-10-30T14:00:00.000Z",
+       "updatedAt": "2026-10-30T14:00:00.000Z",
+       "impactLevel": "medium",
+       "validTime": {
+        "from": "2026-10-30T00:00:00.000Z"
+       },
+       "supersedes": [
+        {
+         "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+         "kind": "succession",
+         "reason": "the speaker presented the value as replacing the earlier one"
+        }
+       ],
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+          "extractor": "scripted-replay",
+          "locator": "chars:32-128",
+          "observedAt": "2026-10-30T14:00:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+          "role": "user"
+         }
+        }
+       },
+       "verificationPolicyId": "policy.fact"
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "primary database",
+       "value": "PostgreSQL 15",
+       "status": "proposed",
+       "createdAt": "2026-10-28T09:00:00.000Z",
+       "updatedAt": "2026-10-28T09:00:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+          "extractor": "scripted-replay",
+          "locator": "chars:32-94",
+          "observedAt": "2026-10-28T09:00:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+          "role": "user"
+         }
+        }
+       },
+       "verificationPolicyId": "policy.fact"
+      },
+      {
+       "id": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "retry budget",
+       "value": "8 attempts per request",
+       "status": "proposed",
+       "createdAt": "2026-10-30T14:02:00.000Z",
+       "updatedAt": "2026-10-30T14:02:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Actually the retry budget is 8 attempts per request.",
+          "extractor": "scripted-replay",
+          "locator": "chars:253-305",
+          "observedAt": "2026-10-30T14:02:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+          "role": "user"
+         }
+        }
+       },
+       "verificationPolicyId": "policy.fact"
+      },
+      {
+       "id": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
+       "subjectType": "team",
+       "subjectId": "platform team",
+       "facet": "memory",
+       "claimType": "knowledge.memory-claim",
+       "fieldOrBehavior": "lead",
+       "value": "Priya Rao",
+       "status": "proposed",
+       "createdAt": "2026-10-30T14:02:00.000Z",
+       "updatedAt": "2026-10-30T14:02:00.000Z",
+       "impactLevel": "medium",
+       "metadata": {
+        "visibility": {
+         "audiences": [
+          "user:fixture"
+         ]
+        },
+        "memory": {
+         "speaker": "user",
+         "source": {
+          "excerpt": "Priya Rao leads the platform team.",
+          "extractor": "scripted-replay",
+          "locator": "chars:446-480",
+          "observedAt": "2026-10-30T14:02:00.000Z",
+          "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+          "role": "user"
+         }
+        }
+       },
+       "verificationPolicyId": "policy.fact"
+      }
+     ],
+     "evidence": [
+      {
+       "id": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c.evidence",
+       "claimId": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "evidenceType": "source_excerpt",
+       "method": "extraction",
+       "sourceRef": "source:sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "excerptOrSummary": "Source states primary database",
+       "observedAt": "2026-10-30T14:00:00.000Z",
+       "collectedBy": "collector",
+       "passing": true
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c.evidence",
+       "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "evidenceType": "source_excerpt",
+       "method": "extraction",
+       "sourceRef": "source:sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "excerptOrSummary": "Source states primary database",
+       "observedAt": "2026-10-28T09:00:00.000Z",
+       "collectedBy": "collector",
+       "passing": true
+      },
+      {
+       "id": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd.evidence",
+       "claimId": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
+       "evidenceType": "source_excerpt",
+       "method": "extraction",
+       "sourceRef": "source:sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
+       "excerptOrSummary": "Source states retry budget",
+       "observedAt": "2026-10-30T14:02:00.000Z",
+       "collectedBy": "collector",
+       "passing": true
+      },
+      {
+       "id": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c.evidence",
+       "claimId": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
+       "evidenceType": "source_excerpt",
+       "method": "extraction",
+       "sourceRef": "source:sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
+       "excerptOrSummary": "Source states lead",
+       "observedAt": "2026-10-30T14:02:00.000Z",
+       "collectedBy": "collector",
+       "passing": true
+      }
+     ],
+     "policies": [
+      {
+       "id": "policy.fact",
+       "claimType": "knowledge.memory-claim",
+       "requiredEvidence": [
+        "source_excerpt"
+       ],
+       "acceptanceCriteria": [
+        "the cited source states the value"
+       ],
+       "reviewAuthority": "producer review",
+       "validityRule": {
+        "kind": "historical"
+       },
+       "stalenessTriggers": [],
+       "conflictRules": [],
+       "impactLevel": "medium"
+      }
+     ],
+     "events": [
+      {
+       "id": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c.verified",
+       "claimId": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "status": "verified",
+       "actor": "producer-review",
+       "method": "review",
+       "evidenceIds": [
+        "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c.evidence"
+       ],
+       "createdAt": "2026-10-30T14:00:00.000Z"
+      },
+      {
+       "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c.verified",
+       "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "status": "verified",
+       "actor": "producer-review",
+       "method": "review",
+       "evidenceIds": [
+        "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c.evidence"
+       ],
+       "createdAt": "2026-10-28T09:00:00.000Z"
+      },
+      {
+       "id": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd.verified",
+       "claimId": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
+       "status": "verified",
+       "actor": "producer-review",
+       "method": "review",
+       "evidenceIds": [
+        "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd.evidence"
+       ],
+       "createdAt": "2026-10-30T14:02:00.000Z"
+      },
+      {
+       "id": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c.verified",
+       "claimId": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
+       "status": "verified",
+       "actor": "producer-review",
+       "method": "review",
+       "evidenceIds": [
+        "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c.evidence"
+       ],
+       "createdAt": "2026-10-30T14:02:00.000Z"
+      }
+     ]
+    }
+   ],
+   "facts": {
+    "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": {
+     "fact": {
+      "outcome": "current",
+      "candidateClaimIds": [],
+      "gapCodes": []
+     },
+     "edges": [
+      {
+       "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+       "byClaimId": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+       "state": "accepted"
+      }
+     ],
+     "status": {
+      "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": "verified",
+      "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": "verified",
+      "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": "verified",
+      "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": "verified",
+      "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": "verified",
+      "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": "verified"
+     }
+    },
+    "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": {
+     "fact": {
+      "outcome": "contested",
+      "candidateClaimIds": [
+       "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+       "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
+      ],
+      "gapCodes": [
+       "contested-value"
+      ]
+     },
+     "edges": [],
+     "status": {
+      "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": "verified",
+      "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": "verified",
+      "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": "verified",
+      "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": "verified",
+      "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": "verified",
+      "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": "verified"
+     }
+    },
+    "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": {
+     "fact": {
+      "outcome": "current",
+      "candidateClaimIds": [],
+      "gapCodes": []
+     },
+     "edges": [],
+     "status": {
+      "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": "verified",
+      "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": "verified",
+      "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": "verified",
+      "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": "verified",
+      "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": "verified",
+      "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": "verified"
+     }
+    }
+   }
+  }
+ }
+}

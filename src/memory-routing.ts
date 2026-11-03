@@ -16,15 +16,16 @@ import {
   currentProposedReviewItem, foldCandidateVerifications, reviewResourceApiVersion, runSupportVerifier,
   type CandidateVerification, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
+import { memoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
 import {
-  MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryIntervalsOverlap, memorySlotKey, memoryValuesEqual, readMemoryVisibility,
+  MemoryClaimError, assertMemoryClaim, foldMemoryText, memorySlotKey, readMemoryVisibility, readAudienceList,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
 } from "./memory-claims.js";
 
 export const MEMORY_ROUTING_VERSION = "1.0" as const;
 export const MEMORY_ROUTING_RULE_IDS = [
   "contradicted-by-verification",
-  "conflicting-current-values",
+  "contested-by-accumulation",
   "consequential-supersession",
   "entity-identity-change",
   "low-extraction-agreement",
@@ -38,7 +39,7 @@ export interface MemoryRoutingPolicy {
   minPasses: number;
   /** Smallest share of passes that must produce an equivalent claim. */
   minAgreement: number;
-  /** Properties that may hold several values at once; every other property is single-valued. */
+  /** Properties that may hold several values at once. Surface's projection cannot contest them (one value policy), so they are not projected. */
   multiValued: string[];
   /** Superseding a claim on one of these goes to review. `"*"` matches everything. */
   consequential: { properties: string[]; subjectTypes: string[] };
@@ -58,6 +59,11 @@ export interface MemoryClaimRoutingInput {
   verifications: CandidateVerification[];
   /** Null when no extraction passes were measured. */
   agreement: MemoryAgreement | null;
+  /**
+   * What Surface's projection says about the claim's slot, run by the host (`projectAccumulation`). Null when it was not
+   * run, which the rule treats as not evaluated. Only a stated claim is projected.
+   */
+  accumulation: MemoryAccumulationFact | null;
   baselines: MemoryVisibilityBaseline[];
 }
 export interface MemoryEntityRoutingInput {
@@ -66,8 +72,8 @@ export interface MemoryEntityRoutingInput {
   proposalRef: string;
   /** Every operation the proposal's alternatives carry (`merge`, `split`, `alias`, `same-as`, `related-to`, `domain:*`). */
   operations: string[];
-  /** `type:id` of every subject the proposal names. */
-  subjects: string[];
+  /** Every subject the proposal names, as Survey's `SubjectRef`, sorted. Not flattened: a type or id may hold any character. */
+  subjects: { subjectType: string; subjectId: string }[];
 }
 /**
  * The part of Survey's `EntityProposal` (kontourai/survey#243, `createEntityProposal`) this Kit reads. Structural so
@@ -110,15 +116,27 @@ const SEALED: MemoryVisibility = { kind: "restricted", audiences: [] };
  * states the order. It is checked against Surface's own meet vectors, and against the real function as soon as the
  * installed Surface has one. Undeclared or unreadable is sealed, as in Surface: omission never widens.
  */
-export function memoryVisibilityWithin(inner: MemoryVisibility | null | undefined, outer: MemoryVisibility | null | undefined): boolean {
-  const a = readMemoryVisibility(inner) ?? SEALED, b = readMemoryVisibility(outer) ?? SEALED;
+export function memoryVisibilityWithin(inner: unknown, outer: unknown): boolean {
+  const a = surfaceReading(inner), b = surfaceReading(outer);
   if (b.kind === "public") return true;
   if (a.kind === "public") return false;
   return a.audiences.every(audience => b.audiences.includes(audience));
 }
+
+/**
+ * How Surface's `meetVisibility` reads one argument (it is total): `public` is public whatever else the object carries,
+ * `restricted` with a readable audience list is that set, and everything else (null, undefined, a string, a malformed
+ * list) is sealed. Not the strict claim reading: the order must agree with Surface on any input, including bad ones.
+ */
+function surfaceReading(value: unknown): MemoryVisibility {
+  if (value === null || typeof value !== "object") return SEALED;
+  const { kind, audiences } = value as { kind?: unknown; audiences?: unknown };
+  if (kind === "public") return { kind: "public" };
+  if (kind !== "restricted") return SEALED;
+  const named = readAudienceList(audiences);
+  return named === undefined ? SEALED : { kind: "restricted", audiences: [...new Set(named)].sort() };
+}
 const listed = (names: string[], name: string) => names.some(entry => entry === "*" || foldMemoryText(entry) === foldMemoryText(name));
-/** Same-slot stated claims the new claim is not explicitly replacing. */
-const asserted = (input: MemoryClaimRoutingInput) => input.current.filter(other => other.posture === "stated" && memorySlotKey(other) === memorySlotKey(input.claim));
 
 export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
   rule<MemoryClaimRoutingInput>("contradicted-by-verification", "claim", input => {
@@ -126,17 +144,23 @@ export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
     const contradicted = applicable.filter(record => record.result === "contradicted").map(record => record.id);
     return contradicted.length ? { records: contradicted } : undefined;
   }),
-  rule<MemoryClaimRoutingInput>("conflicting-current-values", "claim", (input, policy) => {
-    const { claim } = input;
+  rule<MemoryClaimRoutingInput>("contested-by-accumulation", "claim", (input, policy) => {
+    const { claim, accumulation } = input;
+    // Only a stated claim is a candidate for a slot's value; a plan or a what-if is never contested. Surface's projection
+    // has one value policy (a single JSON value), so a property the host declares multi-valued is not projected.
     if (claim.posture !== "stated" || listed(policy.multiValued, claim.property)) return undefined;
-    // An edge replaces a claim only for the same speaker. Another speaker's edge needs an authority decision this
-    // Kit cannot make (Surface leaves a third party's edge pending), so it does not clear the conflict.
-    const replaced = new Set((claim.supersedes ?? []).map(edge => edge.claimId));
-    const conflicts = asserted(input).filter(other => {
-      if (other.id === claim.id || (replaced.has(other.id) && other.speaker === claim.speaker) || memoryValuesEqual(other.value, claim.value)) return false;
-      try { return memoryIntervalsOverlap(other.validTime, claim.validTime); } catch { return true; } // a malformed interval cannot clear a conflict
-    });
-    return conflicts.length ? { with: conflicts.map(other => ({ claimId: other.id, value: other.value })) } : undefined;
+    // Surface decides what is contested (identity, validity, retraction, replacement admission); the Kit compares no
+    // values and reads no edge. A pending replacement is contested too: until a reviewer verifies the successor, Surface
+    // keeps both candidates, so an unreviewed succession routes unless the host's authority has admitted its verification.
+    if (!accumulation) {
+      // Without a projection, a slot with nothing else in it cannot be contested; one with a peer cannot be called uncontested.
+      const peers = input.current.filter(other => other.posture === "stated" && other.id !== claim.id).map(other => other.id);
+      return peers.length ? { reason: "not-evaluated", peers } : undefined;
+    }
+    // An invalid projection (identity unresolved, a replacement cycle, missing lineage) gives no unique answer for the slot.
+    if (accumulation.outcome === "invalid") return { outcome: accumulation.outcome, ...(accumulation.reason ? { reason: accumulation.reason } : {}), candidateClaimIds: accumulation.candidateClaimIds, gapCodes: accumulation.gapCodes };
+    if (accumulation.outcome !== "contested" || !accumulation.candidateClaimIds.includes(claim.id)) return undefined;
+    return { outcome: accumulation.outcome, candidateClaimIds: accumulation.candidateClaimIds, gapCodes: accumulation.gapCodes };
   }),
   rule<MemoryClaimRoutingInput>("consequential-supersession", "claim", (input, policy) => {
     const { claim } = input;
@@ -195,6 +219,8 @@ export interface MemoryClaimChange {
   current?: readonly MemoryClaim[];
   verifications?: readonly unknown[];
   agreement?: MemoryAgreement | null;
+  /** The part of the host's `projectAccumulation` result for this claim's slot; `memoryAccumulationFact` reads it. */
+  accumulation?: MemoryAccumulationFact | null;
   /** Visibility of the source the claim came from; null or absent is undeclared, which reads as sealed. */
   sourceVisibility?: MemoryVisibility | null;
 }
@@ -223,6 +249,7 @@ function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   return {
     type: "claim", claim: canonicalOrder(change.claim), current: ordered, verifications: [...applicable],
     agreement: change.agreement ?? null,
+    accumulation: change.accumulation ? memoryAccumulationFact(change.accumulation) : null,
     baselines: [
       { ref: SOURCE_BASELINE, visibility: readMemoryVisibility(change.sourceVisibility) ?? null },
       ...ordered.map(other => ({ ref: other.id, visibility: other.visibility ?? null })),
@@ -237,17 +264,17 @@ const nonBlank = (value: unknown): value is string => typeof value === "string" 
 function entityInput(change: MemoryEntityChange): MemoryEntityRoutingInput {
   const { proposal } = change, alternatives = proposal?.spec?.alternatives;
   if (typeof proposal?.id !== "string" || !proposal.id.trim() || !Array.isArray(alternatives) || alternatives.length === 0) throw new MemoryClaimError("invalid", "an entity change needs a Survey entity proposal with alternatives");
-  const operations = new Set<string>(), subjects = new Set<string>();
+  const operations = new Set<string>(), subjects = new Map<string, { subjectType: string; subjectId: string }>();
   for (const alternative of alternatives) {
     if (!isEntityOperation(alternative?.operation)) throw new MemoryClaimError("invalid", "an entity alternative needs one of Survey's operations");
     operations.add(alternative.operation);
     for (const subject of alternative.subjects ?? []) {
       if (!nonBlank(subject?.subjectType) || !nonBlank(subject?.subjectId)) throw new MemoryClaimError("invalid", "an entity subject needs a subjectType and subjectId");
-      subjects.add(`${subject.subjectType}:${subject.subjectId}`);
+      subjects.set(JSON.stringify([subject.subjectType, subject.subjectId]), { subjectType: subject.subjectType, subjectId: subject.subjectId });
     }
   }
   if (subjects.size === 0) throw new MemoryClaimError("invalid", "an entity proposal names no subjects");
-  return { type: "entity", proposalRef: proposal.id, operations: [...operations].sort(), subjects: [...subjects].sort() };
+  return { type: "entity", proposalRef: proposal.id, operations: [...operations].sort(), subjects: [...subjects].sort(([x], [y]) => x < y ? -1 : x > y ? 1 : 0).map(([, subject]) => subject) };
 }
 
 export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision {
@@ -267,12 +294,17 @@ const stringList = (value: unknown): value is string[] => Array.isArray(value) &
 function assertStoredInputShape(input: MemoryRoutingInput): void {
   const bad = (what: string): never => { throw new MemoryClaimError("invalid", `stored routing input: ${what}`); };
   if (input.type === "entity") {
-    if (typeof input.proposalRef !== "string" || !input.proposalRef || !stringList(input.operations) || input.operations.length === 0 || !input.operations.every(isEntityOperation) || !stringList(input.subjects) || input.subjects.length === 0 || !input.subjects.every(subject => /^[^:]+:.+$/.test(subject))) bad("entity input is malformed");
+    if (typeof input.proposalRef !== "string" || !input.proposalRef || !stringList(input.operations) || input.operations.length === 0 || !input.operations.every(isEntityOperation) || !Array.isArray(input.subjects) || input.subjects.length === 0 || !input.subjects.every(subject => subject && typeof subject === "object" && nonBlank(subject.subjectType) && nonBlank(subject.subjectId) && Object.keys(subject).length === 2)) bad("entity input is malformed");
     return;
   }
   if (input.type !== "claim") bad("unknown input type");
   if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
   if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
+  if (input.accumulation !== null) {
+    try { memoryAccumulationFact(input.accumulation); } catch { bad("accumulation is not a projection result"); }
+    // memoryAccumulationFact also sorts; a stored fact must already be in that form, or the id would not be stable.
+    if (canonicalJson(memoryAccumulationFact(input.accumulation)) !== canonicalJson(input.accumulation)) bad("accumulation is not in canonical form");
+  }
   if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.visibility === null || readMemoryVisibility(base.visibility) !== undefined))) bad("baselines are malformed");
   // The peers' baselines are re-derivable from the embedded claims; a stored input may not drop one to clear a widening.
   const peers = input.baselines.filter(base => base.ref !== SOURCE_BASELINE);
@@ -353,7 +385,7 @@ export function buildMemoryReviewItem(decision: MemoryRoutingDecision): ReviewIt
   const target = `${claim.subject.label ?? claim.subject.id}.${claim.property}`;
   const rationale = `Routed for review: ${decision.reasons.map(reason => reason.rule).join(", ")}. Posture: ${claim.posture}.`;
   const against = new Set([
-    ...decision.reasons.flatMap(reason => ((reason.detail.with as { claimId: string }[] | undefined) ?? []).map(entry => entry.claimId)),
+    ...decision.reasons.flatMap(reason => ((reason.detail.candidateClaimIds as string[] | undefined) ?? []).filter(id => id !== claim.id)),
     ...(claim.supersedes ?? []).map(edge => edge.claimId),
   ]);
   const prior = current.find(other => against.has(other.id));

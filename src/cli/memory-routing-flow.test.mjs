@@ -10,6 +10,7 @@ import {
   canonicalRunPath, readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from "@kontourai/flow-agents/memory-routing-flow";
 import { attachEvidence } from "@kontourai/flow";
+import { canonicalJson } from "@kontourai/relay";
 import { buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 import { loadEntityProposals } from "./memory-claims-support.mjs";
@@ -358,4 +359,77 @@ test("a directory that does not exist yet is keyed through its nearest existing 
   assert.equal(canonicalRunPath(path.join(alias, "runs", "not-yet", "r1")), canonicalRunPath(missing));
   assert.equal(canonicalRunPath(cwd), alias);
   assert.equal(canonicalRunPath("/"), "/");
+});
+
+// --- review round 4: what is validated is what is attached ----------------------------------------------------------
+
+test("review input is taken as plain data once: a getter that changes between reads cannot pass validation and then poison the run", async t => {
+  for (const validReads of [1, 2, 3, 4, 6]) {
+    const cwd = await workspace(t);
+    const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+    const good = rejection(run.items[0], 5).reviewDecisions[0];
+    let reads = 0;
+    const evil = JSON.parse(JSON.stringify(good));
+    Object.defineProperty(evil, "spec", { enumerable: true, get() { reads++; return reads <= validReads ? good.spec : null; } });
+    await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [evil] }), /accessor|review input/, `valid for ${validReads} reads`);
+    assert.equal((await reviewEvidence(cwd)).length, 0, "nothing was attached");
+    await refreshMemoryRunMetrics({ ...where(cwd) }); // and the run still refreshes
+  }
+});
+
+test("review input that JSON would change is refused, not changed: NaN, Infinity, symbols, class instances, cycles, holes, accessors", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const good = rejection(run.items[0], 5).reviewDecisions[0];
+  const withSpec = extra => ({ ...JSON.parse(JSON.stringify(good)), spec: { ...JSON.parse(JSON.stringify(good)).spec, ...extra } });
+  const cyclic = withSpec({}); cyclic.spec.self = cyclic;
+  class Odd { constructor() { this.a = 1; } }
+  const sym = withSpec({}); sym.spec[Symbol("s")] = 1;
+  const holey = withSpec({ list: new Array(2) });
+  const refused = { "NaN": withSpec({ editedValue: NaN }), "Infinity": withSpec({ editedValue: Infinity }), "a function": withSpec({ editedValue: () => 1 }), "a bigint": withSpec({ editedValue: 1n }),
+    "a class instance": withSpec({ editedValue: new Odd() }), "a Date": withSpec({ editedValue: new Date() }), "a symbol key": sym, "a cycle": cyclic, "a list with a hole": holey,
+    "a Map": withSpec({ editedValue: new Map() }) };
+  for (const [name, item] of Object.entries(refused)) {
+    await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [item] }), /review input/, name);
+  }
+  assert.equal((await reviewEvidence(cwd)).length, 0);
+  // Plain data with a null prototype and an undefined-valued key is fine; the undefined key is simply absent.
+  const plainNull = Object.assign(Object.create(null), JSON.parse(JSON.stringify(good)), { note: undefined });
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [plainNull] });
+  const [stored] = (await readMemoryReviewRecords("run-1", cwd)).decisions;
+  assert.equal("note" in stored, false);
+  const edited = withSpec({ editedValue: { nested: [1, 2, { ok: true }], text: "x" } });
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [edited] });
+  assert.ok((await readMemoryReviewRecords("run-1", cwd)).decisions.some(d => d.spec.editedValue?.nested?.[2]?.ok === true), "ordinary structured data is recorded as is");
+});
+
+test("a malformed review passed to runMemoryRouting is refused before the routing is recorded, so the refusal leaves nothing behind", async t => {
+  const cwd = await workspace(t);
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: CHANGES(), reviewDecisions: [{ kind: "ReviewDecision" }] }), /review input/);
+  assert.equal((await loadRun("run-1", cwd)).manifest.evidence.length, 0, "no routing, no metrics");
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: CHANGES(), reviewEvents: [{ kind: "ReviewSessionEvent" }] }), /review input/);
+  assert.equal((await loadRun("run-1", cwd)).manifest.evidence.length, 0);
+});
+
+test("a retry after a failure between recording the routing and recording the metrics repairs the metrics", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  // The state a crashed process leaves: the routing batch is in the run, the metrics never made it.
+  const file = path.join(cwd, "crashed-batch.json");
+  fs.writeFileSync(file, `${canonicalJson({ schema_version: "1.0", runId: "run-1", decisions })}\n`);
+  await attachEvidence("run-1", { cwd, gate: "route-gate", file, kind: MEMORY_ROUTING_EVIDENCE_KIND });
+  assert.equal(await readLatestMemoryMetrics("run-1", cwd), undefined);
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, decisions.length, "the direct writer repaired them");
+  assert.equal((await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === MEMORY_ROUTING_EVIDENCE_KIND).length, 1, "and did not record the batch twice");
+
+  // The same through runMemoryRouting, starting from the same crashed state.
+  const second = await workspace(t);
+  const file2 = path.join(second, "crashed-batch.json");
+  const changes = CHANGES();
+  const redo = routeMemoryChange(changes[0]);
+  fs.writeFileSync(file2, `${canonicalJson({ schema_version: "1.0", runId: "run-1", decisions: [redo] })}\n`);
+  await attachEvidence("run-1", { cwd: second, gate: "route-gate", file: file2, kind: MEMORY_ROUTING_EVIDENCE_KIND });
+  await runMemoryRouting({ ...where(second), changes });
+  assert.equal((await readLatestMemoryMetrics("run-1", second)).value.decisions, (await readMemoryRoutingDecisions("run-1", second)).length);
 });

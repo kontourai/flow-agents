@@ -17,8 +17,8 @@
     },
     "routed": 4,
     "routedByRule": {
-      "conflicting-current-values": 1,
       "consequential-supersession": 1,
+      "contested-by-accumulation": 2,
       "low-extraction-agreement": 2
     },
     "routedShare": 0.5,
@@ -44,8 +44,8 @@
     },
     "routed": 4,
     "routedByRule": {
-      "conflicting-current-values": 1,
       "consequential-supersession": 1,
+      "contested-by-accumulation": 2,
       "low-extraction-agreement": 2
     },
     "routedShare": 0.5,

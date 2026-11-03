@@ -346,6 +346,11 @@ test("visibility is Surface's closed form, and anything else is refused rather t
   for (const ok of [{ kind: "public" }, { kind: "restricted", audiences: [] }, { kind: "restricted", audiences: ["a", "b"] }]) {
     assert.doesNotThrow(() => assertMemoryClaim(memoryClaim({ ...claim, visibility: ok })), JSON.stringify(ok));
   }
+  const many = n => ({ kind: "restricted", audiences: Array.from({ length: n }, (_, i) => `a${i}`) });
+  assert.doesNotThrow(() => assertMemoryClaim(memoryClaim({ ...claim, visibility: many(1024) })), "1024 audiences is the largest readable list");
+  assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, visibility: many(1025) })), { code: "invalid" });
+  const sparse = new Array(2); sparse[0] = "a";
+  assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, visibility: { kind: "restricted", audiences: sparse } })), { code: "invalid" }, "a list with a hole is unreadable");
   for (const bad of ["public", "private", { audiences: ["a"] }, { kind: "everyone" }, { kind: "public", audiences: ["a"] }, { kind: "restricted" }, { kind: "restricted", audiences: "a" }, { kind: "restricted", audiences: [""] }, { kind: "restricted", audiences: [1] }, { kind: "restricted", audiences: ["a"], extra: 1 }, { kind: "restricted", audiences: Array.from({ length: 1025 }, (_, i) => `a${i}`) }, null, []]) {
     assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, visibility: bad })), { code: "invalid" }, JSON.stringify(bad)?.slice(0, 60));
   }
