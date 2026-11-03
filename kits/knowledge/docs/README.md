@@ -718,7 +718,7 @@ referenced Claude Code project JSONL or Codex rollout. Then it:
   `contentHash`, and a `complete` flag (the idle gap has elapsed since its last
   turn). Its provenance records the harness, session id, transcript path
   relative to its authorized root, cwd, git branch, and start and end times;
-- scrubs every output string deterministically (`scrubResidueText`). Provider
+- scrubs the text, cwd, branch and transcript ref deterministically (`scrubResidueText`). Provider
   tokens, JWTs, private keys, URL credentials and secret-named assignments
   become `<SECRET>`, emails become `<EMAIL>`, and home directories become `~`.
   No model is involved, so transcript text cannot argue its way past the scrub.
@@ -737,8 +737,14 @@ Ownership boundaries:
   passes a line whose content was not fully read: a malformed or
   unknown-version telemetry line, or a transcript that is drifted, unreadable or
   over its size limit. Later lines are still processed, and their sitting hashes
-  stop a re-run from returning them twice. A trailing partial line (in either
-  file) is left for the next run. A truncated, rotated or rewritten telemetry
+  stop a re-run from returning them twice. A trailing partial line in the
+  telemetry file is left for the next run. A transcript that ends in an
+  unterminated line, grows or is replaced while it is read, or is swapped for a
+  symlink after the root check (`TRANSCRIPT_PARTIAL_TAIL`,
+  `TRANSCRIPT_CHANGED_DURING_READ`) holds the cursor; its complete lines are
+  still returned. The transcript is opened without following a final symlink,
+  read through that one descriptor, and its path and inode are re-checked after
+  the read. A truncated, rotated or rewritten telemetry
   file makes the prefix digest mismatch, so the run blocks and the cursor stays
   where it was.
 - **Ferry parses; Knowledge filters.** Transcripts are read by
@@ -747,19 +753,26 @@ Ownership boundaries:
   messages. Sitting splitting, tag and marker filtering, and the scrub work over
   those messages; the kit has no transcript parser of its own. Ferry already
   drops tool results, thinking, `isMeta` entries and Claude sidechains.
-  Drift means Ferry reports skipping a record, or the file reads as a different
-  format from the one its telemetry runtime names (Ferry's `detectFormat`), or a
-  Claude transcript has no `sessionId`, or a Codex rollout does not open with a
-  `session_meta`. Drift is reported as `UNKNOWN_TRANSCRIPT_FORMAT`, holds the
+  Drift means Ferry reports skipping a record, the file reads as a different
+  format from the one its telemetry runtime names (Ferry's `detectFormat`), the
+  complete lines are not valid UTF-8, the session id is not a UUID (so free text
+  and secrets never reach sitting ids or cursor keys), a conversation record has
+  no source timestamp (Ferry would substitute the clock, making hashes
+  nondeterministic), a Claude transcript has no `sessionId`, or a Codex rollout
+  does not open with a `session_meta`. Drift is reported as `UNKNOWN_TRANSCRIPT_FORMAT`, holds the
   cursor, and never crashes the run.
 - **Temporary shims** (`promote/runtime-ferry-shims.js`) cover what the Thread
   does not carry yet, each tied to an upstream issue and to be deleted when it
-  ships: Claude `origin.kind` other than `human`, compact summaries and
+  ships. Each reads one record-level fact from one raw line, and the flagged
+  *line* is removed before Ferry imports the rest, so there is no join on ids,
+  text or time: Claude `origin.kind` other than `human`, compact summaries and
   transcript-only entries ([thread#76](https://github.com/kontourai/thread/issues/76));
   Codex `session_meta` branch and the subagent marker
   ([thread#77](https://github.com/kontourai/thread/issues/77)); Codex
   `developer`-role items that Ferry imports as `user` messages, and the
-  harness-tag list ([thread#78](https://github.com/kontourai/thread/issues/78)).
+  harness-tag list ([thread#78](https://github.com/kontourai/thread/issues/78));
+  and the check that a record carries a source time
+  ([thread#79](https://github.com/kontourai/thread/issues/79)).
   Provenance cwd and branch are session-level (Ferry's Thread metadata), not
   tracked per sitting.
 
@@ -767,7 +780,13 @@ Out of scope here: store writes (#670), scheduling or dreaming (#671),
 injection (#672), OpenCode and pi transcripts, and telemetry schema changes.
 Known gaps: the cursor does not drain a rotated telemetry predecessor (a
 rotation blocks until an operator resets the cursor); the map of sitting
-hashes is never pruned; a transcript whose conversation records were renamed
+hashes is never pruned; a transcript that no longer exists is skipped and
+reported (`TRANSCRIPT_MISSING`) rather than held, because retention cleanup
+would otherwise pin the cursor forever; the injected-memory filter fails
+closed, so an unterminated opening marker hides the text after it in that and
+later messages until a closing marker, and a marker spelled across two text
+parts is not recognised; two transcript files that carry the same session id
+share sitting ids; a transcript whose conversation records were renamed
 wholesale (so Ferry sees no conversation and warns about nothing) is
 indistinguishable from a bookkeeping-only file, so it is skipped and reported
 as `NO_CONVERSATION` rather than blocked as drift.
