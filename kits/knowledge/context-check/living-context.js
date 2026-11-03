@@ -348,12 +348,11 @@ function supersessionChain(claim, byId, supersession, ctx) {
     for (const target of frontier) {
       for (const candidate of [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))) {
         if (reached.has(candidate.id) || !listed(candidate) || candidate.extension.recordedAt === undefined) continue;
-        const active = view.supersededBy[candidate.id]?.includes(target);
-        const state = states.get(candidate.id);
-        const inactive = state?.state === "inactive" && state.successor?.id === target && edgeVisible(candidate, ctx);
-        if (!active && !inactive) continue;
+        // Only a followed edge can reach here: an inactive edge means the successor is outside its valid time at
+        // valid_at, so the successor is a no-answer and has no chain to list it in.
+        if (!view.supersededBy[candidate.id]?.includes(target)) continue;
         reached.add(candidate.id);
-        backward.unshift({ claim_id: candidate.id, relation: "supersedes", ...(active && direct(candidate.id, target) || inactive ? { kind: kindOf(candidate.id) } : {}), active: Boolean(active) });
+        backward.unshift({ claim_id: candidate.id, relation: "supersedes", ...(direct(candidate.id, target) ? { kind: kindOf(candidate.id) } : {}), active: true });
         next.push(candidate.id);
       }
     }
