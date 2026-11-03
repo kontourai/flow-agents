@@ -801,7 +801,8 @@ Ownership boundaries:
 
 Out of scope here: store writes (#670), scheduling or dreaming (#671),
 injection (#672), OpenCode and pi transcripts, and telemetry schema changes.
-Known gaps: a quoted password inside a URL inside another assignment, followed
+Known gaps: a URL password is hidden up to the first "@" (as before), so the tail of
+a password that holds an unencoded "@" (`user:p@ss@host`) stays visible; a quoted password inside a URL inside another assignment, followed
 by a glued run that holds a further key, may leave that last value (earlier
 scrub designs hid it only as a side effect of their stage order); the cursor does not drain a rotated telemetry predecessor (a
 rotation blocks until an operator resets the cursor); the map of sitting

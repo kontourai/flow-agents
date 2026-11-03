@@ -155,8 +155,31 @@ function collectPrivateKeys(text, edits) {
 const SCHEME_CHAR = /[A-Za-z0-9+.-]/;
 const NOT_USER = /[:\s/@]/;
 const NOT_PASSWORD = /[@\s/]/;
+const LETTER = /[A-Za-z]/;
+const WORD_CHAR = /[A-Za-z0-9_]/;
+
+/**
+ * True when a valid scheme (`\b[a-z][a-z0-9+.-]*`) ends right before `at`: some
+ * start inside the run of scheme characters is a letter at a word boundary.
+ * `1://`, `-://`, `9http://` and `foo_https://` are not schemes.
+ */
+function schemeEndsAt(text, at) {
+  let runStart = at;
+  while (runStart > 0 && SCHEME_CHAR.test(text[runStart - 1])) runStart -= 1;
+  for (let start = runStart; start < at; start += 1) {
+    if (LETTER.test(text[start]) && (start === 0 || !WORD_CHAR.test(text[start - 1]))) return true;
+  }
+  return false;
+}
+
+/**
+ * Edits for every URL password, and the ranges of those under a VALID scheme. A
+ * password under an invalid scheme (`1://u:pw@h`) is still hidden, but the text
+ * around it is read as it always was: not a URL, so not protected from other stages.
+ */
 function collectUrlCredentials(text, edits) {
-  if (!text.includes("://")) return;
+  const ranges = [];
+  if (!text.includes("://")) return ranges;
   for (let at = text.indexOf("://"); at !== -1; at = text.indexOf("://", at + 3)) {
     if (at === 0 || !SCHEME_CHAR.test(text[at - 1])) continue;
     let i = at + 3;
@@ -165,8 +188,29 @@ function collectUrlCredentials(text, edits) {
     const passwordStart = i + 1;
     let end = passwordStart;
     while (end < text.length && !NOT_PASSWORD.test(text[end])) end += 1;
-    if (end > passwordStart && text[end] === "@") edit(edits, passwordStart, end, PLACEHOLDER);
+    if (end > passwordStart && text[end] === "@") {
+      edit(edits, passwordStart, end, PLACEHOLDER);
+      if (schemeEndsAt(text, at)) ranges.push({ start: passwordStart, end });
+    }
   }
+  return ranges;
+}
+
+/**
+ * The URL password range [start, end) that contains `position`, or null. Ranges are
+ * in text order and disjoint. Everything inside one is part of the password: the
+ * host after its "@" is not, so no other collector may let its match run past `end`.
+ */
+function urlPasswordAt(ranges, position) {
+  let low = 0;
+  let high = ranges.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (position < ranges[mid].start) high = mid - 1;
+    else if (position >= ranges[mid].end) low = mid + 1;
+    else return ranges[mid];
+  }
+  return null;
 }
 
 // YAML block scalar header: `token: |`, `"token": >-`, `- token: |2 # note`.
@@ -264,7 +308,7 @@ function assignmentValue(text, identifierEnd, run) {
  * that mentions another key is redacted whole. The cost is over-redaction of the
  * prose in between. Each identifier is visited once.
  */
-function collectAssignments(text, edits) {
+function collectAssignments(text, edits, urlRanges) {
   const run = { from: 0, to: 0 };
   IDENTIFIER.lastIndex = 0;
   const inner = new RegExp(IDENTIFIER.source, "g");
@@ -272,12 +316,25 @@ function collectAssignments(text, edits) {
     if (!isSecretName(match[0])) continue;
     const value = assignmentValue(text, match.index + match[0].length, run);
     if (value === null) continue;
-    let end = value.end;
-    inner.lastIndex = text[value.start] === '"' || text[value.start] === "'" ? value.start + 1 : value.start;
+    // An UNQUOTED value that starts inside a URL password stops at the password: the host and path
+    // after its "@" are not the value. A quoted value is one string, so it keeps its whole span
+    // even when its closing quote comes after the "@". The limit is applied before the inner scan,
+    // so no identifier is visited twice.
+    const quoted = text[value.start] === '"' || text[value.start] === "'";
+    const url = quoted ? null : urlPasswordAt(urlRanges, match.index);
+    const limit = url === null ? Infinity : url.end;
+    if (limit <= value.start) continue;
+    let end = Math.min(value.end, limit);
+    inner.lastIndex = quoted ? value.start + 1 : value.start;
     for (let key = inner.exec(text); key !== null && key.index < end; key = inner.exec(text)) {
       if (!isSecretName(key[0])) continue;
       const nested = assignmentValue(text, key.index + key[0].length, run);
-      if (nested !== null && nested.end > end) end = nested.end;
+      if (nested !== null && nested.end > end) {
+        // Same rule as for the outer value: an unquoted nested value stops at the password, a quoted
+        // one is a single string and keeps its whole span.
+        const nestedQuoted = text[nested.start] === '"' || text[nested.start] === "'";
+        end = nestedQuoted ? nested.end : Math.min(nested.end, limit);
+      }
     }
     // A separator when the next character is not a value terminator, so the placeholder can
     // never fuse with what follows it (which a second pass would read as one longer value).
@@ -315,11 +372,15 @@ function collectBearer(text, edits) {
 }
 
 /** The regex-shaped secrets, emails and home directories, found in the blob-masked text. */
-function collectPatterns(masked, edits) {
+function collectPatterns(masked, edits, urlRanges) {
   for (const pattern of SECRET_PATTERNS) {
     for (const m of masked.matchAll(pattern)) edit(edits, m.index, m.index + m[0].length, PLACEHOLDER);
   }
-  for (const m of masked.matchAll(EMAIL)) edit(edits, m.index, m.index + m[0].length, "<EMAIL>");
+  for (const m of masked.matchAll(EMAIL)) {
+    // `user:pw@host.example.com`: the "@" opens the host, so this is a URL credential, not an email.
+    if (urlPasswordAt(urlRanges, m.index) !== null) continue;
+    edit(edits, m.index, m.index + m[0].length, "<EMAIL>");
+  }
   for (const m of masked.matchAll(WINDOWS_HOME)) edit(edits, m.index, m.index + m[0].length, "~");
   for (const m of masked.matchAll(POSIX_HOME)) edit(edits, m.index + m[1].length, m.index + m[0].length, "~");
 }
@@ -327,11 +388,11 @@ function collectPatterns(masked, edits) {
 function scrubOnce(text) {
   const edits = [];
   collectPrivateKeys(text, edits);
-  collectUrlCredentials(text, edits);
+  const urlRanges = collectUrlCredentials(text, edits);
   collectBlockScalars(text, edits);
-  collectAssignments(text, edits);
+  collectAssignments(text, edits, urlRanges);
   collectBearer(text, edits);
-  collectPatterns(maskBlobs(text, edits), edits);
+  collectPatterns(maskBlobs(text, edits), edits, urlRanges);
   return applyEdits(text, edits);
 }
 
