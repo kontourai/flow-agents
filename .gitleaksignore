@@ -2,3 +2,6 @@
 efb977c87fdbc6a3841ee6f0f74ce9ed1dd9c8ed:evals/integration/test_narrative_redaction_failclosed.sh:generic-api-key:28
 # Deliberate test canary in the pinned-telemetry redaction test (never a real credential); the value is built at runtime from 0b75f69a's successors.
 0b75f69acf970051ec854f1d3c4cd67ea898d3d5:src/cli/telemetry-local-pin.test.mjs:generic-api-key:1130
+# Historical occurrences in the #669 runtime-session scrub tests (never real credentials): a synthetic query-string canary and a PEM header string used as a linearity input. The tree now assembles both at run time.
+ea014b8ff69d28899121e105b1ccbe8ec3a5af9d:kits/knowledge/promote/runtime-session.test.js:generic-api-key:941
+4e41b1baa68d33dee495b4ffd2e75566ba35056c:kits/knowledge/promote/runtime-session.test.js:private-key:857
