@@ -23,7 +23,17 @@ import { distill } from "./distill.js";
 import { link } from "./link.js";
 import { health } from "./health.js";
 
-export { ingestSession } from "./ingest.js";
+export { ingestSession, ingestFromSource, SESSION_SOURCE_IDS } from "./ingest.js";
+export {
+  ingestRuntimeSessions,
+  emptyRuntimeCursor,
+  readRuntimeCursor,
+  commitRuntimeCursor,
+  DEFAULT_IDLE_GAP_MS,
+} from "./runtime-session.js";
+export { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE } from "../memory-marker.js";
+export { HARNESS_TAGS } from "./runtime-transcript.js";
+export { scrubResidueText } from "./runtime-redaction.js";
 export { distill } from "./distill.js";
 export { link } from "./link.js";
 export { health } from "./health.js";
