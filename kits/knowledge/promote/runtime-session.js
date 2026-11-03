@@ -118,6 +118,14 @@ class Skipped extends Error {
   }
 }
 
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/** Telemetry writes `timestamp` as epoch milliseconds in a string (`$(date +%s)000`). */
+function telemetryEventMs(value) {
+  const ms = typeof value === "number" ? value : typeof value === "string" && /^[0-9]{12,14}$/.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : null;
+}
+
 /** True when the file at `transcriptPath` still looks like the one that was read (or was never readable). */
 function sameFileStamp(stamp, transcriptPath) {
   if (!stamp) return true;
@@ -342,7 +350,7 @@ export function ingestRuntimeSessions(options = {}) {
         if (parsed.sidechain) {
           outcome = { kind: "skip", reason: "SIDECHAIN_TRANSCRIPT" };
         } else if (parsed.messages.length === 0 && !parsed.partialTail) {
-          outcome = { kind: "skip", reason: "NO_CONVERSATION" };
+          outcome = { kind: "skip", reason: "NO_CONVERSATION", unterminatedMemory: parsed.unterminatedMemory };
         } else {
           outcome = {
             kind: "ok",
@@ -375,13 +383,17 @@ export function ingestRuntimeSessions(options = {}) {
       }
     }
     if (outcome.kind === "ok" && outcome.hold) block("TRANSCRIPT_PARTIAL_TAIL", "transcript ends in an unterminated line");
-    if (outcome.kind === "ok" && outcome.unterminatedMemory) {
+    if (outcome.unterminatedMemory) {
       report.notes.push({ telemetry_offset: lineStart, reason: "INJECTED_MEMORY_UNTERMINATED" });
     }
     if (outcome.kind === "skip" && outcome.reason === "TRANSCRIPT_MISSING") {
       // An event this young may be ahead of its transcript becoming visible.
-      const at = Number(event.timestamp);
-      if (!Number.isFinite(at) || now - at < missingTranscriptGraceMs) {
+      const at = telemetryEventMs(event.timestamp);
+      if (at === null || at > now + CLOCK_SKEW_MS) {
+        block("TELEMETRY_BAD_TIMESTAMP", "telemetry event has no usable timestamp");
+        continue;
+      }
+      if (now - at < missingTranscriptGraceMs) {
         block("TRANSCRIPT_MISSING_RECENT", "transcript for a recent event is not visible yet");
         continue;
       }

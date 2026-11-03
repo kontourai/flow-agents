@@ -39,7 +39,7 @@ const URL_CREDENTIAL = /\b([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s/]+(@)/gi;
 const BEARER = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
 // NAME=value, "name": "value", name: value — for secret-ish names.
 const ASSIGNMENT = new RegExp(
-  `(["']?\\b${SECRET_NAME}["']?\\s*[:=]\\s*(?:(?:bearer|basic)\\s+)?)(?:"[^"]{0,1024}"|'[^']{0,1024}'|[^\\s"',;}]{4,})`,
+  `(["']?\\b${SECRET_NAME}["']?\\s*[:=]\\s*(?:(?:bearer|basic)\\s+)?)(?:"[^"]*"|'[^']*'|[^\\s"',;}]{4,})`,
   "gi",
 );
 // YAML block scalar header: `token: |`, `"token": >-`, `- token: |2 # note`.

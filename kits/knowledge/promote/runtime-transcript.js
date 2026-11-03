@@ -215,20 +215,21 @@ function importThread(createImporter, lines) {
 
 /**
  * User/assistant text of one canonical message, with injected content removed.
- * The injected-memory filter runs per text part (a block may open in one part
- * and close in the next) and its state ends with the message, so a quoted
- * opening marker cannot hide later turns. Harness tags are removed from the
- * joined text. `unterminated` reports a block that never closed.
+ * Filter state ends with the message, so a quoted opening marker cannot hide
+ * later turns. `unterminated` reports a block that never closed.
  */
 function messageText(message) {
   if (!Array.isArray(message.content)) return { text: "", unterminated: false };
+  const joined = message.content
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n\n");
+  // One pass over the whole message: a block opened in one part and closed in a
+  // later one is removed whole, and a close with no open removes everything
+  // before it in the message, parts included.
   const filter = createInjectedMemoryFilter();
-  const texts = [];
-  for (const part of message.content) {
-    if (part.type !== "text" || typeof part.text !== "string") continue;
-    texts.push(filter(part.text));
-  }
-  return { text: stripHarnessTags(texts.join("\n\n")), unterminated: filter.open() };
+  const kept = filter(joined);
+  return { text: stripHarnessTags(kept), unterminated: filter.open() };
 }
 
 function conversationFromThread(thread) {

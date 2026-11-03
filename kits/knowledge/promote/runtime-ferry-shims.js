@@ -64,7 +64,9 @@ export function claudeLineFacts(line) {
   const record = parseObject(line);
   if (!record) return facts;
   const conversation = record.type === "user" || record.type === "assistant";
-  if (conversation && !hasSourceTime(record.timestamp)) facts.missingTime = true;
+  // Ferry skips `isMeta` and (by default) `isSidechain` records, so their time does not matter.
+  const importedByFerry = conversation && record.isMeta !== true && record.isSidechain !== true;
+  if (importedByFerry && !hasSourceTime(record.timestamp)) facts.missingTime = true;
   const role = record.message && typeof record.message === "object" ? record.message.role : undefined;
   if ((role === "user" || role === "assistant") && !conversation && !CLAUDE_NON_CONVERSATION_TYPES.has(record.type)) {
     facts.unrecognizedConversation = true;

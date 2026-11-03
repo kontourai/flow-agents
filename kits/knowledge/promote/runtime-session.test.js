@@ -698,6 +698,23 @@ describe("review round 1 regressions (PR #1575)", () => {
     assert.match(out, /Please document the token/);
     assert.equal(out.includes("HIDDEN_REST_OF_MESSAGE"), false);
     assert.deepEqual(result.report.notes.map((n) => n.reason), ["INJECTED_MEMORY_UNTERMINATED"]);
+    assert.equal(result.report.cursor_held, false, "a note is not a hold");
+    assert.equal(result.candidateCursor.telemetry.offset, fs.statSync(box.telemetryFile).size);
+
+    // a message that is nothing but a hidden block still reports the note
+    const hidden = single("claude-code", ndjson([claudeRec(`${INJECTED_MEMORY_OPEN}only hidden`)]));
+    const hiddenResult = run(hidden.box);
+    assert.deepEqual(hiddenResult.report.skipped.map((s) => s.reason), ["NO_CONVERSATION"]);
+    assert.deepEqual(hiddenResult.report.notes.map((n) => n.reason), ["INJECTED_MEMORY_UNTERMINATED"]);
+
+    // hidden text in an earlier part of a message whose later part closes the block
+    const parts = single(
+      "claude-code",
+      ndjson([claudeRec([{ type: "text", text: "HIDDEN_FIRST_PART" }, { type: "text", text: `${INJECTED_MEMORY_CLOSE} KEPT_TAIL` }])]),
+    );
+    const partsOut = JSON.stringify(run(parts.box).residues);
+    assert.equal(partsOut.includes("HIDDEN_FIRST_PART"), false);
+    assert.match(partsOut, /KEPT_TAIL/);
   });
 
   test("M3: a harness tag opened in one text part and closed in the next is removed whole", () => {
@@ -758,9 +775,9 @@ describe("review round 1 regressions (PR #1575)", () => {
     const nested = scrubResidueText(`cfg:\n  token: |\n    ${hidden}\n  description: KEEP_SIBLING\n  retries: 4`);
     assert.equal(nested.includes(hidden), false);
     assert.match(nested, /description: KEEP_SIBLING\n  retries: 4$/);
-    // a stray quote cannot swallow unbounded prose
-    const prose = `password: "unterminated ${"x".repeat(3000)} KEEP_FAR_PROSE "later"`;
-    assert.match(scrubResidueText(prose), /KEEP_FAR_PROSE/);
+    // a long quoted secret is still a secret: the scrub fails toward over-redaction
+    const long = ["Long", "Secret"].join("").repeat(400);
+    assert.equal(scrubResidueText(`api_key="${long}"`).includes("LongSecret"), false);
   });
 
   test("F6: Claude harness entries are excluded per record, for every message the record produced", () => {
@@ -849,6 +866,50 @@ describe("review round 1 regressions (PR #1575)", () => {
     const result = run(old);
     assert.deepEqual(result.report.skipped.map((s) => s.reason), ["TRANSCRIPT_MISSING"]);
     assert.equal(result.candidateCursor.telemetry.offset, fs.statSync(old.telemetryFile).size);
+  });
+
+  test("M7: Claude isMeta and sidechain records Ferry skips never need a source time", () => {
+    const noTime = (extra) => claudeRec("SKIPPED_BY_FERRY", { ...extra, timestamp: undefined });
+    const { box } = single("claude-code", ndjson([claudeRec("REAL_ONE"), noTime({ isMeta: true, uuid: "m" }), noTime({ isSidechain: true, uuid: "s" })]));
+    const result = run(box);
+    assert.equal(result.report.blocked.length, 0);
+    assert.match(JSON.stringify(result.residues), /REAL_ONE/);
+    assert.equal(JSON.stringify(result.residues).includes("SKIPPED_BY_FERRY"), false);
+  });
+
+  test("M8: a missing transcript whose telemetry timestamp is unusable or in the future is a diagnosed hold, never a silent skip", () => {
+    for (const timestamp of [undefined, null, "", "not-a-number", String(NOW + 24 * 60 * 60 * 1000), 0]) {
+      const box = sandbox();
+      appendTelemetry(box, { ...event("claude-code", path.join(box.roots[0], "gone.jsonl")), timestamp });
+      const result = run(box);
+      assert.deepEqual(result.report.blocked.map((b) => b.reason), ["TELEMETRY_BAD_TIMESTAMP"], String(timestamp));
+      assert.equal(result.report.skipped.length, 0, String(timestamp));
+      assert.equal(result.candidateCursor.telemetry.offset, 0, String(timestamp));
+    }
+  });
+
+  test("M1: a touch that changes only the mtime during the read holds the cursor", () => {
+    const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
+    const real = fs.realpathSync.native(file);
+    const { statSync } = cjsFs;
+    let touched = false;
+    cjsFs.statSync = function (target, ...rest) {
+      if (String(target) === real && !touched) {
+        touched = true;
+        fs.utimesSync(real, new Date(), new Date(Date.now() + 5000));
+      }
+      return statSync.call(this, target, ...rest);
+    };
+    syncBuiltinESMExports();
+    let first;
+    try {
+      first = run(box);
+    } finally {
+      cjsFs.statSync = statSync;
+      syncBuiltinESMExports();
+    }
+    assert.equal(touched, true, "the touch hook must have fired");
+    assert.deepEqual(first.report.blocked.map((b) => b.reason), ["TRANSCRIPT_CHANGED_DURING_READ"]);
   });
 
   test("M9: a conversation-shaped record of an unrecognized type is drift; known non-conversation types are not", () => {
