@@ -109,7 +109,7 @@ are pure; there is no clock and no model call.
 
 ### Review items
 
-`runMemoryRouting` does the whole run: it decides each change, records the decisions and the metrics as one serialised unit, then hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`; the key is the decision id, which does not depend on the order of a claim's audience or edges, so a retry is a no-op). Decisions are recorded before anything is queued; if the queue fails, the decisions are already recorded and a retry publishes again with the same keys. `published` lists only items the queue accepted. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
+`runMemoryRouting` does the whole run: it decides each change, records the decisions and the metrics as one serialised unit, then hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`; the key is the decision id, which does not depend on the order of a claim's audiences or edges, so a retry is a no-op). Decisions are recorded before anything is queued; if the queue fails, the decisions are already recorded and a retry publishes again with the same keys. `published` lists only items the queue accepted. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
 a current/proposed pair when the decision names a current claim it conflicts with or
 replaces, otherwise one proposed candidate. Run a Survey `SupportVerifier` against the
 review candidate with `verifyMemoryClaimAgainstCurrent`, so Survey's workbench shows
@@ -193,7 +193,7 @@ Not built here. Per the decision recorded on `kontourai/corpus#40`, a `proposed`
 stored with the store's `proposeCreate` as a pending create proposal. `applyCreate` creates the record
 and needs a reviewer distinct from the proposer, which is where a routed claim's Survey decision lands;
 `rejectCreate` keeps the proposal as rejected with a rationale (the amendment on the issue renamed the
-verbs from `apply` and `reject`). `proposeCreate` is not on corpus `main` (its lane is `feat/40-create-proposals`),
+verbs from `apply` and `reject`). `proposeCreate` is not on corpus `main` (corpus#42, `feat/40-create-proposals`, is open),
 so this Kit does not call it or assume its input shape.
 
 One consequence needs deciding before recall is wired: that decision keeps pending
