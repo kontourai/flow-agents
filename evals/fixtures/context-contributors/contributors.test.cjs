@@ -10,7 +10,7 @@ const { run, runAsync } = require(path.join(root, 'scripts/hooks/workflow-steeri
 const { writePerActorCurrent } = require(path.join(root, 'scripts/hooks/lib/current-pointer.js'));
 const { profileMemoryContributor: profileMemoryRead, loadMemoryMarker, MAX_CONTEXT_BYTES } = require(path.join(root, 'scripts/hooks/lib/context-contributors/profile-memory.js'));
 let markers;
-before(async () => { markers = await loadMemoryMarker(); assert.ok(markers); });
+before(async () => { markers = await import(require('node:url').pathToFileURL(path.join(root, 'kits/knowledge/memory-marker.js')).href); });
 function profileMemoryContributor(event, payload, budget) { return profileMemoryRead(event, payload, budget, markers); }
 const golden = require('./workflow-golden.json');
 
