@@ -30,6 +30,15 @@ const verification = (claim, result, value = claim.value, verifierId = "stub") =
   verdict: result === "abstain" ? { result, abstainReason: "timeout" } : { result },
   createdAt: "2026-11-01T00:00:00.000Z",
 });
+function lateContradiction(supporting) {
+  const claim = make();
+  const supports = Array.from({ length: supporting }, (_, i) => verification(claim, "supported", claim.value, `support-${i}`));
+  for (let i = 0; i < 500; i++) {
+    const contradicting = verification(claim, "contradicted", claim.value, `check-${i}`);
+    if (supports.every(record => record.id < contradicting.id)) return change(claim, { verifications: [...supports, verification(claim, "abstain", claim.value, "gave-up"), contradicting] });
+  }
+  throw new Error("no contradicting record sorts last; widen the search");
+}
 const rulesOf = decision => decision.reasons.map(reason => reason.rule);
 
 // ---------------------------------------------------------------------------
@@ -46,8 +55,10 @@ const RULE_CASES = {
   "contradicted-by-verification": {
     routes: () => { const claim = make({ value: "PostgreSQL 14" }); return change(claim, { verifications: [verification(claim, "contradicted")] }); },
     alsoRoutes: [
-      ["a supported record does not mask a contradiction recorded by another verifier", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "supported"), verification(claim, "contradicted", claim.value, "other-verifier"), verification(claim, "abstain")] }); }],
-      ["the contradiction is last of several records", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "supported", claim.value, "v1"), verification(claim, "supported", claim.value, "v2"), verification(claim, "contradicted", claim.value, "v3")] }); }],
+      // Survey orders applicable records by id, so pick a contradicting record that sorts AFTER the supporting ones:
+      // a rule that only looked at the first record would pass these.
+      ["a supported record does not mask a contradiction recorded by another verifier", () => lateContradiction(1)],
+      ["the contradiction sorts after several supporting records", () => lateContradiction(3)],
     ],
     passes: [
       ["a supported verdict", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "supported")] }); }],
