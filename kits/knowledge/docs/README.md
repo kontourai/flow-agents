@@ -721,8 +721,10 @@ referenced Claude Code project JSONL or Codex rollout. Then it:
 - scrubs the text, cwd, branch and transcript ref deterministically (`scrubResidueText`). Provider
   tokens, JWTs, private keys, URL credentials and secret-named assignments
   become `<SECRET>`, emails become `<EMAIL>`, and home directories become `~`.
-  No model is involved, so transcript text cannot argue its way past the scrub. The scrub fails toward over-redaction and is linear in the
-  input: a quoted secret value is extended over any further secret-named keys
+  No model is involved, so transcript text cannot argue its way past the scrub. Every scrub stage reads the original text and reports edits,
+  and one step applies their union, so no stage can rewrite the syntax another
+  one needs; the result is then scrubbed again until it stops changing. The
+  scrub fails toward over-redaction and is linear in the input: a quoted secret value is extended over any further secret-named keys
   inside it, an unmatched quote redacts to the end of its line, and a
   non-whitespace run longer than 200 characters (base64, minified code) is
   replaced whole with `<BLOB>`. Secret-named keys are
@@ -799,7 +801,9 @@ Ownership boundaries:
 
 Out of scope here: store writes (#670), scheduling or dreaming (#671),
 injection (#672), OpenCode and pi transcripts, and telemetry schema changes.
-Known gaps: the cursor does not drain a rotated telemetry predecessor (a
+Known gaps: a quoted password inside a URL inside another assignment, followed
+by a glued run that holds a further key, may leave that last value (earlier
+scrub designs hid it only as a side effect of their stage order); the cursor does not drain a rotated telemetry predecessor (a
 rotation blocks until an operator resets the cursor); the map of sitting
 hashes is never pruned; the injected-memory filter fails closed, so an
 unterminated opening marker hides the rest of that message (reported as the

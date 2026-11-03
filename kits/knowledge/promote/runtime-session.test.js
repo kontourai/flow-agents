@@ -772,6 +772,12 @@ describe("review round 1 regressions (PR #1575)", () => {
       assert.match(out, /next: kept$/, input);
       assert.equal(scrubResidueText(out), out, "idempotent");
     }
+    // exact output: the body is replaced from the first body line, and nothing else moves
+    assert.equal(scrubResidueText(`token: |\n  ${hidden}\n  ${hidden2}\nnext: kept`), "token: |\n  <SECRET>\nnext: kept");
+    assert.equal(scrubResidueText(`a:\n  token: |\n    ${hidden}\n  b: 1`), "a:\n  token: |\n    <SECRET>\n  b: 1");
+    // a value that is itself a blob is a secret first, a blob only if nothing names it
+    assert.equal(scrubResidueText(`password: ${"A".repeat(250)}`), "password: <SECRET>");
+    assert.equal(scrubResidueText(`note ${"A".repeat(250)} end`), "note <BLOB> end");
     const nested = scrubResidueText(`cfg:\n  token: |\n    ${hidden}\n  description: KEEP_SIBLING\n  retries: 4`);
     assert.equal(nested.includes(hidden), false);
     assert.match(nested, /description: KEEP_SIBLING\n  retries: 4$/);
@@ -906,6 +912,11 @@ describe("review round 1 regressions (PR #1575)", () => {
       "single-quoted URL password": `https://u:'${canary}'@localhost/path`,
       "quoted value nested in an unquoted one": `token=prefix_password="${canary}"`,
       "quoted value nested in a quoted one": `password='token=prefix_password='${canary}''`,
+      "an edit that unhides a URL password": `https://u:token=password='/'"@h/x`,
+      "bearer after a doubled separator": `token==Bearer ${canary}`,
+      "bearer after a blob": `${"A".repeat(250)}=Bearer ${canary}`,
+      "assignment after a blob": `${"A".repeat(250)} api_key=${canary}`,
+      "credential password with an invalid scheme": `1://u:${canary}@h/x`,
       "nbsp between URL parts": `https://u:ab\u00a0token="${canary}"@h/x`,
       "nbsp before a key": `x\u00a0password=${canary}`,
       "ideographic space before a key": `x\u3000token: "${canary}"`,
