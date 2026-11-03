@@ -1071,6 +1071,16 @@ describe("Living Context: review round 3 regressions (#1572)", () => {
     assert.match(entry(open, true), /supersession_ambiguous/, "control: the same graph with a visible edge is ambiguous");
   });
 
+  test("ambiguity is judged only up to the first claim the reader can see", () => {
+    const hidden = { visibility: { audiences: ["auditor"] } };
+    const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [mk("a", edge("v")), mk("v", edge("h")), mk("h", hidden), mk("h", { ...hidden, slot: "other" }), mk("z", {})] });
+    const result = run(repo, revision, { claim_ids: ["a", "v"] });
+    assert.equal(recallOf(result, "a").status, "superseded", "a is superseded by the visible v whatever lies beyond it");
+    assert.equal(recallOf(result, "a").superseded_by, "v");
+    assert.deepEqual(recallOf(result, "v").reasons, ["supersession_ambiguous"], "only v's own chain reaches the ambiguous id");
+    remove(repo);
+  });
+
   test("a hidden duplicate that no visible claim's chain reaches changes nothing, in any position", async () => {
     const hidden = { visibility: { audiences: ["auditor"] } };
     const normalise = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
