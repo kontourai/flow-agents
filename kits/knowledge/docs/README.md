@@ -845,7 +845,10 @@ this requirement. The host protocol is tracked in
 Each candidate is sent through `proposeCreate(candidate, proposerId, evidence,
 { requestKey })`. The opaque key hashes the sitting ID and candidate position; it contains no source text. Replaying the
 same ordered batch returns the original proposal IDs. Changed content or provenance at an
-occupied position is refused as `REQUEST_KEY_CONFLICT`.
+occupied position is refused as `REQUEST_KEY_CONFLICT`. The proposer identity
+is part of the stored request, so changing it at the same sitting and position
+also conflicts rather than creating another proposal. A changed sitting must
+be reconciled by the host; this bridge does not replace earlier proposals.
 The candidate provenance note encodes the session ID, transcript reference,
 and sitting ID pending the structured provenance contract in
 [Corpus #46](https://github.com/kontourai/corpus/issues/46). This is a proposal request, not an approval or an applied
@@ -860,7 +863,11 @@ protocol remains subject to [#753](https://github.com/kontourai/flow-agents/issu
 error from `proposeCreate` carries already returned proposal IDs and the
 failed candidate index. A request-key conflict is surfaced as such; other
 failures have an indeterminate outcome and require an identical retry or
-reconciliation. `write: false` returns `preview` without registering or writing; an empty
+reconciliation. Corpus `MISSING_EVIDENCE` is a definite refusal for the failed
+candidate and is surfaced separately. Returned `posture: "proposed"` names
+the submitted intent; `review_state: "not_observed"` means it is not evidence
+of the current proposal state. Query Corpus before treating a replayed receipt
+as pending, applied or rejected. `write: false` returns `preview` without registering or writing; an empty
 candidate list returns `noop`.
 The create-proposal API and its package release are upstream dependencies.
 

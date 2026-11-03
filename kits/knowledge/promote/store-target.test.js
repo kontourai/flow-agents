@@ -21,7 +21,7 @@ function setup() {
 test('store target registers the host root and passes distilled content and all provenance to Corpus', async () => {
   const { calls, opts } = setup();
   const result = await runPromote(opts);
-  assert.deepEqual(result, { root: 'memory', posture: 'proposed', proposals: ['proposal-1'] });
+  assert.deepEqual(result, { root: 'memory', posture: 'proposed', review_state: 'not_observed', proposals: ['proposal-1'] });
   assert.deepEqual(calls[0], ['register', 'memory', '/authorized/memory']);
   assert.equal(calls.length, 2);
   const [, candidate, proposer, evidence, options] = calls[1];
@@ -44,6 +44,9 @@ test('missing provenance, incomplete sittings and invalid candidates fail before
     { residue: { ...residue, provenance: { ...residue.provenance, harness: 'unknown' } } },
     { residue: { ...residue, turns: [] } },
     { residue: { ...residue, extra: true } },
+    { residue: { ...residue, sittingId: 'codex:another-session:0' } },
+    { candidates: [{ ...candidates[0], tags: ['ignored'] }] },
+    { write: 'false' },
     { candidates: [{ ...candidates[0], body: '' }] },
     { root: 'relative' },
   ]) {
@@ -79,6 +82,9 @@ test('registration failure stops before Corpus; an uncertain proposal failure is
   const third = setup();
   third.opts.store.proposeCreate = async () => { throw Object.assign(new Error('conflict'), { code: 'REQUEST_KEY_CONFLICT' }); };
   await assert.rejects(runPromote(third.opts), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 0);
+  const fourth = setup();
+  fourth.opts.store.proposeCreate = async () => { throw Object.assign(new Error('invalid'), { code: 'MISSING_EVIDENCE' }); };
+  await assert.rejects(runPromote(fourth.opts), (error) => error.code === 'MISSING_EVIDENCE' && /refused/.test(error.message));
 });
 
 
@@ -160,4 +166,19 @@ test('runtime producer output passes the merged residue contract and reaches the
   const { calls, opts } = setup();
   await runPromote({ ...opts, residue: sitting });
   assert.deepEqual(JSON.parse(calls[1][1].provenance.note), { session_id: sitting.provenance.sessionId, transcript_ref: sitting.provenance.transcriptRef, sitting_id: sitting.sittingId });
+});
+
+
+test('request keys separate sittings and positions but exclude candidate content', async () => {
+  const { calls, opts } = setup();
+  await runPromote({ ...opts, candidates: [candidates[0], { ...candidates[0], title: 'Another' }] });
+  const initial = calls.filter((call) => call[0] === 'propose').map((call) => call[4].requestKey);
+  assert.notEqual(initial[0], initial[1], 'positions must use different keys');
+  calls.length = 0;
+  await runPromote({ ...opts, candidates: [{ ...candidates[0], body: 'Changed' }] });
+  assert.equal(calls[1][4].requestKey, initial[0], 'changed content must conflict at the same key');
+  calls.length = 0;
+  const anotherSitting = { ...residue, sittingId: residue.sittingId.replace(/:0$/, ':1') };
+  await runPromote({ ...opts, residue: anotherSitting });
+  assert.notEqual(calls[1][4].requestKey, initial[0], 'different sittings must use different keys');
 });
