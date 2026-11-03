@@ -64,3 +64,12 @@ test('registry and memory contributor perform no network or child process calls'
  const seen=[]; const result=createContributorRegistry([() => {throw Error('failure');}, (e,p,b) => {seen.push([e,p,b]); return {priority:1,text:'A'};}, () => ({priority:2,text:'B'}), () => ({priority:1,text:'C'})])('SessionStart',{x:1},123);
  assert.equal(result,'BAC'); assert.deepEqual(seen,[['SessionStart',{x:1},123]]);
 });
+
+test('marker resolves when the bundle root itself is named context', t => {
+ const { temp } = setup(t); const bundle=path.join(temp,'context');
+ for (const file of ['scripts/package.json','scripts/hooks/lib/hook-flags.js','scripts/hooks/lib/context-contributors/profile-memory.js','kits/knowledge/memory-marker.js']) {
+  const dest=path.join(bundle,file); fs.mkdirSync(path.dirname(dest),{recursive:true}); fs.copyFileSync(path.join(root,file),dest);
+ }
+ const profile=require(path.join(bundle,'scripts/hooks/lib/context-contributors/profile-memory.js'));
+ assert.match(profile.profileMemoryContributor('SessionStart',{},8192).text,/violet kestrel/);
+});

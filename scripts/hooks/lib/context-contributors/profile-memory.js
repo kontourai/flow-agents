@@ -4,7 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { isHookEnabled } = require('../hook-flags');
 const bundleRoot = path.resolve(__dirname, '../../../..');
-const packageRoot = path.basename(bundleRoot) === 'context' ? path.dirname(bundleRoot) : bundleRoot;
+const packageRoot = fs.existsSync(path.join(bundleRoot, 'kits/knowledge/memory-marker.js')) ? bundleRoot : path.dirname(bundleRoot);
 const { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE } = require(path.join(packageRoot, 'kits/knowledge/memory-marker.js'));
 
 const MAX_BRIEF_BYTES = 32768;
