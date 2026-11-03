@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,6 +91,25 @@ test("standalone Knowledge projection accepts ordinary erasure-capable Surface a
     rmSync(publicName);
     symlinkSync(packageRoot("@kontourai/surface"), publicName, "junction");
     result = run(false);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+
+    // A present alias with a missing transitive dependency is broken, not an
+    // absent alias. Even with ordinary Surface 6 installed, preserve its error.
+    rmSync(publicName);
+    symlinkSync(packageRoot("@kontourai/surface-knowledge"), publicName, "junction");
+    const alias = join(scope, "surface-knowledge");
+    mkdirSync(alias);
+    writeFileSync(join(alias, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
+    writeFileSync(join(alias, "index.js"), 'import "flow-agents-missing-surface-test-dependency";\n');
+    const brokenProgram = `
+      import assert from "node:assert/strict";
+      import { pathToFileURL } from "node:url";
+      const { buildKnowledgeTrustBundle } = await import(pathToFileURL(process.argv[1]));
+      await assert.rejects(() => buildKnowledgeTrustBundle({ store: { readGraph: async () => ({ nodes: [], edges: [] }) } }),
+        (error) => error.code === "ERR_MODULE_NOT_FOUND" && error.message.includes("'flow-agents-missing-surface-test-dependency'"));
+    `;
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
+    result = spawnSync(process.execPath, ["--input-type=module", "-e", brokenProgram, adapter], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
