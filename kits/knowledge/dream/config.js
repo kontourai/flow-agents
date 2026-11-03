@@ -77,7 +77,13 @@ const trustedOwner = (stat, uid) => uid === null || stat.uid === uid || stat.uid
 export function assertOwnerControlledFile(file, label) {
   assertAbsolute(file, label);
   const resolved = path.resolve(file);
-  if (fs.realpathSync(resolved) !== resolved) throw dreamError("DREAM_CONFIG_INVALID", `${label} path must not contain a symlink`);
+  let real;
+  try {
+    real = fs.realpathSync(resolved);
+  } catch {
+    throw dreamError("DREAM_CONFIG_INVALID", `${label} cannot be read: no such file`);
+  }
+  if (real !== resolved) throw dreamError("DREAM_CONFIG_INVALID", `${label} path must not contain a symlink`);
   const uid = typeof process.getuid === "function" ? process.getuid() : null;
   const stat = fs.lstatSync(resolved);
   if (!stat.isFile()) throw dreamError("DREAM_CONFIG_INVALID", `${label} must be a regular file`);

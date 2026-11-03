@@ -58,6 +58,11 @@ export async function createRelayExtractionProvider({ runtime, maxTokens = 2048,
       if (call.input === null || typeof call.input !== "object" || !Array.isArray(call.input.proposals)) {
         throw new ModelInvocationError("RUNTIME_FAILURE", "provider returned a malformed extraction tool input", false);
       }
+      // Traverse drops a malformed item into its warnings. If the model delivered items and none survived, the
+      // extraction did not happen, which is a failed pass, not an empty one.
+      if (call.input.proposals.length > 0 && proposals.length === 0) {
+        throw new ModelInvocationError("RUNTIME_FAILURE", "every item in the extraction tool input was malformed", false);
+      }
       return {
         proposals,
         raw: { response: JSON.stringify(call.input), model: result.model, ...(result.usage?.totalTokens === undefined ? {} : { tokensUsed: result.usage.totalTokens }) },

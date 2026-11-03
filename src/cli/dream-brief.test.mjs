@@ -248,6 +248,18 @@ test("end to end: a settlement is bound to its record: pointing a proposal at an
 
 });
 
+test("end to end: a record with no apply-create entry naming the proposal is not that proposal's record", async (t) => {
+  const { ws, store, host } = await ran();
+  t.after(ws.cleanup);
+  const [first] = await store.listProposals();
+  const recordId = await store.applyCreate(first.id, "a-human-reviewer");
+  store.records.set(recordId, { ...store.records.get(recordId), mutation_log: [{ op: "apply-create", at: NOW_ISO, agent: "a-human-reviewer", evidence: { proposal_id: "some-other-proposal" } }] });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.unverified, 1);
+  store.records.set(recordId, { ...store.records.get(recordId), mutation_log: [] });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.unverified, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, []);
+});
+
 test("end to end: a record whose body is not the proposal's is not that proposal's record", async (t) => {
   const { ws, store, host } = await ran();
   t.after(ws.cleanup);

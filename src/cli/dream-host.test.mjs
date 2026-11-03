@@ -203,6 +203,17 @@ test("config and host trust: a writable config, a writable parent directory and 
   fs.chmodSync(hostDir, 0o700);
 });
 
+test("CLI: a missing host module is a configuration error (exit 2), not a crash", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const config = writeConfig(ws);
+  const parsed = JSON.parse(fs.readFileSync(config, "utf8"));
+  fs.writeFileSync(config, JSON.stringify({ ...parsed, host: path.join(ws.root, "no-such-host.mjs") }), { mode: 0o600 });
+  const err = sink();
+  assert.equal(await main(["run", "--config", config], { stdout: sink(), stderr: err }), 2);
+  assert.match(err.text(), /no such file/);
+});
+
 test("CLI: exit code 75 when another run holds the lock", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
@@ -374,7 +385,7 @@ test("the invocation contract a host scheduler binds to is pinned: ids, exports,
   assert.equal(report.schema_version, "1.0");
   assert.equal(report.trigger, "station-scheduler");
   assert.deepEqual(Object.keys(report.sittings).sort(), ["deferred_incomplete", "deferred_over_cap", "distilled", "resumed", "reused", "seen"]);
-  assert.deepEqual(Object.keys(report.claims).sort(), ["created", "distilled", "rejected", "reused", "routed", "truncated", "uncontested"]);
+  assert.deepEqual(Object.keys(report.claims).sort(), ["created", "distilled", "rejected", "rerouted", "reused", "routed", "truncated", "uncontested"]);
   assert.ok(["success", "noop", "dry-run", "blocked", "failed"].includes(report.status));
   assert.ok(fs.existsSync(path.join(ws.dreamDir, "reports", `${report.run_id}.json`)));
 });

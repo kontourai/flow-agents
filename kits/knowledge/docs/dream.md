@@ -61,11 +61,19 @@ commit (the follow-up report rewrite is best-effort, and the report already on d
 the digest of the cursor it was about to commit). Each earlier step is replay-safe:
 
 - **The plan is the receipt.** Every proposal's body carries the sitting's whole `plan`: the
-  ordered claims the run decided to propose, with their agreement and routing decisions. It
-  is written with the first proposal, so a run that dies partway leaves the plan in the
-  store. The retry reads it back and proposes only what is missing, with no new model call,
-  even if the model would now word everything differently. A sitting whose plan is fully in
-  the store is reused the same way.
+  ordered claims the run decided to propose, with their agreement and project. It is
+  written with the first proposal, so a run that dies partway leaves the plan in the store.
+  The retry reads it back and proposes only what is missing, with no new model call, even if
+  the model would now word everything differently. A sitting whose plan is fully in the
+  store is reused the same way. A plan holds at most 32 claims and 192 KiB; the run keeps
+  the first by claim id that fit and counts the rest in `claims.truncated`.
+- **Routing is decided now, not then.** The plan holds no routing decision, because a
+  decision depends on what else is in the store and on the policy in force. Each proposal
+  carries the decision made when it was proposed; a resumed or reused plan is routed again
+  against today's claims, policy and visibility, the run acts on that (review items,
+  `publish`, metrics), and `claims.rerouted` counts the claims whose outcome changed. A plan
+  is keyed by the visibility it was made under, because visibility is part of a claim's
+  identity: changing it starts a new plan and a new extraction.
 - A claim already proposed, in any state, is reused by its claim id. A rejected proposal
   stays rejected and is not proposed again.
 - **Corrupt or forged receipts stop the run.** A proposal by this proposer that does not
@@ -87,7 +95,11 @@ the digest of the cursor it was about to commit). Each earlier step is replay-sa
 
 **Why the lock is small.** `dream.lock` is mutual exclusion and nothing more: the file is
 hard-linked into place whole, so no reader sees a half-written lock, and an owner is stale
-only when its process is gone. `@kontourai/monument` owns idempotency keys, dedup,
+only when its process is gone (a live pid is never evicted for being old, so a reused pid
+can delay recovery until that process exits). Taking over a stale lock is serialized by a
+second exclusive file, `dream.lock.takeover`: the taker re-reads the lock while holding it
+and removes it only if it is still the exact owner it judged stale, and a taker that loses
+any race gives way. Failing to remove the lock at the end never fails a finished run. `@kontourai/monument` owns idempotency keys, dedup,
 record-before-effect and owner liveness, and it is `private: true` in the Station
 workspace, so this repository cannot consume it. The cursor, Corpus proposals and the lock
 are the only durable state. Adopting Monument later replaces the lock and the
@@ -165,10 +177,17 @@ pinned by `src/cli/dream-host.test.mjs`, so changing it breaks a test.
 | Library call | `runDream(host, options)`, exported from `kits/knowledge/dream/index.js`; resolves to the run report |
 | Command | `node kits/knowledge/dream/cli.js run --config <abs> [--dry-run] [--trigger NAME]`; prints the report as one JSON line |
 | Exit codes | 0 ran (success, noop, dry-run), 1 failed, 2 disabled or misconfigured, 3 blocked telemetry, 75 another run holds the lock |
-| Report | `schema_version: "1.0"`, written to `<dreamDir>/reports/<run_id>.json`; `status` is `success`, `noop`, `dry-run`, `blocked` or `failed` |
+| Report | `schema_version: "1.0"`; `status` is `success`, `noop`, `dry-run`, `blocked` or `failed`. A real run writes it to `<dreamDir>/reports/<run_id>.json`; a dry run returns it and writes no file |
 | Stage names | `ingest`, `distill`, `route`, `propose`, `receipt`, `publish`, `brief`, `report`, `cursor` (passed to `options.onStage`) |
 
 `options.trigger` is recorded in the report and nothing else, so a scheduler can name itself.
+
+Details a binding must respect:
+
+- **The host.** Called as a library, the host must supply `extract`; only the CLI builds one from a Datum role. A real run also needs `publish`.
+- **Where failures surface.** A run that fails after it has started throws with `error.report` attached and, from the CLI, prints that report. Failures before it starts (disabled, locked, misconfigured, host module missing or untrusted) carry an error `code` and no report: from the CLI they exit 2, except a held lock, which exits 75.
+- **Reading a `success` report.** The report on disk is written before the cursor is committed and names it (`cursor.commit_intent`, `digest`, `offset`). `cursor.committed` is true in the returned report and, when the follow-up rewrite succeeds, on disk. If the process died between the two, the report says `success` and the cursor did not move. A consumer reconciles by comparing `cursor.digest` with the cursor file; the file is the authority.
+- **Stable, additive.** Report fields are added, never renamed or removed, within `schema_version` 1.0. The test pins the current key sets, so adding one is a deliberate edit.
 
 ## Turning it on
 

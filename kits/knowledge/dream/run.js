@@ -36,7 +36,7 @@ import {
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, isSealed, writeBriefs } from "./brief.js";
-import { MAX_CLAIMS_PER_SITTING, indexProposals, verifyEntry } from "./envelope.js";
+import { fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
 import { acquireDreamLock } from "./lock.js";
 import { proposeSitting } from "./propose.js";
 import { assertAbsolute, dreamError, projectFromCwd, sha256, writePrivateAtomic } from "./util.js";
@@ -78,7 +78,7 @@ function narrowStore(store) {
  * is the one Corpus made from it: the record's `apply-create` entry names this proposal and the record's body is the
  * proposal's. A settlement that points at some other record, or at none, is not trusted.
  */
-async function briefItems(store, index, proposerId) {
+async function briefItems(store, index, proposerId, route) {
   const items = [];
   const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0 };
   for (const { proposal, envelope } of index.byClaim.values()) {
@@ -109,7 +109,9 @@ async function briefItems(store, index, proposerId) {
         continue;
       }
     }
-    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, state: proposal.state, routing: envelope.decision });
+    // A pending claim's stored decision is from when it was proposed; what other claims exist now may route it.
+    const routing = proposal.state === "pending" ? route(envelope.claim, envelope.agreement) : envelope.decision;
+    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, state: proposal.state, routing });
   }
   return { items, excluded };
 }
@@ -200,7 +202,7 @@ export async function runDream(host, options = {}) {
     started_at: now(),
     ingest: null,
     sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
-    claims: { distilled: 0, rejected: 0, truncated: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
+    claims: { distilled: 0, rejected: 0, truncated: 0, rerouted: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
     review_items: 0,
     unreadable_proposals: 0,
@@ -257,13 +259,19 @@ export async function runDream(host, options = {}) {
     const reviewDecisions = (await host.reviewDecisions?.()) ?? [];
     const decisions = [];
     const processed = new Set();
+    const vKey = visibilityKey(options.visibility);
+    const policy = options.routingPolicy ?? DEFAULT_MEMORY_ROUTING_POLICY;
+    const route = (claim, agreement, withIndex = index) => {
+      const current = [...withIndex.byClaim.values()].filter(({ proposal }) => proposal.state !== "rejected").map(({ envelope }) => envelope.claim);
+      return routeMemoryChange({ type: "claim", claim, current, agreement, sourceVisibility: options.visibility ?? null }, policy);
+    };
 
     if (dryRun) {
       report.would_distill = selected.map((residue) => residue.sittingId);
     }
 
     for (const residue of dryRun ? [] : selected) {
-      const known = index.sitting(residue.sittingId, residue.contentHash);
+      const known = index.sitting(residue.sittingId, residue.contentHash, vKey);
       let plan;
       if (known) {
         // An earlier attempt already decided this sitting's claims. Resume that plan: asking the model again would
@@ -281,19 +289,25 @@ export async function runDream(host, options = {}) {
         report.claims.rejected += distilled.rejected.length;
 
         await stage("route");
-        const current = [...index.byClaim.values()].filter(({ proposal }) => proposal.state !== "rejected").map(({ envelope }) => envelope.claim);
         const project = projectFromCwd(residue.provenance?.cwd ?? null);
         const ordered = [...distilled.claims].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-        // Read max + 1 and refuse: a silent cut would drop claims the report never mentions.
-        report.claims.truncated += Math.max(0, ordered.length - MAX_CLAIMS_PER_SITTING);
-        plan = ordered.slice(0, MAX_CLAIMS_PER_SITTING).map((claim) => {
-          const agreement = distilled.agreement[claim.id] ?? null;
-          return { claim, agreement, decision: routeMemoryChange({ type: "claim", claim, current, agreement, sourceVisibility: options.visibility ?? null }, options.routingPolicy ?? DEFAULT_MEMORY_ROUTING_POLICY), project };
-        });
+        const fitted = fitPlan(ordered.map((claim) => ({ claim, agreement: distilled.agreement[claim.id] ?? null, project })));
+        plan = fitted.plan;
+        report.claims.truncated += fitted.dropped; // reported, never silent
         report.claims.distilled += plan.length;
       }
+      // The plan is what was drafted and stays as written. The decisions the run acts on are made now, against the
+      // claims, policy and visibility in force now, so a resumed plan may route differently from when it was drafted.
+      const decided = plan.map((entry) => ({ ...entry, decision: route(entry.claim, entry.agreement, index) }));
+      if (known) {
+        report.claims.rerouted += decided.filter((entry) => {
+          const before = index.byClaim.get(entry.claim.id)?.envelope.decision;
+          return before && before.outcome !== entry.decision.outcome;
+        }).length;
+      }
+
       await stage("propose");
-      const result = await proposeSitting({ residue, plan, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true })
+      const result = await proposeSitting({ residue, plan, decisions: decided.map((entry) => entry.decision), visibilityKey: vKey, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true })
         .catch((error) => {
           // What landed before the failure is real, and the report must say so.
           for (const landed of error.dreamLanded ?? []) report.receipts.push({ claim_id: landed.claimId, proposal_id: landed.proposalId, disposition: "created", state: "pending", sitting_id: residue.sittingId, outcome: null });
@@ -301,7 +315,7 @@ export async function runDream(host, options = {}) {
           throw error;
         });
       // Account for the store's change before anything else can fail.
-      const outcomes = new Map(plan.map((entry) => [entry.claim.id, entry.decision.outcome]));
+      const outcomes = new Map(decided.map((entry) => [entry.claim.id, entry.decision.outcome]));
       for (const item of result.created) report.receipts.push({ claim_id: item.claimId, proposal_id: item.proposalId, disposition: "created", state: "pending", sitting_id: residue.sittingId, outcome: outcomes.get(item.claimId) });
       for (const item of result.reused) report.receipts.push({ claim_id: item.claimId, proposal_id: item.proposalId, disposition: "reused", state: item.state, sitting_id: residue.sittingId, outcome: outcomes.get(item.claimId) });
       report.claims.created += result.created.length;
@@ -309,7 +323,7 @@ export async function runDream(host, options = {}) {
       if (!known) report.sittings.distilled += 1;
       else if (known.complete) report.sittings.reused += 1;
       else report.sittings.resumed += 1;
-      decisions.push(...plan.map((entry) => entry.decision));
+      decisions.push(...decided.map((entry) => entry.decision));
       processed.add(residue.sittingId);
       await stage("receipt");
       // The next sitting routes against, and reconciles with, what this one just proposed.
@@ -327,7 +341,8 @@ export async function runDream(host, options = {}) {
 
     // Briefs derive from the store every run, because review changes them without any new telemetry.
     await stage("brief");
-    const { items, excluded } = await briefItems(store, indexProposals(await store.listProposals(), proposerId), proposerId);
+    const latest = indexProposals(await store.listProposals(), proposerId);
+    const { items, excluded } = await briefItems(store, latest, proposerId, (claim, agreement) => route(claim, agreement, latest));
     const written = writeBriefs({
       briefsDir,
       items,
@@ -402,6 +417,11 @@ export async function runDream(host, options = {}) {
     }
     throw Object.assign(error, { report });
   } finally {
-    release();
+    try {
+      release();
+    } catch {
+      // Failing to remove the lock must not turn a finished run into a failed one. The lock names this process, so
+      // it goes stale the moment the process exits.
+    }
   }
 }

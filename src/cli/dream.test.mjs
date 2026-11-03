@@ -527,10 +527,8 @@ test("a stored routing decision that was edited and re-sealed is still refused: 
   fs.rmSync(ws.cursorFile);
   const [first] = await store.listProposals();
   const body = JSON.parse(first.candidate.body);
-  // An attacker who knows the format keeps every digest consistent and only changes the outcome.
+  // The decision sits outside the plan digest, so an attacker only has to change the outcome.
   body.decision = { ...body.decision, outcome: "routed" };
-  body.plan[body.sitting.index] = { claim: body.claim, agreement: body.agreement, decision: body.decision, project: body.project };
-  body.sitting.planDigest = planDigest(body.plan);
   fs.writeFileSync(`${store.dir}/${first.id}.json`, JSON.stringify({ ...first, candidate: { ...first.candidate, body: JSON.stringify(body) } }));
   await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.code === "DREAM_RECEIPT_CORRUPT" && error.proposalId === first.id);
 });
@@ -545,4 +543,119 @@ test("a sitting that yields more than 32 claims proposes 32 and counts the rest"
   assert.equal((await store.listProposals()).length, 32);
   assert.equal(report.claims.truncated, 8);
   assert.equal(report.claims.distilled, 32);
+});
+
+test("lock: a takeover that loses to another takeover gives way, and never removes the winner's live lock", (t) => {
+  const dir = tempDir("dream-lock-takeover-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "dream.lock");
+  fs.writeFileSync(file, JSON.stringify({ pid: 2 ** 22 + 1, started_at: 1, token: "dead-owner" }));
+
+  // A has judged the dead owner stale and is about to take the takeover guard. B completes a whole takeover first.
+  const original = fs.openSync;
+  let b;
+  let inside = false;
+  fs.openSync = (target, ...rest) => {
+    if (!inside && String(target).endsWith(".takeover")) {
+      inside = true;
+      try { b = acquireDreamLock(file); } finally { inside = false; }
+    }
+    return original(target, ...rest);
+  };
+  syncBuiltinESMExports();
+  let aError;
+  try { acquireDreamLock(file); } catch (error) { aError = error; } finally { fs.openSync = original; syncBuiltinESMExports(); }
+  assert.equal(typeof b, "function", "B took over the dead owner's lock");
+  assert.equal(aError?.code, "DREAM_LOCKED", "A saw that the lock had changed hands and gave way");
+  const owner = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.notEqual(owner.token, "dead-owner");
+  assert.equal(owner.pid, process.pid, "B's lock is still in place");
+  assert.throws(() => acquireDreamLock(file), (error) => error.code === "DREAM_LOCKED", "and C cannot get in beside B");
+  b();
+  assert.equal(fs.existsSync(file), false);
+});
+
+test("lock: debris from a crashed takeover or install does not wedge it", (t) => {
+  const dir = tempDir("dream-lock-debris-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "dream.lock");
+  fs.writeFileSync(file, JSON.stringify({ pid: 2 ** 22 + 1, started_at: 1, token: "dead" }));
+  fs.writeFileSync(`${file}.takeover`, JSON.stringify({ pid: 2 ** 22 + 2, started_at: 1 }));
+  fs.writeFileSync(`${file}.99.abc.tmp`, "{");
+  fs.writeFileSync(`${file}.stale.xyz`, "{");
+  const release = acquireDreamLock(file);
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).pid, process.pid);
+  release();
+});
+
+test("a delivered extraction whose every item is malformed fails the pass: it is not an empty sitting", async (t) => {
+  const { FakeModelRuntime } = await import("@kontourai/relay");
+  const { extractForRuntime } = await import("../../kits/knowledge/dream/model.js");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const bad = () => ({ provider: "fake", model: "m", outputText: "", toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: { proposals: [{ foo: "bar" }] } }], usage: {}, latencyMs: 1, stopReason: "tool_use" });
+  const host = hostFor(ws, noApplyStore(new FakeCorpusStore(ws.memoryRoot)), await extractForRuntime(new FakeModelRuntime(Array.from({ length: 8 }, bad))));
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.code === "DREAM_DISTILL_FAILED");
+  assert.equal(fs.existsSync(ws.cursorFile), false);
+});
+
+test("a lock that cannot be removed after the cursor commits does not turn a finished run into a failed one", async (t) => {
+  const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  t.after(ws.cleanup);
+  const original = fs.rmSync;
+  fs.rmSync = (target, ...rest) => {
+    if (String(target).endsWith("dream.lock")) throw Object.assign(new Error("EIO"), { code: "EIO" });
+    return original(target, ...rest);
+  };
+  syncBuiltinESMExports();
+  let report;
+  try { report = await runDream(host, runOptions(ws)); } finally { fs.rmSync = original; syncBuiltinESMExports(); }
+  assert.equal(report.status, "success");
+  assert.equal(report.cursor.committed, true);
+  assert.ok(fs.existsSync(ws.cursorFile));
+  fs.rmSync(path.join(ws.dreamDir, "dream.lock"), { force: true });
+});
+
+test("a resumed plan is routed against the claims, policy and visibility in force now, not when it was drafted", async (t) => {
+  const two = (content) => (content.includes("banker's rounding")
+    ? ["alpha", "beta"].map((name) => ({ quote: "I switched to banker's rounding on the total.", subject: "svc shared", subjectType: "service", property: `mode ${name}`, value: name, posture: "stated" }))
+    : []);
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
+  t.after(ws.cleanup);
+  store.failProposeCreate(1);
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  const [landed] = await store.listProposals();
+  assert.equal(JSON.parse(landed.candidate.body).decision.outcome, "proposed", "when it was drafted nothing conflicted");
+
+  // Meanwhile another claim lands in the same slot with a different value.
+  const rival = JSON.parse(landed.candidate.body).claim;
+  const { memoryClaim } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const { id: _id, schema_version: _v, ...fields } = rival;
+  const other = memoryClaim({ ...fields, value: "a different value", source: { ...rival.source, locator: "chars:0-1", excerpt: "x" } });
+  const { encodeEnvelope } = await import("../../kits/knowledge/dream/envelope.js");
+  const { routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const entry = { claim: other, agreement: { passes: 2, agreeing: 2 }, project: null };
+  const decision = routeMemoryChange({ type: "claim", claim: other, current: [], agreement: { passes: 2, agreeing: 2 }, sourceVisibility: { kind: "restricted", audiences: ["user:owner"] } });
+  await store.proposeCreate({ title: "rival", category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: "elsewhere:1", contentHash: "sha256:x", visibilityKey: "k" } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+
+  host.published.length = 0;
+  const retry = await runDream(host, runOptions(ws));
+  assert.equal(retry.sittings.resumed, 1);
+  assert.equal(retry.claims.rerouted, 1, "the landed claim now conflicts with the rival");
+  assert.equal(retry.review_items, 1);
+  assert.equal(host.published.at(-1).reviewItems.length, 1, "and the reviewer is told");
+  assert.equal(JSON.parse((await store.listProposals())[0].candidate.body).decision.outcome, "proposed", "the stored plan is untouched");
+});
+
+test("a plan is bounded in bytes as well as claims: oversize claims are left out and counted, not stored", async (t) => {
+  const big = (content) => (content.includes("banker's rounding")
+    ? ["a", "b", "c"].map((name) => ({ quote: "I switched to banker's rounding on the total.", subject: `svc ${name}`, subjectType: "service", property: "blob", value: `${name}${"x".repeat(100 * 1024)}`, posture: "stated" }))
+    : []);
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: big } });
+  t.after(ws.cleanup);
+  const report = await runDream(host, runOptions(ws));
+  const proposals = await store.listProposals();
+  assert.ok(proposals.length < 3 && proposals.length >= 1);
+  assert.equal(report.claims.truncated, 3 - proposals.length);
+  for (const proposal of proposals) assert.ok(Buffer.byteLength(proposal.candidate.body) <= 512 * 1024);
 });

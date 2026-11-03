@@ -22,17 +22,19 @@ import { dreamError } from "./util.js";
  * @param {object} options
  * @param {object} options.residue complete runtime-session residue (#669)
  * @param {import("./envelope.js").PlanEntry[]} options.plan the sitting's whole plan, in order
+ * @param {object[]} options.decisions the routing decision for each plan entry, made now
+ * @param {string} options.visibilityKey the visibility the plan was made under
  * @param {{store: object, registerRoot: Function, root: string, rootName: string}} options.host
  * @param {string} options.proposerId
  * @param {ReturnType<typeof indexProposals>} options.index proposals already in the store
  * @param {boolean} options.write false previews the candidates and writes nothing
  * @returns {Promise<{created: object[], reused: object[], preview: object[]}>}
  */
-export async function proposeSitting({ residue, plan, host, proposerId, index, write }) {
+export async function proposeSitting({ residue, plan, decisions, visibilityKey, host, proposerId, index, write }) {
   const created = [];
   const reused = [];
   const fresh = [];
-  const sitting = { id: residue.sittingId, contentHash: residue.contentHash };
+  const sitting = { id: residue.sittingId, contentHash: residue.contentHash, visibilityKey };
   plan.forEach((entry, position) => {
     const known = index.byClaim.get(entry.claim.id);
     if (known) {
@@ -50,7 +52,7 @@ export async function proposeSitting({ residue, plan, host, proposerId, index, w
   const candidates = fresh.map(({ position }) => ({
     title: titleFor(plan[position].claim),
     category: MEMORY_CATEGORY,
-    body: encodeEnvelope({ plan, index: position, sitting }),
+    body: encodeEnvelope({ plan, index: position, decision: decisions[position], sitting }),
   }));
 
   if (!write) return { created, reused, preview: candidates.map((candidate, i) => ({ ...candidate, claimId: fresh[i].entry.claim.id })) };
