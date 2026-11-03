@@ -910,6 +910,8 @@ test("a verification record is bounded: a record padded past a claim's worth of 
   const claim = make({ value: "PostgreSQL 16" });
   const genuine = verification(claim, "supported");
   assert.doesNotThrow(() => routeMemoryChange(change(claim, { verifications: [genuine], accumulation: null })));
+  // The bound is a claim's worth of values plus the record's own fields: a record a little past a bare claim's bound is not refused.
+  assert.doesNotThrow(() => routeMemoryChange(change(claim, { verifications: [{ ...genuine, padding: Array.from({ length: 21_000 }, (_, i) => i) }], accumulation: null })), "21,000 values");
   const padded = { ...genuine, padding: Array.from({ length: 25_000 }, (_, i) => i) };
   assert.throws(() => routeMemoryChange(change(claim, { verifications: [padded], accumulation: null })), /routing change verifications\[0\].*too large/);
 });

@@ -724,6 +724,11 @@ test("a second record that reuses a decision's id with a wrong outcome is checke
   await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [wrong] });
   await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd) }), /does not recompute/);
   await assert.rejects(runMemoryRouting({ ...where(cwd), changes: MORE() }), /does not recompute/, "and nothing more is recorded on top of it");
+  // New review state sent alongside is not recorded either: the request is refused before it writes, not after.
+  const reviewCount = async () => (await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === MEMORY_REVIEW_EVIDENCE_KIND).length;
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(0, 2) }), /does not recompute/);
+  assert.equal(await reviewCount(), 0, "no review record was left behind a refused refresh");
+  assert.equal((await readMemoryRoutingDecisions("run-1", cwd)).length, 3, "and no decision either");
   const report = await recomputeRecordedMemoryRouting("run-1", cwd);
   assert.deepEqual(report.mismatches.map(item => item.decisionId), [decisions[1].id], "the report names the bad payload even though its id was seen");
   assert.equal(report.decisions, 3);
@@ -745,10 +750,13 @@ test("a run with bad stored routing evidence is recovered by superseding it, and
   await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: ["no-such-record"], decisions }), /not live routing records/);
   await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [bad.id], decisions: [{ ...decisions[1], outcome: "proposed", reasons: [] }] }), /does not recompute/, "the replacement is held to the same rule");
   await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [], decisions }), /name the live routing records/);
-  const fixed = await supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [bad.id], decisions: [] });
+  // A record of another run is bad evidence too, and is recovered the same way; a superseded one no longer blocks.
+  const foreign = await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-2", decisions: [decisions[0]] }, "foreign.json");
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd) }), /does not recompute|another run/);
+  const fixed = await supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [bad.id, foreign.id], decisions: [] });
   assert.ok(fixed.id);
   const stored = await readMemoryRoutingEvidence("run-1", cwd);
-  assert.deepEqual(stored.map(entry => [entry.evidenceId, entry.superseded]), [[first.id, false], [bad.id, true], [fixed.id, false]], "the bad record is still there, superseded");
+  assert.deepEqual(stored.map(entry => [entry.evidenceId, entry.superseded]), [[first.id, false], [bad.id, true], [foreign.id, true], [fixed.id, false]], "the bad records are still there, superseded");
   assert.deepEqual((await recomputeRecordedMemoryRouting("run-1", cwd)).mismatches, [], "the report reads the live records");
   await refreshMemoryRunMetrics({ ...where(cwd) });
   assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 3);
