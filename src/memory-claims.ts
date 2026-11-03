@@ -127,7 +127,8 @@ export function memoryInstant(value: string | undefined): number | undefined {
   if (!Number.isFinite(ms)) return undefined;
   // Date.parse rolls 2026-02-30 over to March 2. Refuse a date that is not on the calendar instead.
   const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  const calendar = new Date(Date.UTC(year, month - 1, day));
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(year, month - 1, day); // Date.UTC would read years 0-99 as 1900-1999
   return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 && calendar.getUTCDate() === day ? ms : undefined;
 }
 
@@ -258,8 +259,9 @@ function assemble(fields: Record<string, ExtractionProposalLike>, context: Assem
   for (const [name, key] of [["validFrom", "from"], ["validUntil", "until"]] as const) {
     const raw = text(name);
     if (raw === undefined) continue;
-    if (memoryInstant(raw) === undefined) throw new MemoryClaimError("invalid", `${name} is not an ISO 8601 instant`);
-    validTime[key] = raw;
+    const instant = memoryInstant(raw);
+    if (instant === undefined) throw new MemoryClaimError("invalid", `${name} is not an ISO 8601 instant`);
+    validTime[key] = new Date(instant).toISOString(); // `...T00:00Z` and `...T00:00+00:00` are one instant, so one claim
   }
   const hasTime = validTime.from !== undefined || validTime.until !== undefined;
   if (hasTime) memoryIntervalsOverlap(validTime, undefined);

@@ -219,7 +219,7 @@
   ],
   "sitting1": [
     {
-      "changeId": "sha256:617ce42d6d78ff4cdf638e8dd2acb5f987e7008c26b1732b8eb63120c8ff37f1",
+      "changeId": "sha256:9cba6934d5916821fe5fa9cc2ed8475ecbb2f9c5e902cd2f62ad3d3272bb6de7",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -228,7 +228,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:45e4f1d10e5dffb1b38d38106ddd1f4cd3b30df4ecc210f771ac42fc72203f63",
+      "id": "sha256:8c4495172953ee6e746d70d27063c4458de806299187e8a162406a8882a1608d",
       "input": {
         "agreement": {
           "agreeing": 2,
@@ -248,7 +248,7 @@
         ],
         "claim": {
           "claimType": "knowledge.memory-claim",
-          "id": "sha256:617ce42d6d78ff4cdf638e8dd2acb5f987e7008c26b1732b8eb63120c8ff37f1",
+          "id": "sha256:9cba6934d5916821fe5fa9cc2ed8475ecbb2f9c5e902cd2f62ad3d3272bb6de7",
           "posture": "stated",
           "property": "primary database",
           "schema_version": "1.0",
@@ -274,7 +274,7 @@
             }
           ],
           "validTime": {
-            "from": "2026-10-30"
+            "from": "2026-10-30T00:00:00.000Z"
           },
           "value": "PostgreSQL 16"
         },

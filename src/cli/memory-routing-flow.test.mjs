@@ -7,8 +7,10 @@ import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
 import { deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import {
   MEMORY_METRICS_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence,
-  readLatestMemoryMetrics, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
+  readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from "@kontourai/flow-agents/memory-routing-flow";
+import { attachEvidence } from "@kontourai/flow";
+import { buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 import { loadEntityProposals } from "./memory-claims-support.mjs";
 
@@ -182,4 +184,92 @@ test("refreshing metrics after review supersedes the earlier figures and reads t
   assert.equal(before.reviewer.decisions, 0);
   const second = await refreshMemoryRunMetrics({ ...where(cwd) });
   assert.equal(second.id, run.metrics.id, "nothing changed, so nothing new is recorded");
+});
+
+// --- review round: the orchestration around the evidence --------------------------------------------------------
+
+const MORE = () => {
+  const claim = make({ property: "retry budget", value: "5 attempts per request", source: { ...base.source, ref: "claude-code:s:2" } });
+  return [{ type: "claim", claim, agreement: { passes: 2, agreeing: 1 } }];
+};
+
+/** A real Survey rejection of the first routed item, with its dwell: selected, then submitted `seconds` later. */
+function rejection(item, seconds) {
+  const session = { ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "reject-proposed" } };
+  const start = Date.parse("2026-11-02T10:00:00.000Z");
+  const reviewEvents = buildReviewSessionEvents(session, "session-1").map(event => ({ ...event, spec: { ...event.spec, occurredAt: new Date(event.spec.eventType === "decision-submitted" ? start + seconds * 1000 : start).toISOString() } }));
+  return { reviewDecisions: buildReviewDecisionsFromSession(session), reviewEvents };
+}
+
+test("a refresh racing a new batch never leaves metrics describing fewer decisions than are recorded", async t => {
+  const cwd = await workspace(t);
+  await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  await Promise.all([refreshMemoryRunMetrics({ ...where(cwd) }), runMemoryRouting({ ...where(cwd), changes: MORE() }), refreshMemoryRunMetrics({ ...where(cwd) })]);
+  const recorded = (await readMemoryRoutingDecisions("run-1", cwd)).length;
+  assert.equal(recorded, 4);
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, recorded);
+});
+
+test("retrying a run that already completed review does not erase the review figures", async t => {
+  const cwd = await workspace(t);
+  const first = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const review = rejection(first.items[0], 10);
+  await refreshMemoryRunMetrics({ ...where(cwd), ...review });
+  const reviewed = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.deepEqual([reviewed.reviewer.rejected, reviewed.reviewer.defectsCaught, reviewed.reviewSeconds], [1, 1, 10]);
+
+  const retried = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const after = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.deepEqual(after, reviewed, "an identical retry leaves the review figures alone");
+  assert.equal(retried.metrics.id, (await readLatestMemoryMetrics("run-1", cwd)).evidenceId);
+  // A host that passes the review state to date gets figures that include it.
+  await runMemoryRouting({ ...where(cwd), changes: MORE(), ...review });
+  const withMore = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.deepEqual([withMore.decisions, withMore.reviewer.rejected, withMore.reviewSeconds], [4, 1, 10]);
+});
+
+test("review state is recorded once: passing what is already recorded adds no evidence", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const review = rejection(run.items[0], 5);
+  const count = async () => (await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === "memory.review-record").length;
+  await refreshMemoryRunMetrics({ ...where(cwd), ...review });
+  await refreshMemoryRunMetrics({ ...where(cwd), ...review });
+  await runMemoryRouting({ ...where(cwd), changes: CHANGES(), ...review });
+  assert.equal(await count(), 1);
+  assert.deepEqual((await readMemoryReviewRecords("run-1", cwd)).decisions.length, review.reviewDecisions.length);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [{ kind: "Something" }] }), /not a Survey ReviewDecision/);
+});
+
+test("refreshing metrics uses the review state it is given", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  await refreshMemoryRunMetrics({ ...where(cwd), ...rejection(run.items[0], 25) });
+  const metrics = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.deepEqual([metrics.reviewer.decisions, metrics.reviewer.rejected, metrics.reviewer.pending, metrics.reviewSeconds, metrics.reviewSecondsPerCaughtDefect], [1, 1, 1, 25, 25]);
+});
+
+test("the latest metrics are the last live entry, even when a cross-process race left two", async t => {
+  const cwd = await workspace(t);
+  const { metrics } = runOf();
+  const dir = fs.mkdtempSync(path.join(cwd, "raw-"));
+  const rawAttach = async (body, name) => { const file = path.join(dir, name); fs.writeFileSync(file, JSON.stringify(body)); return attachEvidence("run-1", { cwd, gate: "route-gate", file, kind: MEMORY_METRICS_EVIDENCE_KIND }); };
+  const a = await rawAttach({ ...metrics, decisions: 1 }, "a.json");
+  const b = await rawAttach({ ...metrics, decisions: 2 }, "b.json");
+  assert.equal((await readMemoryMetricsEvidence("run-1", cwd)).filter(entry => !entry.superseded).length, 2, "the race is real: two live entries");
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).evidenceId, b.id);
+  assert.notEqual(a.id, b.id);
+});
+
+test("two spellings of one directory are one run: concurrent recordings through an ancestor alias make one entry", async t => {
+  const cwd = await workspace(t);
+  const alias = fs.realpathSync(cwd);
+  if (alias === cwd) { t.skip("this temp directory has no alias (on macOS /var is /private/var)"); return; }
+  const { decisions, metrics } = runOf();
+  const viaBoth = i => where(i % 2 ? alias : cwd);
+  const entries = await Promise.all([0, 1, 2, 3].map(i => recordMemoryRoutingEvidence({ ...viaBoth(i), decisions })));
+  assert.equal(new Set(entries.map(entry => entry.id)).size, 1);
+  await Promise.all([0, 1, 2, 3].map(i => recordMemoryMetricsEvidence({ ...viaBoth(i), metrics: { ...metrics, reviewer: { ...metrics.reviewer, pending: i } } })));
+  assert.equal((await readMemoryMetricsEvidence("run-1", cwd)).filter(entry => !entry.superseded).length, 1);
+  assert.equal((await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === MEMORY_ROUTING_EVIDENCE_KIND).length, 1);
 });

@@ -10,6 +10,7 @@
  * recorded and recomputable but a gate cannot yet require them.
  */
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,6 +25,7 @@ import {
 
 export const MEMORY_ROUTING_EVIDENCE_KIND = "memory.routing-decisions";
 export const MEMORY_METRICS_EVIDENCE_KIND = "memory.run-metrics";
+export const MEMORY_REVIEW_EVIDENCE_KIND = "memory.review-record";
 const PRODUCER = "knowledge.memory-routing";
 
 /** The evidence file for the routing kind: one batch of a run's decisions. */
@@ -33,6 +35,14 @@ export interface MemoryRoutingRecord {
   decisions: MemoryRoutingDecision[];
 }
 
+/** The Survey review state that fed a run's metrics: decisions and session events, as Survey wrote them. */
+export interface MemoryReviewRecord {
+  schema_version: typeof MEMORY_ROUTING_VERSION;
+  runId: string;
+  decisions: ReviewDecision[];
+  events: ReviewSessionEvent[];
+}
+
 interface Location { runId: string; gate: string; cwd?: string }
 
 // Flow's run lock is not re-entrant, so check-then-attach cannot run inside it. Within one process the two steps are
@@ -40,7 +50,11 @@ interface Location { runId: string; gate: string; cwd?: string }
 // batch (readers dedupe by decision id) or two live metrics entries (readers take the last); it cannot lose or corrupt one.
 const tails = new Map<string, Promise<unknown>>();
 function serialized<T>(where: Location, work: () => Promise<T>): Promise<T> {
-  const key = `${path.resolve(where.cwd ?? process.cwd())}\0${where.runId}`;
+  // Real path, so two spellings of one directory (a symlink, /tmp vs /private/tmp) share a chain.
+  const dir = path.resolve(where.cwd ?? process.cwd());
+  let real = dir;
+  try { real = realpathSync(dir); } catch { /* not there yet: the operation itself will say so */ }
+  const key = `${real}\0${where.runId}`;
   const run = (tails.get(key) ?? Promise.resolve()).then(work, work);
   const tail = run.catch(() => undefined);
   tails.set(key, tail);
@@ -78,10 +92,10 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
  * batch again returns the entry already there, so a retry after a lost reply
  * does not double-record.
  */
-export function recordMemoryRoutingEvidence(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
-  return serialized(input, () => recordRouting(input));
+export async function recordMemoryRoutingEvidence(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+  return (await serialized(input, () => recordRouting(input))).entry;
 }
-async function recordRouting(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+async function recordRouting(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<{ entry: FlowEvidenceEntry; created: boolean }> {
   for (const decision of input.decisions) {
     const check = recomputeMemoryRouting(decision);
     if (!check.ok) throw new MemoryClaimError("invalid", `routing decision ${decision.id} does not recompute: ${check.mismatches.join("; ")}`);
@@ -91,7 +105,7 @@ async function recordRouting(input: Location & { decisions: readonly MemoryRouti
   const record: MemoryRoutingRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions: [...input.decisions] };
   const digest = sha256(bytesOf(record));
   const existing = (await liveEntries(input, MEMORY_ROUTING_EVIDENCE_KIND)).find(entry => entry.sha256 === digest);
-  return existing ?? attachJson(input, MEMORY_ROUTING_EVIDENCE_KIND, record);
+  return existing ? { entry: existing, created: false } : { entry: await attachJson(input, MEMORY_ROUTING_EVIDENCE_KIND, record), created: true };
 }
 
 /**
@@ -172,18 +186,27 @@ export interface MemoryRoutingRun {
 }
 
 /**
- * One run's routing, end to end: decide each change, record the decisions as Flow evidence, hand the review items to
- * the host's queue, and record the run's metrics. Decisions are recorded before anything is queued, so a queued item
- * always has a recorded reason; a retry is safe because both the evidence and the queue publish are idempotent.
- * Metrics cover every decision recorded for the run so far, not only this batch.
+ * One run's routing, end to end: decide each change, record the decisions and the run's metrics as one unit, then
+ * hand each routed claim's review item to the host's queue. Decisions are recorded before anything is queued, so a
+ * queued item always has a recorded reason; a retry is safe because the evidence is content-addressed and the queue
+ * publish carries a stable key.
+ *
+ * Metrics are derived from the evidence recorded for the run: every routing decision and every Survey review decision
+ * and event handed in so far. Review state passed in is recorded first, so a later call that passes none (an identical
+ * retry, or a new batch) still counts the review already recorded instead of overwriting it with a run that has none.
  */
 export async function runMemoryRouting(input: Location & {
   changes: readonly MemoryChange[];
   policy?: Partial<MemoryRoutingPolicy>;
   queue?: MemoryReviewQueue;
+  reviewDecisions?: readonly ReviewDecision[];
+  reviewEvents?: readonly ReviewSessionEvent[];
 }): Promise<MemoryRoutingRun> {
   const decisions = routeMemoryChanges(input.changes, input.policy);
-  const routing = await recordMemoryRoutingEvidence({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
+  const { routing, metrics } = await serialized(input, async () => {
+    const recorded = await recordRouting({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
+    return { routing: recorded.entry, metrics: await refreshMetrics(input) };
+  });
   const items: ReviewItem[] = [], entityProposals: string[] = [], published: string[] = [];
   for (const decision of decisions) {
     if (decision.outcome !== "routed") continue;
@@ -192,16 +215,48 @@ export async function runMemoryRouting(input: Location & {
     items.push(item);
     if (input.queue) { await input.queue.publish(item, decision.id); published.push(item.metadata.name); }
   }
-  const metrics = await refreshMemoryRunMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd });
   return { decisions, items, entityProposals, published, routing, metrics };
 }
 
-/**
- * Recomputes the run's metrics from its recorded decisions and the Survey review so far, and records them as the
- * run's current metrics. Call it as reviewers decide.
- */
-export async function refreshMemoryRunMetrics(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<FlowEvidenceEntry> {
+/** Records review state not yet recorded. A decision or event already in the run's evidence is not recorded twice. */
+async function recordReview(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<void> {
+  const known = await readReview(input.runId, input.cwd);
+  const seen = new Set([...known.decisions, ...known.events].map(item => canonicalJson(item)));
+  const fresh = <T extends object>(items: readonly T[] | undefined, kind: string): T[] => (items ?? []).filter(item => {
+    if (!item || (item as { kind?: unknown }).kind !== kind) throw new MemoryClaimError("invalid", `review input is not a Survey ${kind}`);
+    return !seen.has(canonicalJson(item));
+  });
+  const decisions = fresh(input.reviewDecisions, "ReviewDecision"), events = fresh(input.reviewEvents, "ReviewSessionEvent");
+  if (decisions.length === 0 && events.length === 0) return;
+  const record: MemoryReviewRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions, events };
+  await attachJson(input, MEMORY_REVIEW_EVIDENCE_KIND, record);
+}
+
+/** All review state recorded for a run, across batches, once each. */
+async function readReview(runId: string, cwd?: string): Promise<{ decisions: ReviewDecision[]; events: ReviewSessionEvent[] }> {
+  const decisions = new Map<string, ReviewDecision>(), events = new Map<string, ReviewSessionEvent>();
+  for (const { value } of await readStored<MemoryReviewRecord>(runId, cwd, MEMORY_REVIEW_EVIDENCE_KIND)) {
+    for (const decision of value.decisions) decisions.set(canonicalJson(decision), decision);
+    for (const event of value.events) events.set(canonicalJson(event), event);
+  }
+  return { decisions: [...decisions.values()], events: [...events.values()] };
+}
+export const readMemoryReviewRecords = (runId: string, cwd?: string) => readReview(runId, cwd);
+
+async function refreshMetrics(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<FlowEvidenceEntry> {
+  await recordReview(input);
   const decisions = await readMemoryRoutingDecisions(input.runId, input.cwd);
-  const metrics = deriveMemoryRunMetrics({ runId: input.runId, decisions, reviewDecisions: input.reviewDecisions, reviewEvents: input.reviewEvents });
-  return recordMemoryMetricsEvidence({ runId: input.runId, gate: input.gate, cwd: input.cwd, metrics });
+  const review = await readReview(input.runId, input.cwd);
+  const metrics = deriveMemoryRunMetrics({ runId: input.runId, decisions, reviewDecisions: review.decisions, reviewEvents: review.events });
+  return recordMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, metrics });
+}
+
+/**
+ * Records any new Survey review state, recomputes the run's metrics from everything recorded, and records them as the
+ * run's current metrics. Reading and writing are one unit, so a concurrent recording cannot leave the figures
+ * describing fewer decisions than are recorded. Call it as reviewers decide, passing what is new (or everything: what
+ * is already recorded is not recorded twice).
+ */
+export function refreshMemoryRunMetrics(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<FlowEvidenceEntry> {
+  return serialized(input, () => refreshMetrics(input));
 }

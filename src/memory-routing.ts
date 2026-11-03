@@ -200,6 +200,12 @@ export interface MemoryClaimChange {
 export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProposalLike }
 export type MemoryChange = MemoryClaimChange | MemoryEntityChange;
 
+/** A claim's id ignores the order of its audience and edges; so must the decision that embeds it, or one claim gets two decision ids. */
+const canonicalOrder = (claim: MemoryClaim): MemoryClaim => ({
+  ...claim,
+  ...(claim.audience ? { audience: [...new Set(claim.audience)].sort() } : {}),
+  ...(claim.supersedes ? { supersedes: [...claim.supersedes].sort((x, y) => x.claimId.localeCompare(y.claimId)) } : {}),
+});
 const MAX_CURRENT_PER_SLOT = 64;
 const SOURCE_BASELINE = "source";
 
@@ -212,25 +218,32 @@ function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   if (change.agreement != null && !agreementWellFormed(change.agreement)) throw new MemoryClaimError("invalid", "agreement needs integer passes >= 1 and 0 <= agreeing <= passes");
   const { applicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(change.claim.id), value: change.claim.value }, change.verifications ?? []);
   // Everything order-dependent is sorted here, so the decision id does not depend on the order inputs arrive in.
-  const ordered = [...current].sort((x, y) => x.id.localeCompare(y.id));
+  const ordered = [...current].sort((x, y) => x.id.localeCompare(y.id)).map(canonicalOrder);
   return {
-    type: "claim", claim: change.claim, current: ordered, verifications: [...applicable],
+    type: "claim", claim: canonicalOrder(change.claim), current: ordered, verifications: [...applicable],
     agreement: change.agreement ?? null,
     baselines: [
-      { ref: SOURCE_BASELINE, audience: change.sourceAudience ? [...change.sourceAudience] : null },
+      { ref: SOURCE_BASELINE, audience: change.sourceAudience ? [...new Set(change.sourceAudience)].sort() : null },
       ...ordered.map(other => ({ ref: other.id, audience: other.audience ? [...other.audience] : null })),
     ],
   };
 }
+
+/** The operations Survey's entity review accepts (kontourai/survey#243). */
+const isEntityOperation = (value: unknown): value is string => typeof value === "string" && (["merge", "split", "alias", "same-as", "related-to"].includes(value) || /^domain:\S+$/.test(value));
+const nonBlank = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
 
 function entityInput(change: MemoryEntityChange): MemoryEntityRoutingInput {
   const { proposal } = change, alternatives = proposal?.spec?.alternatives;
   if (typeof proposal?.id !== "string" || !proposal.id.trim() || !Array.isArray(alternatives) || alternatives.length === 0) throw new MemoryClaimError("invalid", "an entity change needs a Survey entity proposal with alternatives");
   const operations = new Set<string>(), subjects = new Set<string>();
   for (const alternative of alternatives) {
-    if (typeof alternative.operation !== "string" || !alternative.operation) throw new MemoryClaimError("invalid", "an entity alternative needs an operation");
+    if (!isEntityOperation(alternative?.operation)) throw new MemoryClaimError("invalid", "an entity alternative needs one of Survey's operations");
     operations.add(alternative.operation);
-    for (const subject of alternative.subjects ?? []) subjects.add(`${subject.subjectType}:${subject.subjectId}`);
+    for (const subject of alternative.subjects ?? []) {
+      if (!nonBlank(subject?.subjectType) || !nonBlank(subject?.subjectId)) throw new MemoryClaimError("invalid", "an entity subject needs a subjectType and subjectId");
+      subjects.add(`${subject.subjectType}:${subject.subjectId}`);
+    }
   }
   if (subjects.size === 0) throw new MemoryClaimError("invalid", "an entity proposal names no subjects");
   return { type: "entity", proposalRef: proposal.id, operations: [...operations].sort(), subjects: [...subjects].sort() };
@@ -253,13 +266,17 @@ const stringList = (value: unknown): value is string[] => Array.isArray(value) &
 function assertStoredInputShape(input: MemoryRoutingInput): void {
   const bad = (what: string): never => { throw new MemoryClaimError("invalid", `stored routing input: ${what}`); };
   if (input.type === "entity") {
-    if (typeof input.proposalRef !== "string" || !input.proposalRef || !stringList(input.operations) || input.operations.length === 0 || !stringList(input.subjects) || input.subjects.length === 0) bad("entity input is malformed");
+    if (typeof input.proposalRef !== "string" || !input.proposalRef || !stringList(input.operations) || input.operations.length === 0 || !input.operations.every(isEntityOperation) || !stringList(input.subjects) || input.subjects.length === 0 || !input.subjects.every(subject => /^[^:]+:.+$/.test(subject))) bad("entity input is malformed");
     return;
   }
   if (input.type !== "claim") bad("unknown input type");
   if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
   if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
   if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.audience === null || stringList(base.audience)))) bad("baselines are malformed");
+  // The peers' baselines are re-derivable from the embedded claims; a stored input may not drop one to clear a widening.
+  const peers = input.baselines.filter(base => base.ref !== SOURCE_BASELINE);
+  const expected = input.current.map(other => ({ ref: other.id, audience: other.audience ? [...other.audience] : null }));
+  if (input.baselines.filter(base => base.ref === SOURCE_BASELINE).length !== 1 || canonicalJson(peers) !== canonicalJson(expected)) bad("baselines do not match the embedded current claims");
 }
 
 export interface RoutingRecomputation { ok: boolean; mismatches: string[] }
@@ -279,8 +296,9 @@ export function recomputeMemoryRouting(decision: MemoryRoutingDecision): Routing
     if (decision.input.type === "claim") {
       assertMemoryClaim(decision.input.claim);
       decision.input.current.forEach(other => assertMemoryClaim(other));
-      const { rejected } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(decision.input.claim.id), value: decision.input.claim.value }, decision.input.verifications);
+      const { rejected, inapplicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(decision.input.claim.id), value: decision.input.claim.value }, decision.input.verifications);
       if (rejected.length) mismatches.push("a stored verification record is invalid");
+      if (inapplicable.length) mismatches.push("a stored verification record is not bound to this claim's value");
     }
     const expected = evaluateMemoryRouting(decision.input, policy);
     if (expected.outcome !== decision.outcome) mismatches.push(`outcome: recorded ${decision.outcome}, recomputed ${expected.outcome}`);

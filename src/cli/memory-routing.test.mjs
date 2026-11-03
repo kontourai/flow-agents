@@ -249,7 +249,14 @@ test("an entity change takes Survey's EntityProposal by structure and refuses an
   assert.deepEqual(decision.input.operations, ["merge", "same-as"]);
   assert.deepEqual(decision.input.subjects, ["person:m. chen", "person:maya c.", "person:maya chen"]);
   assert.deepEqual(routeMemoryChange({ type: "entity", proposal: merge }).input.operations, ["merge"]);
-  for (const bad of [null, {}, { id: "x" }, { id: "x", spec: { alternatives: [] } }, { id: "", spec: { alternatives: [{ operation: "merge", subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ operation: "merge", subjects: [] }] } }]) {
+  for (const operation of ["same-as", "related-to", "domain:billing"]) {
+    assert.deepEqual(routeMemoryChange({ type: "entity", proposal: { id: merge.id, spec: { alternatives: [{ operation, subjects: merge.spec.alternatives[0].subjects }] } } }).input.operations, [operation]);
+  }
+  for (const bad of [null, {}, { id: "x" }, { id: "x", spec: { alternatives: [] } }, { id: "", spec: { alternatives: [{ operation: "merge", subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ operation: "merge", subjects: [] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "erase", subjects: [{}] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "merge", subjects: [{}] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "merge", subjects: [{ subjectType: "person", subjectId: " " }] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "domain:", subjects: [{ subjectType: "person", subjectId: "a" }] }] } }]) {
     assert.throws(() => routeMemoryChange({ type: "entity", proposal: bad }), /entity/, JSON.stringify(bad));
   }
 });
@@ -266,6 +273,7 @@ test("recomputation detects an edited outcome, an edited input, a changed policy
 
   const edited = plain(routed);
   edited.input.current = [];
+  edited.input.baselines = edited.input.baselines.filter(base => base.ref === "source");
   const editedCheck = recomputeMemoryRouting(edited);
   assert.equal(editedCheck.ok, false);
   assert.match(editedCheck.mismatches.join("\n"), /outcome: recorded routed, recomputed proposed/);
@@ -281,6 +289,41 @@ test("recomputation detects an edited outcome, an edited input, a changed policy
   const tampered = plain(routed);
   tampered.input.claim.value = "MySQL";
   assert.match(recomputeMemoryRouting(tampered).mismatches.join("\n"), /id is not the digest/);
+});
+
+test("a stored input may not drop a peer's audience baseline to clear a widening", () => {
+  const narrow = make({ audience: ["user:brian"] });
+  const wide = routeMemoryChange(change(make({ value: "PostgreSQL 15", source: { ...base.source, ref: "s2" }, audience: ["user:brian", "public"] }), { current: [narrow], sourceAudience: ["user:brian", "public"] }));
+  assert.deepEqual(rulesOf(wide), ["visibility-widening"]);
+  const edited = plain(wide);
+  edited.input.baselines = edited.input.baselines.filter(base => base.ref === "source");
+  Object.assign(edited, evaluateMemoryRouting(edited.input, edited.policy));
+  const check = recomputeMemoryRouting(edited);
+  assert.equal(check.ok, false, "outcome and reasons were recomputed to match the edit; the dropped baseline still refuses it");
+  assert.match(check.mismatches.join("\n"), /baselines do not match the embedded current claims/);
+});
+
+test("one claim has one decision id, however its audience or edges were ordered", () => {
+  const a = routeMemoryChange(change(make({ audience: ["b", "a"] }), { sourceAudience: ["b", "a"] }));
+  const b = routeMemoryChange(change(make({ audience: ["a", "b", "a"] }), { sourceAudience: ["a", "b"] }));
+  assert.equal(a.id, b.id);
+  const edges = [{ claimId: make({ value: "x" }).id, kind: "succession", reason: "r" }, { claimId: make({ value: "y" }).id, kind: "correction", reason: "r" }];
+  assert.equal(routeMemoryChange(change(make({ supersedes: edges }))).id, routeMemoryChange(change(make({ supersedes: [...edges].reverse() }))).id);
+});
+
+test("a conflicting peer is found wherever it sorts among the peers", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const agreeing = i => make({ value: "PostgreSQL 16", source: { ...base.source, ref: `agree-${i}` } });
+  const conflicting = i => make({ value: "PostgreSQL 15", source: { ...base.source, ref: `conflict-${i}` } });
+  let sawFirst = false, sawLast = false;
+  for (let i = 0; i < 200 && !(sawFirst && sawLast); i++) {
+    const peers = [agreeing(i), conflicting(i)].sort((x, y) => x.id.localeCompare(y.id));
+    const where = peers[0].value === "PostgreSQL 15" ? "first" : "last";
+    if (where === "first" && sawFirst || where === "last" && sawLast) continue;
+    (where === "first" ? () => { sawFirst = true; } : () => { sawLast = true; })();
+    assert.deepEqual(rulesOf(routeMemoryChange(change(claim, { current: peers }))), ["conflicting-current-values"], `conflict sorts ${where}`);
+  }
+  assert.ok(sawFirst && sawLast, "both placements were exercised");
 });
 
 test("routing is deterministic: the same inputs give the same decision id, whatever order current claims arrive in", () => {

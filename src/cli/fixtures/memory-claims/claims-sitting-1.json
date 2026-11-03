@@ -8,7 +8,7 @@
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:617ce42d6d78ff4cdf638e8dd2acb5f987e7008c26b1732b8eb63120c8ff37f1": {
+    "sha256:9cba6934d5916821fe5fa9cc2ed8475ecbb2f9c5e902cd2f62ad3d3272bb6de7": {
       "agreeing": 2,
       "passes": 2
     },
@@ -24,7 +24,7 @@
   "claims": [
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:617ce42d6d78ff4cdf638e8dd2acb5f987e7008c26b1732b8eb63120c8ff37f1",
+      "id": "sha256:9cba6934d5916821fe5fa9cc2ed8475ecbb2f9c5e902cd2f62ad3d3272bb6de7",
       "posture": "stated",
       "property": "primary database",
       "schema_version": "1.0",
@@ -50,7 +50,7 @@
         }
       ],
       "validTime": {
-        "from": "2026-10-30"
+        "from": "2026-10-30T00:00:00.000Z"
       },
       "value": "PostgreSQL 16"
     },

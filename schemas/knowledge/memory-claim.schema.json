@@ -69,7 +69,7 @@
     "validTime": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Half-open interval [from, until) of when the assertion says the value held in the world. Absent bounds are unbounded; an absent validTime asserts no bound. Instants are ISO 8601 dates or zoned date-times; an empty or unparseable interval is rejected, never guessed.",
+      "description": "Half-open interval [from, until) of when the assertion says the value held in the world. Absent bounds are unbounded; an absent validTime asserts no bound. The Kit stores instants as UTC ISO 8601 date-times; an empty, unparseable or off-calendar interval is rejected, never guessed.",
       "properties": {
         "from": {
           "type": "string",
