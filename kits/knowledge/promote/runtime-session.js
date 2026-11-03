@@ -33,6 +33,8 @@ import { TranscriptFormatError, readConversation, splitSittings } from "./runtim
 export const RUNTIME_CURSOR_SCHEMA_VERSION = "1.0";
 export const TELEMETRY_SCHEMA_VERSION = "0.3.0";
 export const DEFAULT_IDLE_GAP_MS = 30 * 60 * 1000;
+/** A transcript missing for a telemetry event younger than this holds the cursor; older ones are skipped. */
+export const DEFAULT_MISSING_TRANSCRIPT_GRACE_MS = 60 * 60 * 1000;
 export const SUPPORTED_RUNTIMES = Object.freeze(["claude-code", "codex"]);
 
 const DEFAULT_LIMITS = Object.freeze({
@@ -99,7 +101,7 @@ function realRoots(transcriptRoots) {
   if (!Array.isArray(transcriptRoots) || transcriptRoots.length === 0) {
     throw new Error("runtime-session ingest requires at least one authorized transcript root");
   }
-  return transcriptRoots.map((root) => fs.realpathSync(root));
+  return transcriptRoots.map((root) => fs.realpathSync.native(root));
 }
 
 class Blocked extends Error {
@@ -137,11 +139,15 @@ const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
  * still resolve to the same inode and the file must not have grown, otherwise
  * the read is not trusted: a swap between the root check and the read, or an
  * append during it, holds the cursor instead of leaking or losing content.
+ * Content appended after this function returns is newer than the telemetry
+ * reference being served; the next reference re-reads the transcript.
+ * Limit: Node has no openat2(RESOLVE_BENEATH), so a swap of a parent directory
+ * by someone who can already write inside the authorized roots is not defeated.
  */
 function readTranscript(transcriptPath, roots, maxBytes) {
   let real;
   try {
-    real = fs.realpathSync(transcriptPath);
+    real = fs.realpathSync.native(transcriptPath);
   } catch (error) {
     if (error && error.code === "ENOENT") throw new Skipped("TRANSCRIPT_MISSING");
     throw new Blocked("TRANSCRIPT_UNREADABLE", "transcript path could not be resolved");
@@ -164,12 +170,14 @@ function readTranscript(transcriptPath, roots, maxBytes) {
     const after = fs.fstatSync(fd);
     let current;
     try {
-      current = { real: fs.realpathSync(transcriptPath), stat: fs.statSync(real) };
+      current = { real: fs.realpathSync.native(transcriptPath), stat: fs.statSync(real) };
     } catch {
       throw new Blocked("TRANSCRIPT_CHANGED_DURING_READ", "transcript path changed while it was read");
     }
     if (
       after.size !== content.length ||
+      current.stat.size !== after.size ||
+      current.stat.mtimeMs !== after.mtimeMs ||
       current.real !== real ||
       current.stat.ino !== before.ino ||
       current.stat.dev !== before.dev
@@ -228,7 +236,9 @@ function buildSittingResidues(harness, parsed, transcriptRef, idleGapMs, now) {
  * @param {string[]} options.transcriptRoots  host-authorized transcript roots.
  * @param {object} [options.cursor]  last committed cursor (default: empty).
  * @param {number} [options.idleGapMs]  sitting split gap (default 30 min).
- * @param {number} [options.now]  clock for `complete` (default Date.now()).
+ * @param {number} [options.now]  clock for `complete` and the missing-transcript grace (default Date.now()).
+ * @param {number} [options.missingTranscriptGraceMs]  hold the cursor for a missing transcript whose
+ *   telemetry event is younger than this (default 1 h); older ones are skipped (retention cleanup).
  * @param {object} [options.limits]  { maxTelemetryBytes, maxTranscriptBytes }.
  * @returns {{ residues: object[], report: object, candidateCursor: object }}
  */
@@ -239,6 +249,7 @@ export function ingestRuntimeSessions(options = {}) {
     cursor = emptyRuntimeCursor(),
     idleGapMs = DEFAULT_IDLE_GAP_MS,
     now = Date.now(),
+    missingTranscriptGraceMs = DEFAULT_MISSING_TRANSCRIPT_GRACE_MS,
   } = options;
   const limits = { ...DEFAULT_LIMITS, ...(options.limits || {}) };
   if (!Number.isFinite(idleGapMs) || idleGapMs <= 0) throw new Error("idleGapMs must be a positive number");
@@ -252,6 +263,7 @@ export function ingestRuntimeSessions(options = {}) {
     sittings_unchanged: 0,
     skipped: [],
     blocked: [],
+    notes: [],
     cursor_held: false,
   };
   const unchangedCursor = () => ({ residues: [], report: { ...report, cursor_held: true }, candidateCursor: cursor });
@@ -337,6 +349,7 @@ export function ingestRuntimeSessions(options = {}) {
             residues: buildSittingResidues(harness, parsed, ref, idleGapMs, now),
             // A write in progress: emit what is complete, but do not move past the line.
             hold: parsed.partialTail,
+            unterminatedMemory: parsed.unterminatedMemory,
           };
         }
       } catch (error) {
@@ -362,6 +375,17 @@ export function ingestRuntimeSessions(options = {}) {
       }
     }
     if (outcome.kind === "ok" && outcome.hold) block("TRANSCRIPT_PARTIAL_TAIL", "transcript ends in an unterminated line");
+    if (outcome.kind === "ok" && outcome.unterminatedMemory) {
+      report.notes.push({ telemetry_offset: lineStart, reason: "INJECTED_MEMORY_UNTERMINATED" });
+    }
+    if (outcome.kind === "skip" && outcome.reason === "TRANSCRIPT_MISSING") {
+      // An event this young may be ahead of its transcript becoming visible.
+      const at = Number(event.timestamp);
+      if (!Number.isFinite(at) || now - at < missingTranscriptGraceMs) {
+        block("TRANSCRIPT_MISSING_RECENT", "transcript for a recent event is not visible yet");
+        continue;
+      }
+    }
     if (outcome.kind === "skip") skip(outcome.reason);
     if (outcome.kind === "block") block(outcome.reason, outcome.detail);
   }

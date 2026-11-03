@@ -291,7 +291,7 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
     const box = sandbox();
     fs.appendFileSync(
       box.claudeTranscript,
-      JSON.stringify({ type: "user", sessionId: CLAUDE_SESSION, timestamp: "2026-10-30T10:32:00.000Z", message: { role: "user", content: "PARTIAL_LINE" } }),
+      JSON.stringify({ type: "user", sessionId: CLAUDE_SESSION, timestamp: "2026-10-30T10:32:00.000Z", message: { role: "user", content: "PARTIAL_LINE" } }).slice(0, -6),
     );
     appendTelemetry(box, event("claude-code", box.claudeTranscript));
     const { residues, report, candidateCursor } = run(box);
@@ -539,9 +539,10 @@ describe("review round 1 regressions (PR #1575)", () => {
   }
 
   test("F1: an unterminated transcript tail holds the cursor and is read once completed", () => {
-    for (const tail of [JSON.stringify(claudeRec("TAIL_MUST_BE_READ", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" })), "{", '{"x":"\u00e9'.slice(0, 5)]) {
+    const full = JSON.stringify(claudeRec("TAIL_MUST_BE_READ", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" }));
+    for (const tail of [Buffer.from(full.slice(0, -9)), Buffer.from("{"), Buffer.from([0x7b, 0x22, 0xf0, 0x9f])]) {
       const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
-      fs.appendFileSync(file, Buffer.concat([Buffer.from(tail), Buffer.from([0xf0, 0x9f])]));
+      fs.appendFileSync(file, tail);
       const first = run(box);
       assert.deepEqual(first.report.blocked.map((b) => b.reason), ["TRANSCRIPT_PARTIAL_TAIL"]);
       assert.equal(first.report.cursor_held, true);
@@ -549,13 +550,21 @@ describe("review round 1 regressions (PR #1575)", () => {
       assert.match(JSON.stringify(first.residues), /FIRST_LINE/, "complete lines are still emitted");
     }
     const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
-    fs.appendFileSync(file, JSON.stringify(claudeRec("TAIL_MUST_BE_READ", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" })));
+    fs.appendFileSync(file, full.slice(0, -9));
     const first = run(box);
-    fs.appendFileSync(file, "\n");
+    fs.appendFileSync(file, `${full.slice(-9)}\n`);
     const second = run(box, { cursor: first.candidateCursor });
     assert.match(JSON.stringify(second.residues), /TAIL_MUST_BE_READ/);
     assert.equal(second.report.cursor_held, false);
     assert.equal(second.candidateCursor.telemetry.offset, fs.statSync(box.telemetryFile).size);
+  });
+
+  test("a final record that is whole JSON but has no newline yet is complete, not a hold", () => {
+    const { box } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]).concat(JSON.stringify(claudeRec("LAST_NO_NEWLINE", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" }))));
+    const result = run(box);
+    assert.equal(result.report.blocked.length, 0);
+    assert.match(JSON.stringify(result.residues), /LAST_NO_NEWLINE/);
+    assert.equal(result.candidateCursor.telemetry.offset, fs.statSync(box.telemetryFile).size);
   });
 
   test("F1: a transcript that grows between two telemetry references is re-read, not served from the first snapshot", () => {
@@ -665,13 +674,40 @@ describe("review round 1 regressions (PR #1575)", () => {
       "claude-code",
       ndjson([
         claudeRec(`${O}hidden LEAK_OPEN`, { uuid: "u1" }),
-        claudeRec("LEAK_BETWEEN", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" }),
         claudeRec(`LEAK_CLOSE${C} real follow-up`, { uuid: "u3", timestamp: "2026-10-30T09:00:02.000Z" }),
       ]),
     );
-    const out = JSON.stringify(run(box).residues);
-    for (const leak of ["LEAK_OPEN", "LEAK_BETWEEN", "LEAK_CLOSE", "hidden"]) assert.equal(out.includes(leak), false, leak);
+    const result = run(box);
+    const out = JSON.stringify(result.residues);
+    for (const leak of ["LEAK_OPEN", "LEAK_CLOSE", "hidden"]) assert.equal(out.includes(leak), false, leak);
     assert.match(out, /real follow-up/);
+    assert.deepEqual(result.report.notes.map((n) => n.reason), ["INJECTED_MEMORY_UNTERMINATED"]);
+  });
+
+  test("M5: a quoted opening marker hides the rest of its own message, not the session, and is reported", () => {
+    const { box } = single(
+      "claude-code",
+      ndjson([
+        claudeRec(`Please document the token ${INJECTED_MEMORY_OPEN} in the README. HIDDEN_REST_OF_MESSAGE`),
+        claudeRec("LEGITIMATE_LATER_PROMPT", { uuid: "u2", timestamp: "2026-10-30T09:00:02.000Z" }),
+      ]),
+    );
+    const result = run(box);
+    const out = JSON.stringify(result.residues);
+    assert.match(out, /LEGITIMATE_LATER_PROMPT/);
+    assert.match(out, /Please document the token/);
+    assert.equal(out.includes("HIDDEN_REST_OF_MESSAGE"), false);
+    assert.deepEqual(result.report.notes.map((n) => n.reason), ["INJECTED_MEMORY_UNTERMINATED"]);
+  });
+
+  test("M3: a harness tag opened in one text part and closed in the next is removed whole", () => {
+    const { box } = single(
+      "claude-code",
+      ndjson([claudeRec([{ type: "text", text: "<system-reminder>HIDDEN_ONE" }, { type: "text", text: "HIDDEN_TWO</system-reminder>REAL_TEXT" }])]),
+    );
+    const out = JSON.stringify(run(box).residues);
+    assert.match(out, /REAL_TEXT/);
+    assert.equal(/HIDDEN_ONE|HIDDEN_TWO/.test(out), false);
   });
 
   test("F4: a session id that is not a UUID is drift and never reaches residue or cursor keys", () => {
@@ -702,6 +738,29 @@ describe("review round 1 regressions (PR #1575)", () => {
       assert.equal(scrubResidueText(out), out, "idempotent");
     }
     assert.match(scrubResidueText(`token: |\n  ${first}\nnext: kept`), /next: kept$/);
+  });
+
+  test("M4/M6: block-scalar secrets in every YAML header form are scrubbed, siblings are kept", () => {
+    const hidden = ["Secret", "First"].join("");
+    const hidden2 = ["Secret", "Last"].join("");
+    for (const input of [
+      `"token": |\n  ${hidden}\n  ${hidden2}\nnext: kept`,
+      `token: | # note\n  ${hidden}\n  ${hidden2}\nnext: kept`,
+      `token: |2-\n  ${hidden}\n  ${hidden2}\nnext: kept`,
+      `token: |\n  ${hidden}\n\n  ${hidden2}\nnext: kept`,
+      `- token: >\n    ${hidden}\n    ${hidden2}\nnext: kept`,
+    ]) {
+      const out = scrubResidueText(input);
+      assert.equal(out.includes(hidden) || out.includes(hidden2), false, input);
+      assert.match(out, /next: kept$/, input);
+      assert.equal(scrubResidueText(out), out, "idempotent");
+    }
+    const nested = scrubResidueText(`cfg:\n  token: |\n    ${hidden}\n  description: KEEP_SIBLING\n  retries: 4`);
+    assert.equal(nested.includes(hidden), false);
+    assert.match(nested, /description: KEEP_SIBLING\n  retries: 4$/);
+    // a stray quote cannot swallow unbounded prose
+    const prose = `password: "unterminated ${"x".repeat(3000)} KEEP_FAR_PROSE "later"`;
+    assert.match(scrubResidueText(prose), /KEEP_FAR_PROSE/);
   });
 
   test("F6: Claude harness entries are excluded per record, for every message the record produced", () => {
@@ -758,6 +817,96 @@ describe("review round 1 regressions (PR #1575)", () => {
     const result = run(box);
     assert.equal(result.residues.length, 0);
     assert.equal(result.report.blocked[0].reason, "UNKNOWN_TRANSCRIPT_FORMAT");
+  });
+
+  test("M7: only records Ferry imports need a source time; excluded entries are never inspected", () => {
+    const noTime = (rec) => ({ ...rec, timestamp: undefined });
+    for (const [runtime, rows] of [
+      ["codex", [codexMeta(), codexMsg("user", "REAL_ONE"), noTime({ type: "event_msg", payload: { type: "task_complete" } }), noTime({ type: "event_msg", payload: { type: "token_count", info: null } }), noTime(codexMsg("developer", "DEV_NO_TIME"))]],
+      ["claude-code", [claudeRec("REAL_ONE"), noTime(claudeRec("PEER_NO_TIME", { uuid: "p", origin: { kind: "peer" } })), noTime({ type: "queue-operation", operation: "enqueue", sessionId: UID })]],
+    ]) {
+      const { box } = single(runtime, ndjson(rows));
+      const result = run(box);
+      assert.equal(result.report.blocked.length, 0, runtime);
+      assert.match(JSON.stringify(result.residues), /REAL_ONE/, runtime);
+    }
+  });
+
+  test("M8: a missing transcript for a recent event holds the cursor until it appears; an old event is skipped", () => {
+    const box = sandbox();
+    const gone = path.join(box.roots[0], "late.jsonl");
+    appendTelemetry(box, { ...event("claude-code", gone), timestamp: String(NOW - 5 * 60 * 1000) });
+    const first = run(box);
+    assert.deepEqual(first.report.blocked.map((b) => b.reason), ["TRANSCRIPT_MISSING_RECENT"]);
+    assert.equal(first.candidateCursor.telemetry.offset, 0);
+    fs.writeFileSync(gone, ndjson([claudeRec("APPEARED_LATER")]));
+    const second = run(box, { cursor: first.candidateCursor });
+    assert.match(JSON.stringify(second.residues), /APPEARED_LATER/);
+    assert.equal(second.report.cursor_held, false);
+
+    const old = sandbox();
+    appendTelemetry(old, { ...event("claude-code", path.join(old.roots[0], "gone.jsonl")), timestamp: String(NOW - 48 * 60 * 60 * 1000) });
+    const result = run(old);
+    assert.deepEqual(result.report.skipped.map((s) => s.reason), ["TRANSCRIPT_MISSING"]);
+    assert.equal(result.candidateCursor.telemetry.offset, fs.statSync(old.telemetryFile).size);
+  });
+
+  test("M9: a conversation-shaped record of an unrecognized type is drift; known non-conversation types are not", () => {
+    for (const [runtime, body] of [
+      ["claude-code", ndjson([claudeRec("UNREAD_CONVERSATION", { type: "human-v2" })])],
+      ["codex", ndjson([codexMeta(), { ...codexMsg("user", "UNREAD_CONVERSATION"), type: "response_item_v2" }])],
+    ]) {
+      const { box } = single(runtime, body);
+      const result = run(box);
+      assert.equal(result.residues.length, 0, runtime);
+      assert.equal(result.report.blocked[0].reason, "UNKNOWN_TRANSCRIPT_FORMAT", runtime);
+      assert.equal(result.candidateCursor.telemetry.offset, 0, runtime);
+    }
+    const { box } = single(
+      "claude-code",
+      ndjson([claudeRec("KNOWN_GOOD"), { type: "api-request-blob", sessionId: UID, timestamp: STAMP, message: { role: "user", content: "RAW_API_PAYLOAD" } }]),
+    );
+    const result = run(box);
+    assert.equal(result.report.blocked.length, 0);
+    assert.equal(JSON.stringify(result.residues).includes("RAW_API_PAYLOAD"), false);
+  });
+
+  test("M1: growth between the post-read fstat and the later stat holds the cursor", () => {
+    const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
+    const real = fs.realpathSync.native(file);
+    const { statSync } = cjsFs;
+    let grown = false;
+    cjsFs.statSync = function (target, ...rest) {
+      if (String(target) === real && !grown) {
+        grown = true;
+        fs.appendFileSync(real, ndjson([claudeRec("APPENDED_LATE", { uuid: "u2", timestamp: "2026-10-30T09:00:05.000Z" })]));
+      }
+      return statSync.call(this, target, ...rest);
+    };
+    syncBuiltinESMExports();
+    let first;
+    try {
+      first = run(box);
+    } finally {
+      cjsFs.statSync = statSync;
+      syncBuiltinESMExports();
+    }
+    assert.equal(grown, true, "the growth hook must have fired");
+    assert.deepEqual(first.report.blocked.map((b) => b.reason), ["TRANSCRIPT_CHANGED_DURING_READ"]);
+    assert.equal(first.candidateCursor.telemetry.offset, 0);
+  });
+
+  test("a transcript path spelled with different letter case on a case-insensitive filesystem stays inside its root", (t) => {
+    const probe = path.join(os.tmpdir(), `case-probe-${process.pid}`);
+    fs.writeFileSync(probe, "");
+    const insensitive = fs.existsSync(probe.toUpperCase().replace(os.tmpdir().toUpperCase(), os.tmpdir()));
+    fs.rmSync(probe);
+    if (!insensitive) return t.skip("case-sensitive filesystem");
+    const { box, file } = single("claude-code", ndjson([claudeRec("CASE_ALIAS")]));
+    appendTelemetry(box, event("claude-code", path.join(path.dirname(file), "CASE.JSONL")));
+    const result = run(box);
+    assert.equal(result.report.skipped.some((s) => s.reason === "TRANSCRIPT_OUTSIDE_ROOTS"), false);
+    assert.match(JSON.stringify(result.residues), /CASE_ALIAS/);
   });
 
   test("F10: a Codex rollout with a session_meta and no conversation is skipped, not blocked", () => {
