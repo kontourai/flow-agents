@@ -101,7 +101,7 @@ test("supersedes edges: a succession needs the speaker to say it replaces AND a 
   const old = earlier.result.claims.find(claim => claim.property === "primary database");
   const next = later.result.claims.find(claim => claim.property === "primary database");
   assert.deepEqual(next.supersedes.map(edge => [edge.claimId, edge.kind]), [[old.id, "succession"]]);
-  assert.deepEqual(next.validTime, { from: "2026-10-30" });
+  assert.deepEqual(next.validTime, { from: "2026-10-30T00:00:00.000Z" }, "a bare date is midnight UTC, stored as that instant");
   const owner = earlier.result.claims.find(claim => claim.property === "on-call owner");
   const retraction = later.result.claims.find(claim => claim.property === "on-call owner");
   assert.equal(retraction.posture, "retracted");
@@ -182,16 +182,34 @@ test("passes that disagree on what the claim says do not collapse into agreement
   const sitting = loadSittings()[0];
   const quote = "The widget service uses PostgreSQL 15 as its primary database.";
   const finding = extra => ({ quote, subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated", ...extra });
-  for (const [name, a, b] of [
+  const earlier = (await fixtureClaims()).earlier.result.claims;
+  for (const [name, a, b, withCurrent] of [
     ["a different start date", { validFrom: "2026-01-01" }, { validFrom: "2027-01-01" }],
     ["start date in one pass only", { validFrom: "2026-01-01" }, {}],
     ["a different end date", { validUntil: "2026-12-01" }, { validUntil: "2027-12-01" }],
     ["a different posture", { posture: "stated" }, { posture: "hypothetical" }],
     ["a different speaker", { speaker: "Maya Chen" }, { speaker: "Dana Reyes" }],
+    ["one pass saw the speaker say it replaces the earlier value, the other did not", { value: "PostgreSQL 16", validFrom: "2026-10-30", replacesPrior: true }, { value: "PostgreSQL 16", validFrom: "2026-10-30" }, true],
   ]) {
-    const result = await distillMemoryClaims({ sitting, passes: 2, extract: traverseExtract(scriptedProvider([[finding(a)], [finding(b)]])) });
+    const result = await distillMemoryClaims({ sitting, passes: 2, ...(withCurrent ? { current: earlier } : {}), extract: traverseExtract(scriptedProvider([[finding(a)], [finding(b)]])) });
     assert.equal(result.claims.length, 2, `${name}: both findings are kept`);
     assert.deepEqual(result.claims.map(claim => result.agreement[claim.id].agreeing), [1, 1], name);
+  }
+});
+
+test("equivalent spellings of one instant are one value; early years and leap days are real dates", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const finding = extra => ({ quote, subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated", ...extra });
+  const spelled = await distillMemoryClaims({ sitting, passes: 2, extract: traverseExtract(scriptedProvider([[finding({ validFrom: "2026-01-01T00:00Z" })], [finding({ validFrom: "2026-01-01T00:00:00+00:00" })]])) });
+  assert.equal(spelled.claims.length, 1);
+  assert.deepEqual(spelled.agreement[spelled.claims[0].id], { passes: 2, agreeing: 2 });
+  assert.deepEqual(spelled.claims[0].validTime, { from: "2026-01-01T00:00:00.000Z" });
+  const offset = await distillMemoryClaims({ sitting, passes: 1, extract: traverseExtract(scriptedProvider([[finding({ validFrom: "2026-01-01T02:00:00+02:00" })]])) });
+  assert.deepEqual(offset.claims[0].validTime, { from: "2026-01-01T00:00:00.000Z" }, "an offset is converted, not stored as written");
+  for (const [date, ok] of [["0042-03-01", true], ["0000-01-01", true], ["2024-02-29", true], ["2026-02-29", false], ["2100-02-29", false], ["2000-02-29", true], ["2026-04-31", false], ["2026-00-10", false]]) {
+    const result = await distillMemoryClaims({ sitting, passes: 1, extract: traverseExtract(scriptedProvider([[finding({ validFrom: date })]])) });
+    assert.equal(result.claims.length, ok ? 1 : 0, date);
   }
 });
 

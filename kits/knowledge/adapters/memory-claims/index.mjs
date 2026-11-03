@@ -9,6 +9,6 @@ export {
   presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
 } from '@kontourai/flow-agents/memory-routing';
 export {
-  MEMORY_METRICS_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND,
-  readLatestMemoryMetrics, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
+  MEMORY_METRICS_EVIDENCE_KIND, MEMORY_REVIEW_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND,
+  readLatestMemoryMetrics, readMemoryMetricsEvidence, readMemoryReviewRecords, readMemoryRoutingDecisions, readMemoryRoutingEvidence, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from '@kontourai/flow-agents/memory-routing-flow';
