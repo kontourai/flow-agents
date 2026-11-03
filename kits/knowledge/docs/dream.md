@@ -177,27 +177,19 @@ id is the sitting's working-directory name. Nothing else decides scope.
   merged but unpublished, and needs host-supplied admission decisions. See
   [#1584](https://github.com/kontourai/flow-agents/issues/1584).
 - **Where the contest fact comes from.** #1571 routes on a projection fact (`contested-by-
-  accumulation`) and compares no values itself. The host runs Surface's `projectAccumulation`
-  because it needs observations with custody and an authority snapshot this run does not hold:
-  pass `host.project({ query, claims })` and the run maps its claims in with #1571's mapper,
-  reads the result with `memoryAccumulationFact`, and routes on it. A projection that throws,
-  or returns something that is not a fact, is recorded as an `invalid` fact, which routes:
-  a slot that cannot be answered is not read as uncontested. Without `host.project` the fact
-  comes from the local stand-in (`gapCodes: ["dream-stand-in"]`). **One verdict per slot**: the
-  host's fact (else the stand-in's, computed over the values review left) is what routing is
-  given, what the review-queue backfill is given, and what the brief honours, so the queue and the
-  brief cannot disagree. With `host.project` the host is asked once per slot that holds more than
-  one stated claim on every run (a no-op run included), so the host should cache. An `invalid` fact
-  holds back every stated claim in its slot. A fact stored in a decision is bounded to the claim, its
-  rivals and 17 ids, with 16 gap codes and a `truncated:` code saying what was cut
-  (`claims.facts_truncated`); the claim stays a candidate, so the outcome is the same.
-- **Eligibility (the quarantine).** An `applied` proposal is eligible when its record is
-  active and is the record Corpus made from it: the record's `apply-create` entry names the
-  proposal and the record body is the proposal's. A settlement that points at some other
-  record is excluded as `unverified`. A `pending` one is eligible only with
-  `includeUnreviewed: true`, and only if routing left it `proposed`; it is then labelled
-  unreviewed. A `pending` claim routing sent to review waits for the review. A `rejected` one
-  never appears. A proposal the distiller itself approved is excluded.
+  accumulation`) and compares no values itself; Surface's `projectAccumulation` is meant to produce
+  it, run by a host that holds the custody it needs (observations with digests and an authority
+  snapshot). It is merged but unpublished, and this run holds no custody, so there is no seam for it
+  here yet: **the dream produces the fact itself** with `classifyCurrent`, the local stand-in
+  (`gapCodes: ["dream-stand-in"]` in every stored fact says so), computed over the values review has
+  left. There is one verdict function. Routing, the review-queue backfill and the brief all use it,
+  so they agree by construction. Replacing it with the real projection, and adding a host seam for
+  that, is [#1584](https://github.com/kontourai/flow-agents/issues/1584). A fact stored in a
+  decision is bounded to the claim, its rivals and 17 ids, 16 gap codes of at most 120 characters,
+  and a `truncated:` code saying what was cut (`claims.facts_truncated`); the claim stays a
+  candidate, so the outcome is the same. A plan's claims are peers of one another and of the stored
+  claims, each once; a decision embeds at most 16 peers (the rivals first, then any peer the claim
+  would be wider than), and `claims.peers_capped` counts each time more were left out.
 - **Rank** = confidence × recency × scope. Confidence is `0.55 + 0.45 × agreement` for an
   applied claim and `0.5 × agreement` for a pending one, where agreement is the share of
   extraction passes that found the claim, so review always outranks agreement. Recency is

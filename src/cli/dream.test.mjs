@@ -906,45 +906,6 @@ test("an over-size body of this run's own is refused without being parsed, even 
   assert.equal(parsed, 0);
 });
 
-test("the host's Surface projection, when it provides one, decides the contest: current routes nothing, contested and invalid route, and a projection that cannot answer fails closed", async (t) => {
-  const clash = (content) => (content.includes("banker's rounding")
-    ? ["half up", "half even"].map((value) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value, posture: "stated" }))
-    : []);
-  const outcomes = {};
-  const run = async (label, project) => {
-    const { ws, host, store } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: clash } });
-    t.after(ws.cleanup);
-    const seen = [];
-    const report = await runDream({ ...host, project: async (request) => { seen.push(request); return project(request); } }, runOptions(ws));
-    outcomes[label] = { report, seen, store };
-    return outcomes[label];
-  };
-  const current = (request) => ({ outcome: "current", candidateClaimIds: [request.claims[0].id], gapCodes: [] });
-  const contested = (request) => ({ outcome: "contested", candidateClaimIds: request.claims.map((c) => c.id).sort(), gapCodes: [] });
-
-  const calm = await run("current", current);
-  assert.equal(calm.report.claims.routed, 0, "the host's projection said current, so the run did not second-guess it");
-  const first = calm.seen[0];
-  assert.equal(first.query.valuePolicy, "single-json-v1");
-  assert.equal(first.query.slot.fieldOrBehavior, "rounding");
-  assert.ok(first.claims.every((claim) => claim.status === "proposed" && claim.facet === "memory"), "claims are mapped into Surface's shape by the Kit's own mapper");
-
-  const clash2 = await run("contested", contested);
-  assert.equal(clash2.report.claims.routed, 2);
-
-  const invalid = await run("invalid", () => ({ outcome: "invalid", reason: "identity unresolved", candidateClaimIds: [], gapCodes: ["identity"] }));
-  assert.equal(invalid.report.claims.routed, 2, "an invalid projection gives no unique answer, which routes");
-
-  const broken = await run("throws", () => { throw new Error("authority snapshot unavailable"); });
-  assert.equal(broken.report.claims.routed, 2, "a projection that cannot answer is not read as uncontested");
-  const stored = JSON.parse((await broken.store.listProposals())[0].candidate.body);
-  assert.equal(stored.decision.input.accumulation.outcome, "invalid");
-  assert.deepEqual(stored.decision.input.accumulation.gapCodes, ["projection-failed"]);
-
-  const garbage = await run("not-a-fact", () => ({ hello: "world" }));
-  assert.equal(garbage.report.claims.routed, 2, "a result that is not a projection fact fails closed too");
-});
-
 // ── review round 4 ────────────────────────────────────────────────────────────────────────────────────────────
 
 import { boundFact, MAX_FACT_IDS, MAX_FACT_GAPS } from "../../kits/knowledge/dream/envelope.js";
@@ -958,7 +919,15 @@ test("a projection fact is bounded before it is stored: thousands of candidates 
   assert.ok(fact.candidateClaimIds.includes(mine) && fact.candidateClaimIds.includes(rival));
   assert.ok(fact.gapCodes.length <= MAX_FACT_GAPS);
   assert.ok(fact.gapCodes.some((code) => code.startsWith("truncated:")), "the cut is recorded in the fact itself");
-  assert.equal(cut, (30000 - MAX_FACT_IDS) + (40 - MAX_FACT_GAPS), "ids and gap codes cut, as counted");
+  assert.equal(fact.gapCodes.length, MAX_FACT_GAPS);
+  const dropped = 40 - (MAX_FACT_GAPS - 1);
+  assert.ok(fact.gapCodes.includes(`truncated:${30000 - MAX_FACT_IDS}ids:${dropped}gaps`), "the code states exactly what was dropped");
+  assert.equal(cut, (30000 - MAX_FACT_IDS) + dropped);
+  const exact = boundFact({ outcome: "contested", candidateClaimIds: [mine], gapCodes: Array.from({ length: 17 }, (_, i) => `g${String(i).padStart(2, "0")}`) }, mine);
+  assert.deepEqual(exact.fact.gapCodes.filter((code) => code.startsWith("truncated:")), ["truncated:0ids:2gaps"], "17 codes into 16 slots with one for the note drops two originals");
+  assert.equal(exact.cut, 2);
+  const long = boundFact({ outcome: "invalid", reason: "r".repeat(5 * 1024 * 1024), candidateClaimIds: [mine], gapCodes: ["g".repeat(5 * 1024 * 1024)] }, mine);
+  assert.ok(Buffer.byteLength(JSON.stringify(long.fact)) < 2048, "strings are bounded as well as counts");
   assert.ok(Buffer.byteLength(JSON.stringify(fact)) < 4096);
   const started = Date.now();
   boundFact({ outcome: "contested", candidateClaimIds: ids, gapCodes: [] }, mine, [rival]);
@@ -982,9 +951,7 @@ test("a slot with many candidates still produces a small, storable decision, thr
     await store.proposeCreate({ title: `rival ${n}`, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `rival:${n}`, contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
   }
   const one = (content) => (content.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value: "banker's", posture: "stated" }] : []);
-  const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: one }), {
-    project: async (request) => ({ outcome: "contested", candidateClaimIds: request.claims.map((c) => c.id).sort(), gapCodes: [] }),
-  });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: one }));
   const report = await runDream(host, runOptions(ws, { visibility: vis }));
   assert.equal(report.status, "success");
   assert.ok(report.claims.facts_truncated >= 1, "121 candidates were cut to what a decision stores");
@@ -993,17 +960,6 @@ test("a slot with many candidates still produces a small, storable decision, thr
   assert.ok(mine.decision.input.accumulation.candidateClaimIds.length <= MAX_FACT_IDS);
   assert.ok(mine.decision.input.current.length <= 16);
   assert.ok(Buffer.byteLength(JSON.stringify(mine.decision)) < 256 * 1024);
-});
-
-test("a projection that names claims the run never saw is not an answer for the slot", async (t) => {
-  const { ws, host, store } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
-  t.after(ws.cleanup);
-  const report = await runDream({ ...host, project: async (request) => ({ outcome: "contested", candidateClaimIds: [...request.claims.map((c) => c.id), `sha256:${"0".repeat(64)}`].sort(), gapCodes: [] }) }, runOptions(ws));
-  assert.equal(report.status, "success", "the run does not crash on a fact that disagrees with the store");
-  assert.equal(report.claims.routed, 2, "it routes: a slot that cannot be answered is not read as uncontested");
-  const stored = JSON.parse((await store.listProposals())[0].candidate.body);
-  assert.equal(stored.decision.input.accumulation.outcome, "invalid");
-  assert.match(stored.decision.input.accumulation.reason, /outside the slot/);
 });
 
 test("a contest that a Survey edit created reaches the review queue: the verdict the brief used is the one routing is given", async (t) => {
@@ -1036,29 +992,6 @@ test("a contest that a Survey edit created reaches the review queue: the verdict
   }
 });
 
-test("the brief honours the host's projection: a slot the host calls invalid leaves its claims out, and one it calls current stays in", async (t) => {
-  const { briefOf } = { briefOf: (ws) => JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries };
-  const mk = async (project) => {
-    const f = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: (c) => (c.includes("banker's rounding") ? ["a", "b"].map((v) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value: v, posture: "stated" })) : []) } });
-    t.after(f.ws.cleanup);
-    f.host.project = project;
-    await runDream(f.host, runOptions(f.ws));
-    for (const proposal of await f.store.listProposals()) await f.store.applyCreate(proposal.id, "a-human-reviewer");
-    {
-      const report = await runDream(f.host, runOptions(f.ws));
-      return { report, entries: briefOf(f.ws) };
-    }
-  };
-  // The host says the two differing values are not a contest (say its authority admitted one over the other).
-  const calm = await mk(async (request) => ({ outcome: "current", candidateClaimIds: [request.claims[0].id], gapCodes: [] }));
-  assert.equal(calm.report.brief_excluded.contested, 0, "the host's verdict overrides the stand-in's");
-  assert.equal(calm.entries.length, 2);
-  // The host cannot answer for the slot: neither claim is current.
-  const invalid = await mk(async () => ({ outcome: "invalid", reason: "identity unresolved", candidateClaimIds: [], gapCodes: ["identity"] }));
-  assert.equal(invalid.report.brief_excluded.contested, 2);
-  assert.deepEqual(invalid.entries, []);
-});
-
 test("report counters are per claim: a claim proposed uncontested and routed on a later look counts once, as routed", async (t) => {
   const clash = (content) => (content.includes("banker's rounding")
     ? ["half up", "half even"].map((value) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value, posture: "stated" }))
@@ -1068,35 +1001,6 @@ test("report counters are per claim: a claim proposed uncontested and routed on 
   const report = await runDream(host, runOptions(ws));
   assert.equal(report.claims.routed + report.claims.uncontested, report.claims.created, "one outcome per proposed claim");
   assert.equal(host.published.at(-1).decisions.length, report.claims.created, "and one decision per claim goes to publish");
-});
-
-test("the mapper is given every claim a replacement points at, not only the slot's", async (t) => {
-  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
-  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
-  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
-  t.after(ws.cleanup);
-  const store = new FakeCorpusStore(ws.memoryRoot);
-  const vis = { kind: "restricted", audiences: ["user:owner"] };
-  const base = { subject: { type: "service", id: "other", label: "other" }, claimType: "knowledge.memory-claim", speaker: "user", posture: "stated", visibility: vis };
-  const target = memoryClaim({ ...base, property: "old thing", value: "v1", source: { ref: "sitting:t", locator: "chars:0-1", excerpt: "t", observedAt: "2026-10-01T00:00:00.000Z" } });
-  // B sits in the same slot as the claim this run will make, and replaces `target`, which lives in ANOTHER slot.
-  const slotOfRun = { subject: { type: "service", id: "ledger service", label: "ledger service" }, property: "rounding mode" };
-  const successor = memoryClaim({ ...base, ...slotOfRun, value: "something", source: { ref: "sitting:s", locator: "chars:0-2", excerpt: "s", observedAt: "2026-10-02T00:00:00.000Z" }, supersedes: [{ claimId: target.id, kind: "succession", reason: "the speaker said it replaces the earlier value" }], validTime: { from: "2026-10-02T00:00:00Z" } });
-  let n = 0;
-  for (const claim of [target, successor]) {
-    const entry = { claim, agreement: { passes: 2, agreeing: 2 }, project: null };
-    const decision = routeMemoryChange({ type: "claim", claim, current: [], agreement: entry.agreement, sourceVisibility: vis });
-    await store.proposeCreate({ title: `seed ${n}`, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `seed:${n++}`, contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
-  }
-  const seen = [];
-  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), {
-    project: async (request) => { seen.push(request); return { outcome: "current", candidateClaimIds: request.claims.filter((c) => c.fieldOrBehavior === request.query.slot.fieldOrBehavior).map((c) => c.id), gapCodes: [] }; },
-  });
-  const report = await runDream(host, runOptions(ws, { visibility: vis }));
-  assert.equal(report.status, "success");
-  const withEdge = seen.find((request) => request.claims.some((claim) => claim.id === successor.id));
-  assert.ok(withEdge, "the host was asked about the slot that holds the replacement; the mapper was not starved of its target");
-  assert.ok(withEdge.claims.some((claim) => claim.id === target.id), "and the replaced claim travelled with its successor");
 });
 
 test("a decision embeds only the peers that matter: agreeing peers that are no narrower are left out", async (t) => {
@@ -1138,4 +1042,68 @@ test("a peer the claim would be wider than is embedded and routes it, though it 
   assert.equal(stored.decision.outcome, "routed");
   assert.deepEqual(stored.decision.reasons.map((r) => r.rule), ["visibility-widening"]);
   assert.deepEqual(stored.decision.input.current.map((c) => c.id), [peer.id], "the narrower peer is the bound that routes it, so it is embedded");
+});
+
+// ── review round 5 ─────────────────────────────────────────────────────────────────────────────────────────────
+
+test("an honest retry of a big contested sitting does not wedge: a plan's claims are peers once, however they got into the store", async (t) => {
+  for (const count of [16, 17, 32]) {
+    const many = (content) => (content.includes("banker's rounding")
+      ? Array.from({ length: count }, (_, i) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value: `value ${i}`, posture: "stated" }))
+      : []);
+    const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: many } });
+    t.after(ws.cleanup);
+    let fail = true;
+    host.publish = (batch) => { if (fail) throw new Error("review queue down"); host.published.push(batch); };
+    for (let attempt = 0; attempt < 3; attempt += 1) await assert.rejects(() => runDream(host, runOptions(ws)), /review queue down/, `${count} claims, attempt ${attempt}`);
+    fail = false;
+    const report = await runDream(host, runOptions(ws));
+    assert.equal(report.status, "success", `${count} claims recover once the queue is back`);
+    assert.equal(report.claims.routed + report.claims.uncontested >= count, true);
+  }
+});
+
+test("peers_capped counts every cut: more outcome-changing peers than a decision holds are counted, not silent", async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const narrow = (n) => ({ kind: "restricted", audiences: [`user:other${n}`] });
+  for (let n = 0; n < 25; n += 1) {
+    const claim = memoryClaim({ subject: { type: "service", id: "ledger service", label: "ledger service" }, claimType: "knowledge.memory-claim", property: "rounding mode", value: "banker's rounding", speaker: "user", source: { ref: `sitting:n${n}`, locator: `chars:0-${n}`, excerpt: `e${n}`, observedAt: "2026-10-01T00:00:00.000Z" }, posture: "stated", visibility: narrow(n) });
+    const entry = { claim, agreement: { passes: 2, agreeing: 2 }, project: null };
+    const decision = routeMemoryChange({ type: "claim", claim, current: [], agreement: entry.agreement, sourceVisibility: narrow(n) });
+    await store.proposeCreate({ title: `n${n}`, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `n:${n}`, contentHash: "h", visibilityKey: visibilityKey(narrow(n)) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+  }
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract());
+  const report = await runDream(host, runOptions(ws, { visibility: { kind: "restricted", audiences: ["user:owner"] } }));
+  assert.ok(report.claims.peers_capped >= 1, "25 peers the claim is wider than do not fit in 16, and the report says so");
+});
+
+
+test("review's rejection and correction are seen when routing: a rival the reviewer rejected does not contest, and a peer corrected into disagreement does", async (t) => {
+  const { buildReviewDecisionsFromSession, initialReviewQueueSessionState } = await import("@kontourai/survey/review-workbench");
+  const { buildMemoryReviewItem, memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const vis = { kind: "restricted", audiences: ["user:owner"] };
+  const scenario = async (peerValue, decision, editedValue) => {
+    const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+    t.after(ws.cleanup);
+    const store = new FakeCorpusStore(ws.memoryRoot);
+    const peer = memoryClaim({ subject: { type: "service", id: "ledger service", label: "ledger service" }, claimType: "knowledge.memory-claim", property: "rounding mode", value: peerValue, speaker: "user", source: { ref: "sitting:peer", locator: "chars:0-1", excerpt: "e", observedAt: "2026-10-01T00:00:00.000Z" }, posture: "stated", visibility: vis });
+    const entry = { claim: peer, agreement: { passes: 2, agreeing: 2 }, project: null };
+    await store.proposeCreate({ title: "peer", category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision: routeMemoryChange({ type: "claim", claim: peer, current: [], agreement: entry.agreement, sourceVisibility: vis }), sitting: { id: "peer:1", contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+    const item = buildMemoryReviewItem(routeMemoryChange({ type: "claim", claim: peer, agreement: { passes: 2, agreeing: 1 }, sourceVisibility: vis }));
+    const reviewDecisions = buildReviewDecisionsFromSession({ ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: decision }, ...(editedValue ? { editedValuesByItemName: { [item.metadata.name]: editedValue } } : {}) });
+    const mine = (content) => (content.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "ledger service", subjectType: "service", property: "rounding mode", value: "banker's rounding", posture: "stated" }] : []);
+    const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: mine }), { reviewDecisions: () => reviewDecisions });
+    const report = await runDream(host, runOptions(ws, { visibility: vis }));
+    const stored = (await store.listProposals()).map((p) => JSON.parse(p.candidate.body)).find((e) => e.sitting.id.startsWith("codex:") && e.claim.property === "rounding mode");
+    return { report, outcome: stored.decision.outcome };
+  };
+  assert.equal((await scenario("half up", "reject-proposed")).outcome, "proposed", "the reviewer rejected the rival, so it contests nothing");
+  assert.equal((await scenario("half up", "accept-proposed")).outcome, "routed", "an accepted rival that disagrees contests");
+  assert.equal((await scenario("banker's rounding", "accept-proposed", "half up")).outcome, "routed", "a peer that agreed until the reviewer corrected it now disagrees");
+  assert.equal((await scenario("banker's rounding", "accept-proposed")).outcome, "proposed", "and an agreeing peer, uncorrected, contests nothing");
 });

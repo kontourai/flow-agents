@@ -135,7 +135,7 @@ const overlap = (x, y) => x === null || y === null || (x.from < y.until && y.fro
  * Cost: values and intervals are read once per claim, and a slot with a single distinct
  * value is settled without comparing claims.
  *
- * @param {BriefItem[]} items non-rejected claims, any state. An item may carry `contested` (boolean): the caller's verdict for its slot.
+ * @param {BriefItem[]} items non-rejected claims, any state
  * @param {{ multiValued?: string[] }} [policy]
  * @returns {{ current: BriefItem[], contested: BriefItem[], superseded: BriefItem[], notCurrent: BriefItem[] }}
  */
@@ -166,13 +166,6 @@ export function classifyCurrent(items, policy = {}) {
       const rival = group.some((b) => info.get(b).value !== info.get(a).value && overlap(info.get(a).span, info.get(b).span));
       if (rival) contested.add(a.claim.id);
     }
-  }
-  // A verdict the caller already reached for a slot (the host's projection, or the stand-in over the same values the
-  // review queue saw) is the one the brief honours, so the queue and the brief cannot disagree. It overrides only the
-  // contest: replacement and posture stay as above.
-  for (const item of stated) {
-    if (item.contested === true) contested.add(item.claim.id);
-    else if (item.contested === false) contested.delete(item.claim.id);
   }
   const out = { current: [], contested: [], superseded: [], notCurrent: [] };
   for (const item of items) {

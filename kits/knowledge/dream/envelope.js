@@ -101,11 +101,13 @@ export function fitPlan(entries) {
 /** The most claim ids and gap codes a stored projection fact carries. A slot can hold thousands of candidates. */
 export const MAX_FACT_IDS = 17;
 export const MAX_FACT_GAPS = 16;
+export const MAX_FACT_STRING = 120;
 
 /**
  * A projection fact small enough to store in a decision: the claim itself, then `prefer` (its rivals) first, then the
- * rest, up to MAX_FACT_IDS; gap codes capped, with the cut recorded in one code. For a contested claim the outcome is
- * unchanged (it is still a candidate), so routing is the same; the cut is visible in the fact and counted by the caller.
+ * rest, up to MAX_FACT_IDS; at most MAX_FACT_GAPS gap codes and strings of at most MAX_FACT_STRING characters, with any
+ * cut recorded in one `truncated:` code. For a contested claim the outcome is unchanged (it is still a candidate), so
+ * routing is the same. `cut` counts what was left out.
  */
 export function boundFact(fact, claimId, prefer = []) {
   if (!fact) return { fact, cut: 0 };
@@ -116,13 +118,14 @@ export function boundFact(fact, claimId, prefer = []) {
     if (picked.size >= MAX_FACT_IDS) break;
     if (named.has(id)) picked.add(id);
   }
-  const chosen = [...picked];
-  const idsCut = ids.length - chosen.length;
-  const gaps = [...new Set(fact.gapCodes)].sort();
-  const gapCut = Math.max(0, gaps.length - MAX_FACT_GAPS);
-  const gapCodes = gaps.slice(0, MAX_FACT_GAPS - (idsCut || gapCut ? 1 : 0));
-  if (idsCut || gapCut) gapCodes.push(`truncated:${idsCut}ids:${gapCut}gaps`);
-  return { fact: { ...fact, candidateClaimIds: chosen.sort(), gapCodes: gapCodes.sort() }, cut: idsCut + gapCut };
+  const idsCut = ids.length - picked.size;
+  const gaps = [...new Set(fact.gapCodes.map((code) => String(code).slice(0, MAX_FACT_STRING)))].sort();
+  const roomForGaps = idsCut > 0 || gaps.length > MAX_FACT_GAPS ? MAX_FACT_GAPS - 1 : MAX_FACT_GAPS;
+  const kept = gaps.slice(0, roomForGaps);
+  const gapCut = gaps.length - kept.length;
+  if (idsCut > 0 || gapCut > 0) kept.push(`truncated:${idsCut}ids:${gapCut}gaps`);
+  const reason = typeof fact.reason === "string" ? fact.reason.slice(0, MAX_FACT_STRING) : undefined;
+  return { fact: { ...fact, ...(reason === undefined ? {} : { reason }), candidateClaimIds: [...picked].sort(), gapCodes: kept.sort() }, cut: idsCut + gapCut };
 }
 
 export function titleFor(claim) {
