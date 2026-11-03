@@ -438,11 +438,6 @@ export async function runDream(host, options = {}) {
     }
     throw Object.assign(error, { report });
   } finally {
-    try {
-      release();
-    } catch {
-      // Failing to remove the lock must not turn a finished run into a failed one. The lock names this process, so
-      // it goes stale the moment the process exits.
-    }
+    release(); // never throws: see acquireDreamLock
   }
 }
