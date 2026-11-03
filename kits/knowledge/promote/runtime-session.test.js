@@ -562,12 +562,18 @@ describe("review round 1 regressions (PR #1575)", () => {
     const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
     appendTelemetry(box, event("claude-code", file));
     const real = fs.realpathSync(file);
-    const closeSync = cjsFs.closeSync;
+    const { openSync, closeSync } = cjsFs;
+    const transcriptFds = new Set();
     let grown = false;
+    cjsFs.openSync = function (target, ...rest) {
+      const fd = openSync.call(this, target, ...rest);
+      if (String(target) === real) transcriptFds.add(fd);
+      return fd;
+    };
     cjsFs.closeSync = function (fd, ...rest) {
       const result = closeSync.call(this, fd, ...rest);
-      if (!grown) {
-        grown = true;
+      if (transcriptFds.delete(fd) && !grown) {
+        grown = true; // the first read of the transcript is over; now it grows
         fs.appendFileSync(real, ndjson([claudeRec("GROWTH_MUST_SURVIVE", { uuid: "u2", timestamp: "2026-10-30T09:00:05.000Z" })]));
       }
       return result;
@@ -577,10 +583,12 @@ describe("review round 1 regressions (PR #1575)", () => {
     try {
       first = run(box);
     } finally {
+      cjsFs.openSync = openSync;
       cjsFs.closeSync = closeSync;
       syncBuiltinESMExports();
     }
-    assert.equal(grown, true, "the growth hook must have fired");
+    assert.equal(grown, true, "the growth hook must have fired after the first transcript read");
+    assert.equal(first.report.telemetry_lines_read, 2);
     assert.match(JSON.stringify(first.residues), /GROWTH_MUST_SURVIVE/);
   });
 
@@ -610,32 +618,6 @@ describe("review round 1 regressions (PR #1575)", () => {
     assert.equal(first.candidateCursor.telemetry.offset, 0);
     const second = run(box, { cursor: first.candidateCursor });
     assert.match(JSON.stringify(second.residues), /GROWTH_MUST_BE_READ/);
-  });
-
-  test("F1: a transcript that grows between two telemetry references is re-read, not served from the first snapshot", () => {
-    const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
-    appendTelemetry(box, event("claude-code", file));
-    const real = fs.realpathSync(file);
-    const closeSync = cjsFs.closeSync;
-    let grown = false;
-    cjsFs.closeSync = function (fd, ...rest) {
-      const result = closeSync.call(this, fd, ...rest);
-      if (!grown) {
-        grown = true;
-        fs.appendFileSync(real, ndjson([claudeRec("GROWTH_MUST_SURVIVE", { uuid: "u2", timestamp: "2026-10-30T09:00:05.000Z" })]));
-      }
-      return result;
-    };
-    syncBuiltinESMExports();
-    let first;
-    try {
-      first = run(box);
-    } finally {
-      cjsFs.closeSync = closeSync;
-      syncBuiltinESMExports();
-    }
-    assert.equal(grown, true, "the growth hook must have fired");
-    assert.match(JSON.stringify(first.residues), /GROWTH_MUST_SURVIVE/);
   });
 
   test("F2: a transcript swapped for a symlink out of the authorized roots after the root check is not read", () => {
