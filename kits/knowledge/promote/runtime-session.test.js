@@ -797,7 +797,7 @@ describe("review round 1 regressions (PR #1575)", () => {
     const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
     const pick = (list) => list[Math.floor(rnd() * list.length)];
     const canary = ["zz", "canary", "zz"].join("");
-    const labels = ["password", "API_TOKEN", "token", "api_key", "client_secret", "Authorization"];
+    const labels = ["password", "API_TOKEN", "token", "api_key", "client_secret", "Authorization", "--password", "x-api-key", "my-api-key_2", "accessToken", "PASSWORD2"];
     const noise = ['password: "', "token='", 'api_key = "', '"', "'", "stray ", "prose words ", "\n", "`", ", ", "{", "}", "- ", "x=1 "];
     let checked = 0;
     for (let n = 0; n < 4000; n += 1) {
@@ -850,26 +850,84 @@ describe("review round 1 regressions (PR #1575)", () => {
     assert.equal(scrubResidueText('{"password": "a\\"b secret tail", "k": 1}'), '{"password": <SECRET>, "k": 1}');
   });
 
+  test("M6: every key spelling and value framing the scrub supports hides its value, and the scrub stays idempotent", () => {
+    const canary = ["Ingest", "Delta", "Canary987"].join("");
+    const keys = ["password", "API_TOKEN", "my-api-key_2", "x-api-key", "client_secret", "Authorization", "--password", "--api-key", "-token", "foo--password", "auth_token", "refresh-token", "accessToken", "secretKey", "PASSWORD2", "db.password"];
+    const frames = [
+      (k) => `${k}=${canary}`, (k) => `${k}: ${canary}`, (k) => `"${k}": "${canary}"`, (k) => `${k} = '${canary}'`,
+      (k) => `export ${k}=${canary}`, (k) => `-H "${k}: Bearer ${canary}"`, (k) => `?${k}=${canary}&x=1`,
+      (k) => `{"a":{"${k}":"${canary}"}}`, (k) => `${k}:\n  ${canary}`,
+      (k) => `${k}: Basic${" ".repeat(8)}${canary}`, (k) => `${k}: Basic\t\t${canary}`,
+      (k) => `${k}="${"a".repeat(300)} ${canary}"`, (k) => `${k} = "${"a".repeat(300)} ${canary}"`,
+      (k) => `${k}: | #${"b".repeat(300)}\n  ${canary}\nnext: kept`,
+      (k) => `${k}=<SECRET>${canary}`, (k) => `${k}=ghp_${"A".repeat(25)}:${canary}`,
+    ];
+    for (const frame of frames) {
+      for (const key of keys) {
+        const input = frame(key);
+        const out = scrubResidueText(input);
+        assert.equal(out.includes(canary), false, `${key} / ${input.slice(0, 40)}`);
+        assert.equal(scrubResidueText(out), out, `idempotent: ${key} / ${input.slice(0, 40)}`);
+      }
+    }
+    // a placeholder glued to the next key stays apart from it
+    const glued = scrubResidueText('{password: ""password: "}');
+    assert.equal(scrubResidueText(glued), glued);
+    // not secret-named: left alone
+    assert.equal(scrubResidueText("max_tokens: 4096 bypass=value tokenizer=fast"), "max_tokens: 4096 bypass=value tokenizer=fast");
+  });
+
+  test("M6: mixed-case key spellings, URL passwords that look like assignments, and trailing digits", () => {
+    const canary = ["Minimal", "Own", "Canary7319"].join("");
+    for (const key of ["passWord", "pAssword", "toKen", "aUthorization", "sEcret", "APIkEy", "client_sEcret", "AccessToken", "x-Api-Key"]) {
+      const out = scrubResidueText(`${key}=${canary}`);
+      assert.equal(out.includes(canary), false, key);
+      assert.equal(scrubResidueText(out), out, key);
+    }
+    // the password of a URL is one password, even when it contains assignment syntax
+    const url = scrubResidueText(`https://u:token='ok'${canary}@localhost/path and postgres://app:pw${canary}@db:5432/x`);
+    assert.equal(url.includes(canary), false);
+    assert.equal(url, "https://u:<SECRET>@localhost/path and postgres://app:<SECRET>@db:5432/x");
+    // not secret-named: left alone, including near-misses and `max_tokens`
+    for (const text of ["tokenizer2=fast", "Passwords=none", "compass=north", "spwd=1", "secretary=jane", "HTTP2=on", "max_tokens: 4096"]) {
+      assert.equal(scrubResidueText(text), text);
+    }
+  });
+
   test("the scrub is linear on pathological runs, and a data blob is replaced whole", () => {
+    const REDACTION = path.join(HERE, "runtime-redaction.js");
+    // Each input is built and scrubbed in a child process with a hard timeout, so a quadratic
+    // regression fails in seconds instead of hanging the suite.
     const inputs = {
-      "a-": "a-".repeat(80000),
-      "a.": "a.".repeat(80000),
-      "eyJ-": "eyJ-".repeat(40000),
-      "sk-": "sk-".repeat(60000),
-      "http-ish": "a://b:".repeat(30000),
-      "BEGIN": "-----BEGIN PRIVATE KEY-----\n".repeat(8000),
-      "token_ in quotes": `password="${"token_".repeat(30000)}"`,
-      "stray quotes": 'password:"'.repeat(30000),
+      "a-": '"a-".repeat(80000)',
+      "a.": '"a.".repeat(80000)',
+      "eyJ-": '"eyJ-".repeat(40000)',
+      "sk-": '"sk-".repeat(60000)',
+      "http-ish": '"a://b:".repeat(30000)',
+      "BEGIN": '"-----BEGIN PRIVATE KEY-----\\n".repeat(8000)',
+      "token_ in quotes": '`password="${"token_".repeat(30000)}"`',
+      "stray quotes": "'password:\"'.repeat(30000)",
+      "repeated key=": '"token=".repeat(60000)',
+      "many keys in one quoted span": '`password="${"token=a ".repeat(40000)}"`',
+      "trailing digits": '`${"1".repeat(2000000)}x`',
+      "one huge identifier": '`${"a-".repeat(1000000)}token=${"S".repeat(10)}`',
+      "camelCase identifier": '"camelCaseIdentifierSegment".repeat(40000)',
     };
-    for (const [name, input] of Object.entries(inputs)) {
-      const started = process.hrtime.bigint();
-      const out = scrubResidueText(input);
-      const ms = Number(process.hrtime.bigint() - started) / 1e6;
-      assert.ok(ms < 3000, `${name}: ${ms.toFixed(0)} ms for ${input.length} bytes`);
-      assert.equal(scrubResidueText(out), out, `${name}: idempotent`);
+    for (const [name, expression] of Object.entries(inputs)) {
+      const code =
+        `import { scrubResidueText } from ${JSON.stringify(`file://${REDACTION}`)};` +
+        `const input = ${expression}; const started = Date.now(); const out = scrubResidueText(input);` +
+        `console.log(JSON.stringify({ ms: Date.now() - started, idempotent: scrubResidueText(out) === out }));`;
+      const child = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8", timeout: 20000, maxBuffer: 1 << 20 });
+      assert.equal(child.error, undefined, `${name}: did not finish in 20 s (${child.error?.code})`);
+      assert.equal(child.status, 0, `${name}: ${child.stderr.slice(0, 200)}`);
+      const result = JSON.parse(child.stdout);
+      assert.ok(result.ms < 3000, `${name}: ${result.ms} ms`);
+      assert.equal(result.idempotent, true, `${name}: idempotent`);
     }
     assert.equal(scrubResidueText(`before ${"A".repeat(2000)} after`), "before <BLOB> after");
-    assert.equal(scrubResidueText(`k ${"A".repeat(256)} z`), `k ${"A".repeat(256)} z`);
+    assert.equal(scrubResidueText(`k ${"A".repeat(200)} z`), `k ${"A".repeat(200)} z`);
+    assert.equal(scrubResidueText(`k ${"A".repeat(201)} z`), "k <BLOB> z");
     const pem = ["-----BEGIN RSA ", "PRIVATE KEY-----\nMIIBOgIBAAJB\n-----END RSA ", "PRIVATE KEY-----"].join("");
     assert.equal(scrubResidueText(`a ${pem} b`), "a <SECRET> b");
   });

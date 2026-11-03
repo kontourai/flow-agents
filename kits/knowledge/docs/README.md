@@ -724,8 +724,13 @@ referenced Claude Code project JSONL or Codex rollout. Then it:
   No model is involved, so transcript text cannot argue its way past the scrub. The scrub fails toward over-redaction and is linear in the
   input: a quoted secret value is extended over any further secret-named keys
   inside it, an unmatched quote redacts to the end of its line, and a
-  non-whitespace run longer than 256 characters (base64, minified code) is
-  replaced whole with `<BLOB>`.
+  non-whitespace run longer than 200 characters (base64, minified code) is
+  replaced whole with `<BLOB>`. Secret-named keys are
+  recognised by splitting an identifier into words (snake, kebab and camelCase,
+  `--flag` prefixes, trailing digits, dotted paths for YAML block scalars); a
+  key the word list does not contain (`db_pass`, `pass`) is not redacted, and
+  neither is an unquoted value of fewer than four characters or a bare
+  `--password value` with a space.
 
 Ownership boundaries:
 
