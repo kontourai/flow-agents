@@ -25,11 +25,9 @@ const SECRET_WORDS = new Set([
   "authorization", "apikey", "accesskey", "privatekey", "connectionstring",
 ]);
 const SECRET_WORD_PAIRS = new Set(["api key", "access key", "private key", "connection string"]);
-const MAX_KEY_LENGTH = 128;
 
 /** `my_api_token_2`, `Client-Secret`, `PASSWORD`: a key with a secret word between plain segments. */
 function isSecretName(identifier) {
-  if (identifier.length > MAX_KEY_LENGTH) return false;
   const segments = identifier.toLowerCase().split(/[_-]/);
   if (segments.some((segment) => segment === "")) return false;
   for (let i = 0; i < segments.length; i += 1) {
@@ -56,7 +54,7 @@ const SECRET_PATTERNS = [
 const URL_CREDENTIAL = /\b([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s/]+(@)/gi;
 const BEARER = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
 // YAML block scalar header: `token: |`, `"token": >-`, `- token: |2 # note`.
-const BLOCK_SCALAR_HEADER = /^([ \t]*(?:-[ \t]+)?)(["']?)([A-Za-z0-9_-]{1,128})\2[ \t]*:[ \t]*[|>][0-9+-]*[ \t]*(?:#.*)?$/;
+const BLOCK_SCALAR_HEADER = /^([ \t]*(?:-[ \t]+)?)(["']?)([A-Za-z0-9_-]{1,256})\2[ \t]*:[ \t]*[|>][0-9+-]*[ \t]*(?:#.*)?$/;
 
 /**
  * Replace the body of every secret-named YAML block scalar. The body is the

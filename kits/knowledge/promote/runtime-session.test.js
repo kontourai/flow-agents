@@ -841,6 +841,9 @@ describe("review round 1 regressions (PR #1575)", () => {
     assert.equal(chained.includes(tail), false);
     assert.equal(scrubResidueText(chained), chained);
     assert.equal(scrubResidueText('x="1" password="ok" y="2"'), 'x="1" password=<SECRET> y="2"');
+    // `Bearer <word>` must not eat a key name that follows it
+    const bearerKey = ["hunter2", "hunter2"].join("");
+    assert.equal(scrubResidueText(`Bearer password: "${bearerKey}"`).includes(bearerKey), false);
     // unterminated quote: the rest of the line is redacted, the next line is not
     assert.equal(scrubResidueText('password: "oops no close\nnext line stays'), 'password: <SECRET>\nnext line stays');
     // an escaped quote does not close the value
