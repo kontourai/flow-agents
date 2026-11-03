@@ -18,6 +18,11 @@
  *   - a `pending` proposal routing sent to review: never, until review settles it;
  *   - a `rejected` proposal: never.
  *
+ * Only CURRENT, UNCONTESTED claims are ranked (see `classifyCurrent`). A claim
+ * that a rival in its slot contradicts waits in the review queue, not the brief;
+ * a claim another claim replaced, and a claim that asserts nothing about the
+ * present (a hypothetical or a retraction), is not current.
+ *
  * Rank = confidence x recency x scope-match. Confidence starts from agreement,
  * the share of extraction passes that found the claim: an applied claim scores
  * `0.55 + 0.45 x agreement` (0.55 to 1) and a pending one `0.5 x agreement`
@@ -39,6 +44,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { INJECTED_MEMORY_CLOSE, INJECTED_MEMORY_OPEN } from "../memory-marker.js";
+import { memoryIntervalsOverlap, memorySlotKey, memoryValuesEqual } from "@kontourai/flow-agents/memory-claims";
+
 import { presentMemoryClaims } from "../adapters/memory-claims/index.mjs";
 import { truncateUtf8, writePrivateAtomic } from "./util.js";
 
@@ -84,6 +91,76 @@ export function isSealed(claim) {
   return visibility.kind !== "restricted" || !Array.isArray(visibility.audiences) || visibility.audiences.length === 0;
 }
 
+const asserts = (item) => item.claim.posture === "stated";
+const multiValued = (policy, property) => (policy?.multiValued ?? []).some((name) => name === "*" || String(name).toLowerCase() === String(property).toLowerCase());
+const overlaps = (a, b) => {
+  try {
+    return memoryIntervalsOverlap(a.validTime, b.validTime);
+  } catch {
+    return true; // a malformed interval cannot clear a conflict
+  }
+};
+
+/**
+ * Which claims are current and uncontested, by the slot rules #1571's routing uses
+ * (`conflicting-current-values`): a stated claim is contested when another stated
+ * claim in the same slot (Surface's canonical claim key plus claim type) holds a
+ * different value over an overlapping valid time and neither replaces the other.
+ * A claim named by a `succession` edge from a stated claim by the same speaker, or by
+ * a `correction` edge from a retracted one, has been replaced and is not current. A
+ * hypothetical or retracted claim asserts nothing about the present and is not current.
+ * Properties the policy lists as `multiValued` cannot be contested. A contested claim
+ * is contested however it got there: a pending rival contests an applied claim until
+ * review settles it, because neither is known to be the current value.
+ *
+ * TEMPORARY: Surface's accumulation projection (kontourai/surface#359) owns "which
+ * claims are current" and is merged but unpublished (6.2.1 has no accumulation module),
+ * and it needs host-supplied custody and admission decisions this run does not have.
+ * This applies the same slot rules locally. Replace it with the projection:
+ * kontourai/flow-agents#1584.
+ *
+ * @param {BriefItem[]} items non-rejected, non-sealed claims, any state
+ * @param {{ multiValued?: string[] }} [policy]
+ * @returns {{ current: BriefItem[], contested: BriefItem[], superseded: BriefItem[], notCurrent: BriefItem[] }}
+ */
+export function classifyCurrent(items, policy = {}) {
+  const byId = new Map(items.map((item) => [item.claim.id, item]));
+  const replaced = new Set();
+  for (const item of items) {
+    for (const edge of item.claim.supersedes ?? []) {
+      const target = byId.get(edge.claimId);
+      if (!target) continue;
+      const fromStated = item.claim.posture === "stated" && edge.kind === "succession" && item.claim.speaker === target.claim.speaker;
+      const fromRetraction = item.claim.posture === "retracted" && edge.kind === "correction";
+      if (fromStated || fromRetraction) replaced.add(target.claim.id);
+    }
+  }
+  const stated = items.filter((item) => asserts(item) && !replaced.has(item.claim.id));
+  const slots = new Map();
+  for (const item of stated) {
+    const key = memorySlotKey(item.claim);
+    slots.set(key, [...(slots.get(key) ?? []), item]);
+  }
+  const contested = new Set();
+  for (const group of slots.values()) {
+    for (const a of group) {
+      if (multiValued(policy, a.claim.property)) continue;
+      for (const b of group) {
+        if (a === b || memoryValuesEqual(a.claim.value, b.claim.value) || !overlaps(a.claim, b.claim)) continue;
+        contested.add(a.claim.id);
+      }
+    }
+  }
+  const out = { current: [], contested: [], superseded: [], notCurrent: [] };
+  for (const item of items) {
+    if (replaced.has(item.claim.id)) out.superseded.push(item);
+    else if (item.claim.posture === "hypothetical" || item.claim.posture === "retracted") out.notCurrent.push(item);
+    else if (contested.has(item.claim.id)) out.contested.push(item);
+    else out.current.push(item);
+  }
+  return out;
+}
+
 export function isEligible(item, { includeUnreviewed = false } = {}) {
   if (isSealed(item.claim)) return false;
   if (item.state === "applied") return true;
@@ -101,11 +178,14 @@ function scopeMatch(item, project) {
   return item.project ? 0 : 0.75;
 }
 
-/** Eligible items for a brief, best first. `project` null is the global brief. */
-export function rankItems(items, { project = null, now, includeUnreviewed = false } = {}) {
+/**
+ * Eligible items for a brief, best first. `project` null is the global brief. Only current, uncontested claims are
+ * ranked (see `classifyCurrent`); a caller that already classified passes `current` to skip the work.
+ */
+export function rankItems(items, { project = null, now, includeUnreviewed = false, policy, current } = {}) {
   const at = Date.parse(now);
   if (!Number.isFinite(at)) throw new Error("brief now must be an ISO timestamp");
-  return items
+  return (current ?? classifyCurrent(items, policy).current)
     .filter((item) => isEligible(item, { includeUnreviewed }))
     .map((item) => {
       const observed = Date.parse(item.claim.source.observedAt);
@@ -166,8 +246,10 @@ const PROJECT_FILE = /^project-([a-z0-9_-]{1,64})\.json$/;
  * eligible claim. A project brief for a project with none is removed, so stale
  * memory never outlives the claim behind it.
  */
-export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOBAL_BUDGET_BYTES, projectBudget = DEFAULT_PROJECT_BUDGET_BYTES, maxEntryBytes, includeUnreviewed = false, reviewDecisions = [], dryRun = false }) {
-  const projects = [...new Set(items.filter((item) => isEligible(item, { includeUnreviewed }) && item.project).map((item) => item.project))].sort();
+export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOBAL_BUDGET_BYTES, projectBudget = DEFAULT_PROJECT_BUDGET_BYTES, maxEntryBytes, includeUnreviewed = false, reviewDecisions = [], dryRun = false, policy }) {
+  const classified = classifyCurrent(items, policy);
+  const all = items;
+  const projects = [...new Set(classified.current.filter((item) => isEligible(item, { includeUnreviewed }) && item.project).map((item) => item.project))].sort();
   const specs = [
     { name: "global.json", project: null, budget: globalBudget },
     ...projects.map((project) => ({ name: `project-${project}.json`, project, budget: projectBudget })),
@@ -176,10 +258,11 @@ export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOB
   const removed = [];
   const compiled = specs.map((spec) => ({
     ...spec,
-    brief: compileBrief(rankItems(items, { project: spec.project, now, includeUnreviewed }), { budget: spec.budget, maxEntryBytes, reviewDecisions }),
+    brief: compileBrief(rankItems(all, { project: spec.project, now, includeUnreviewed, current: classified.current }), { budget: spec.budget, maxEntryBytes, reviewDecisions }),
   }));
+  const excluded = { contested: classified.contested.length, superseded: classified.superseded.length, not_current: classified.notCurrent.length, considered: all.length };
   if (dryRun) {
-    return Object.assign(compiled.map(({ name, brief }) => ({ name, ...summary(brief), written: false })), { removed });
+    return Object.assign(compiled.map(({ name, brief }) => ({ name, ...summary(brief), written: false })), { removed, excluded });
   }
   try {
     fs.mkdirSync(briefsDir, { recursive: true, mode: 0o700 });
@@ -198,7 +281,7 @@ export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOB
     error.removed = [...removed];
     throw error;
   }
-  return Object.assign(outputs, { removed });
+  return Object.assign(outputs, { removed, excluded });
 }
 
 function summary(brief) {

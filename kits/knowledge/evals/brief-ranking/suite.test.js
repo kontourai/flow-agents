@@ -112,3 +112,11 @@ test("a budget too small for any entry yields an empty brief, never an overrun",
   assert.equal(brief.bytes, 0);
   assert.throws(() => compileBrief([], { budget: 0 }), /positive integer/);
 });
+
+test("contested claims are not ranked: a slot with two values is out of the brief, and the rest of the store is unaffected", () => {
+  const a = item({ value: "PostgreSQL 15", property: "primary database" });
+  const b = item({ value: "PostgreSQL 16", property: "primary database" });
+  const fine = item({ value: "nightly", property: "backup schedule" });
+  const brief = compileBrief(rankItems([a, b, fine], { now: NOW }), { budget: 4096 });
+  assert.deepEqual(brief.claimIds, [fine.claim.id]);
+});

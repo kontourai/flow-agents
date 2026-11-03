@@ -9,20 +9,22 @@ import test from "node:test";
 import { buildReviewDecisionsFromSession, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
 import { INJECTED_MEMORY_CLOSE, INJECTED_MEMORY_OPEN } from "../../kits/knowledge/memory-marker.js";
 import { buildMemoryReviewItem, memoryClaim, routeMemoryChange } from "../../kits/knowledge/adapters/memory-claims/index.mjs";
-import { compileBrief, isEligible, isSealed, rankItems, writeBriefs } from "../../kits/knowledge/dream/brief.js";
+import { classifyCurrent, compileBrief, isEligible, isSealed, rankItems, writeBriefs } from "../../kits/knowledge/dream/brief.js";
 import { runDream } from "../../kits/knowledge/dream/run.js";
 import { truncateUtf8 } from "../../kits/knowledge/dream/util.js";
 import { FakeCorpusStore, NOW_ISO, hostFor, noApplyStore, runOptions, scriptedExtract, tempDir, workspace } from "./dream-support.mjs";
 
 let counter = 0;
-function claim({ subject = "svc", property, value, observedAt = NOW_ISO, posture = "stated", visibility }) {
+function claim({ subject = "svc", property, value, observedAt = NOW_ISO, posture = "stated", visibility, speaker = "user", validTime, supersedes }) {
   counter += 1;
   return memoryClaim({
     subject: { type: "service", id: subject, label: subject },
     claimType: "knowledge.memory-claim",
     property: property ?? `property ${counter}`,
     value,
-    speaker: "user",
+    speaker,
+    ...(validTime ? { validTime } : {}),
+    ...(supersedes ? { supersedes } : {}),
     source: { ref: "sitting:fixture", locator: `chars:0-${counter}`, excerpt: `excerpt ${counter}`, observedAt, role: "user" },
     posture,
     ...(visibility === undefined ? { visibility: { kind: "public" } } : visibility === null ? {} : { visibility }),
@@ -71,6 +73,97 @@ test("a sealed claim is never in a brief: absent visibility and an empty audienc
   assert.equal(isSealed(open.claim) || isSealed(restricted.claim), false);
   assert.deepEqual(rankItems([absent, empty, restricted, open], { now: NOW_ISO }).map((i) => i.claim.value).sort(), ["owner fact", "public fact"]);
   assert.deepEqual(rankItems([absent, empty], { now: NOW_ISO, includeUnreviewed: true }), []);
+});
+
+// ── current and uncontested (surface#359's question, answered with #1571's slot rules until it is consumable) ──
+
+const slot = { subject: "db", property: "primary database" };
+const values = (items) => items.map((i) => i.claim.value).sort();
+
+test("a contested claim is not in the brief: two stated values for one slot leave neither current", () => {
+  const a = item({ ...slot, value: "PostgreSQL 15" });
+  const b = item({ ...slot, value: "PostgreSQL 16", state: "pending" });
+  const other = item({ subject: "db", property: "backup schedule", value: "nightly" });
+  const sorted = classifyCurrent([a, b, other]);
+  assert.deepEqual(values(sorted.contested), ["PostgreSQL 15", "PostgreSQL 16"], "the reviewed claim is contested by an unreviewed rival until review settles it");
+  assert.deepEqual(values(sorted.current), ["nightly"]);
+  assert.deepEqual(rankItems([a, b, other], { now: NOW_ISO, includeUnreviewed: true }).map((i) => i.claim.value), ["nightly"]);
+  const brief = compileBrief(rankItems([a, b, other], { now: NOW_ISO }), { budget: 2048 });
+  assert.ok(!brief.entries.some((entry) => entry.includes("PostgreSQL")));
+});
+
+test("settling a contest brings the survivor back: a rejected rival no longer contests", () => {
+  const a = item({ ...slot, value: "PostgreSQL 15" });
+  const b = item({ ...slot, value: "PostgreSQL 16" });
+  assert.equal(classifyCurrent([a, b]).current.length, 0);
+  assert.deepEqual(values(classifyCurrent([a]).current), ["PostgreSQL 15"], "briefItems drops a rejected proposal before this runs");
+});
+
+test("what is not a contest: the same value, multi-valued properties, disjoint valid times, other slots, and claims that assert nothing", () => {
+  const same = [item({ ...slot, value: "PostgreSQL 15" }), item({ ...slot, value: "PostgreSQL 15", observedAt: "2026-10-01T00:00:00.000Z" })];
+  assert.equal(classifyCurrent(same).contested.length, 0, "a restatement agrees");
+  const many = [item({ ...slot, property: "language", value: "Go" }), item({ ...slot, property: "language", value: "Rust" })];
+  assert.equal(classifyCurrent(many).contested.length, 2);
+  assert.equal(classifyCurrent(many, { multiValued: ["language"] }).contested.length, 0);
+  const eras = [
+    item({ ...slot, value: "MySQL", validTime: { from: "2020-01-01T00:00:00Z", until: "2024-01-01T00:00:00Z" } }),
+    item({ ...slot, value: "PostgreSQL", validTime: { from: "2024-01-01T00:00:00Z" } }),
+  ];
+  assert.equal(classifyCurrent(eras).contested.length, 0, "[from, until) intervals that only touch do not overlap");
+  assert.equal(classifyCurrent([item({ ...slot, value: "A" }), item({ ...slot, value: "B", posture: "hypothetical" })]).contested.length, 0, "a what-if contests nothing");
+  assert.equal(classifyCurrent([item({ ...slot, value: "A" }), item({ ...slot, value: "B", posture: "proposed" })]).contested.length, 0, "a plan contests nothing");
+});
+
+test("a replaced claim is not current, and its successor is; a retraction removes the claim it retracts", () => {
+  const old = item({ ...slot, value: "PostgreSQL 15" });
+  const edge = [{ claimId: old.claim.id, kind: "succession", reason: "the speaker said it replaces the earlier value" }];
+  const next = item({ ...slot, value: "PostgreSQL 16", validTime: { from: "2026-10-01T00:00:00Z" }, supersedes: edge });
+  const sorted = classifyCurrent([old, next]);
+  assert.deepEqual(values(sorted.superseded), ["PostgreSQL 15"]);
+  assert.deepEqual(values(sorted.current), ["PostgreSQL 16"], "replacing is not contesting");
+  assert.equal(classifyCurrent([old, item({ ...slot, value: "PostgreSQL 16", supersedes: edge, speaker: "someone else" })]).contested.length, 2, "another speaker's edge replaces nothing: it needs an authority decision");
+
+  const retraction = item({ ...slot, value: "PostgreSQL 15", posture: "retracted", supersedes: [{ claimId: old.claim.id, kind: "correction", reason: "the speaker withdrew it" }] });
+  const out = classifyCurrent([old, retraction]);
+  assert.deepEqual(out.superseded.map((i) => i.claim.id), [old.claim.id]);
+  assert.deepEqual(out.notCurrent.map((i) => i.claim.id), [retraction.claim.id], "and the retraction itself is not a current claim");
+});
+
+test("a sealed claim still contests: disagreement does not depend on who may read it", () => {
+  const a = item({ ...slot, value: "PostgreSQL 15" });
+  const sealed = item({ ...slot, value: "PostgreSQL 16", visibility: null });
+  assert.equal(classifyCurrent([a, sealed]).contested.length, 2);
+});
+
+test("end to end: conflicting claims from two sittings reach neither the brief nor the report's count of current claims", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const claimsOf = (content) => {
+    const claim = { subject: "ledger service", subjectType: "service", property: "rounding mode", posture: "stated" };
+    if (content.includes("document the rounding rule")) return [{ ...claim, value: "round half up", quote: "Documented in docs/rounding.md." }];
+    if (content.includes("banker's rounding")) return [{ ...claim, value: "banker's rounding", quote: "I switched to banker's rounding on the total." }];
+    return [];
+  };
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf }));
+  const first = await runDream(host, runOptions(ws));
+  assert.equal(first.claims.routed, 1, "the later claim was routed to review, which is where a contested claim belongs");
+  assert.equal(host.published.at(-1).reviewItems.length, 1);
+  for (const proposal of await store.listProposals()) await store.applyCreate(proposal.id, "a-human-reviewer");
+
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.contested, 2);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, [], "both applied, and still neither is in the brief");
+
+  // The reviewer settles it: the losing claim is rejected, and the survivor is current again.
+  const loser = (await store.listProposals()).find((p) => JSON.parse(p.candidate.body).claim.value === "round half up");
+  await store.retire((await store.get(loser.record_id))?.id);
+  const after = await runDream(host, runOptions(ws));
+  assert.equal(after.brief_excluded.inactive, 1);
+  assert.equal(after.brief_excluded.contested, 0);
+  const entries = JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries;
+  assert.equal(entries.length, 1);
+  assert.match(entries[0], /banker's rounding/);
 });
 
 test("quarantine: only applied claims are eligible by default; pending needs opt-in, and routed or rejected never", () => {

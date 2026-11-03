@@ -86,10 +86,9 @@ async function briefItems(store, index, proposerId, route) {
       excluded.rejected += 1;
       continue;
     }
-    if (isSealed(envelope.claim)) {
-      excluded.sealed += 1;
-      continue;
-    }
+    // A sealed claim never reaches a brief, but it still contests a rival: whether two claims disagree does not
+    // depend on who may read them.
+    if (isSealed(envelope.claim)) excluded.sealed += 1;
     if (proposal.state === "applied") {
       // Defence in depth: Corpus refuses SELF_APPROVAL, and a record the distiller approved still does not count.
       if (!proposal.reviewer_id || proposal.reviewer_id === proposal.proposer_id || proposal.reviewer_id === proposerId) {
@@ -352,11 +351,12 @@ export async function runDream(host, options = {}) {
       maxEntryBytes: options.maxEntryBytes,
       includeUnreviewed: options.includeUnreviewed === true,
       reviewDecisions,
+      policy,
       dryRun,
     });
     report.briefs = [...written];
     report.obsolete_briefs_removed = written.removed;
-    report.brief_excluded = excluded;
+    report.brief_excluded = { ...excluded, ...written.excluded };
 
     // The cursor: sittings this run finished, and a telemetry offset that never passes work left undone
     // (an incomplete sitting, one past the per-run cap, or one that failed).

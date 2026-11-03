@@ -140,13 +140,28 @@ claim, where `dreamDir` defaults to
 id is the sitting's working-directory name. Nothing else decides scope.
 
 - **Sealed claims.** A claim whose visibility is sealed (none given, or restricted to no audience) is never in a brief: a brief is injected into sessions, and sealed means visible to no one. Set `visibility` in the config, for a single-owner machine usually `{"kind": "restricted", "audiences": ["user:<you>"]}`; without it the run still proposes, but nothing it proposes reaches a brief.
+- **Current and uncontested only.** A brief ranks claims that are current and that no rival
+  contests. A stated claim is *contested* when another stated claim in the same slot holds a
+  different value over an overlapping valid time and neither replaces the other. These are
+  the slot rules of #1571's `conflicting-current-values` routing rule. Every claim in a
+  contested slot leaves the brief, applied or not: a pending rival contests a reviewed
+  claim until review settles it, and rejecting the rival (or retiring the loser's record)
+  brings the survivor back. A contested pair is a review-queue matter, not brief content:
+  the later claim is routed to review when it is proposed (`conflicting-current-values`), and
+  `brief_excluded.contested` counts what the brief held back. A claim a stated claim by the
+  same speaker replaced (a `succession` edge), or that a retraction withdrew (a `correction`
+  edge), is superseded; a hypothetical or retracted claim asserts nothing about the present.
+  A plan (`proposed` posture) neither contests nor is contested. This is a local stand-in for
+  Surface's accumulation projection (surface#359), which owns "which claims are current", is
+  merged but unpublished, and needs host-supplied admission decisions. See
+  [#1584](https://github.com/kontourai/flow-agents/issues/1584).
 - **Eligibility (the quarantine).** An `applied` proposal is eligible when its record is
   active and is the record Corpus made from it: the record's `apply-create` entry names the
   proposal and the record body is the proposal's. A settlement that points at some other
-  record is excluded as `unverified`. A `pending` one is eligible only with `includeUnreviewed: true`, and only if
-  routing left it `proposed`; it is then labelled unreviewed. A `pending` claim routing
-  sent to review waits for the review. A `rejected` one never appears. A proposal the
-  distiller itself approved is excluded.
+  record is excluded as `unverified`. A `pending` one is eligible only with
+  `includeUnreviewed: true`, and only if routing left it `proposed`; it is then labelled
+  unreviewed. A `pending` claim routing sent to review waits for the review. A `rejected` one
+  never appears. A proposal the distiller itself approved is excluded.
 - **Rank** = confidence × recency × scope. Confidence is `0.55 + 0.45 × agreement` for an
   applied claim and `0.5 × agreement` for a pending one, where agreement is the share of
   extraction passes that found the claim, so review always outranks agreement. Recency is

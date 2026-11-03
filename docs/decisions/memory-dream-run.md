@@ -35,6 +35,11 @@ scheduled job of this repository.
 - **Unreviewed claims are quarantined from the brief.** The brief contains applied
   claims. An operator may opt in to uncontested pending claims, which are labelled
   unreviewed. A claim routed to review waits for the review.
+- **Only current, uncontested claims are ranked.** A claim a rival in its slot contradicts
+  waits in the review queue, not the brief; a replaced, retracted or hypothetical claim is not
+  current. The slot rules are #1571's routing rules, applied locally until Surface's accumulation
+  projection ([surface#359](https://github.com/kontourai/surface/pull/359)) is published and
+  consumable ([#1584](https://github.com/kontourai/flow-agents/issues/1584)).
 - **The cursor is committed last.** It is the run's only progress state. Corpus
   proposals are its receipts, reconciled by claim id.
 - **Model calls go through Relay.** A Datum role, routed by Dispatch, over a Relay
