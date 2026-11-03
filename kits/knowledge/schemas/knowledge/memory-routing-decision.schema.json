@@ -204,7 +204,7 @@
               "description": "What the claim's visibility must stay within: its source, and every current claim in its slot."
             },
             "accumulation": {
-              "description": "What Surface's projection (`projectAccumulation`, run by the host) says about the claim's slot: the outcome, which claims are candidates, and the gap codes. Null when it was not run. Only a stated claim is projected.",
+              "description": "What Surface's projection (`projectAccumulation`, run by the host) says about the claim's slot, with the query slot it answered: the outcome, which claims are candidates, which support the current value (Surface joins subjects an admitted identity mapping declares equivalent, so these can carry another raw subject), and the gap codes. Null when it was not run. Only a stated claim is projected.",
               "oneOf": [
                 {
                   "type": "null"
@@ -214,7 +214,9 @@
                   "additionalProperties": false,
                   "required": [
                     "outcome",
+                    "slot",
                     "candidateClaimIds",
+                    "supportingClaimIds",
                     "gapCodes"
                   ],
                   "properties": {
@@ -236,6 +238,46 @@
                       }
                     },
                     "gapCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "slot": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "subjectType",
+                        "subjectId",
+                        "fieldOrBehavior",
+                        "claimType"
+                      ],
+                      "properties": {
+                        "subjectType": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "fieldOrBehavior": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "claimType": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "qualifiers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "supportingClaimIds": {
                       "type": "array",
                       "items": {
                         "type": "string"

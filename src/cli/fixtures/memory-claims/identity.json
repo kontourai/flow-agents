@@ -1,0 +1,622 @@
+{
+ "source": "@kontourai/surface@6.3.0 projectAccumulation over Kit-mapped claims, with a host-admitted identity mapping (the link and mapping claim are Surface's identity-merge-split vector)",
+ "now": "2026-06-01T00:00:00Z",
+ "scenarios": {
+  "differentValues": {
+   "claims": [
+    {
+     "schema_version": "1.0",
+     "id": "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e",
+     "claimType": "fact",
+     "property": "headquarters",
+     "speaker": "user",
+     "posture": "stated",
+     "subject": {
+      "type": "org",
+      "id": "acme"
+     },
+     "value": "Berlin",
+     "source": {
+      "ref": "sitting-a",
+      "locator": "chars:0-20",
+      "excerpt": "Acme is based in Berlin.",
+      "observedAt": "2026-01-10T00:00:00Z"
+     },
+     "visibility": {
+      "kind": "public"
+     }
+    },
+    {
+     "schema_version": "1.0",
+     "id": "sha256:3d91e973871c720819faf35d6f02ac0a8c9e50c8e24a3caed67e471c13034e5b",
+     "claimType": "fact",
+     "property": "headquarters",
+     "speaker": "user",
+     "posture": "stated",
+     "subject": {
+      "type": "company",
+      "id": "acme-gmbh"
+     },
+     "value": "Munich",
+     "source": {
+      "ref": "sitting-b",
+      "locator": "chars:0-20",
+      "excerpt": "Acme GmbH is based in Munich.",
+      "observedAt": "2026-01-10T00:00:00Z"
+     },
+     "visibility": {
+      "kind": "restricted",
+      "audiences": [
+       "user:only-b"
+      ]
+     }
+    }
+   ],
+   "observations": [
+    {
+     "id": "oa",
+     "observedAt": "2026-03-11T00:00:00Z",
+     "contentDigest": "sha256:9cb0680b1099d66eb8bbbedc4cc6d896e84ed6da5852ecd3ea73360a1d9039e9",
+     "authenticatedPublisher": "producer-a",
+     "bundle": {
+      "schemaVersion": 5,
+      "source": "producer-a:run-1",
+      "producerId": "producer-a",
+      "claims": [
+       {
+        "id": "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e",
+        "subjectType": "org",
+        "subjectId": "acme",
+        "facet": "memory",
+        "claimType": "fact",
+        "fieldOrBehavior": "headquarters",
+        "value": "Berlin",
+        "status": "proposed",
+        "createdAt": "2026-01-10T00:00:00.000Z",
+        "updatedAt": "2026-01-10T00:00:00.000Z",
+        "impactLevel": "medium",
+        "metadata": {
+         "visibility": "public",
+         "memory": {
+          "speaker": "user",
+          "source": {
+           "ref": "sitting-a",
+           "locator": "chars:0-20",
+           "excerpt": "Acme is based in Berlin.",
+           "observedAt": "2026-01-10T00:00:00Z"
+          }
+         }
+        }
+       }
+      ],
+      "evidence": [],
+      "events": [],
+      "policies": []
+     }
+    },
+    {
+     "id": "ob",
+     "observedAt": "2026-03-11T00:00:00Z",
+     "contentDigest": "sha256:8c916cdc37914815a1f5089d14d4d6a71ef408380463dd126fa8f921be808aa5",
+     "authenticatedPublisher": "producer-b",
+     "bundle": {
+      "schemaVersion": 5,
+      "source": "producer-b:run-1",
+      "producerId": "producer-b",
+      "claims": [
+       {
+        "id": "sha256:3d91e973871c720819faf35d6f02ac0a8c9e50c8e24a3caed67e471c13034e5b",
+        "subjectType": "company",
+        "subjectId": "acme-gmbh",
+        "facet": "memory",
+        "claimType": "fact",
+        "fieldOrBehavior": "headquarters",
+        "value": "Munich",
+        "status": "proposed",
+        "createdAt": "2026-01-10T00:00:00.000Z",
+        "updatedAt": "2026-01-10T00:00:00.000Z",
+        "impactLevel": "medium",
+        "metadata": {
+         "visibility": {
+          "audiences": [
+           "user:only-b"
+          ]
+         },
+         "memory": {
+          "speaker": "user",
+          "source": {
+           "ref": "sitting-b",
+           "locator": "chars:0-20",
+           "excerpt": "Acme GmbH is based in Munich.",
+           "observedAt": "2026-01-10T00:00:00Z"
+          }
+         }
+        }
+       }
+      ],
+      "evidence": [],
+      "events": [],
+      "policies": []
+     }
+    },
+    {
+     "id": "oi",
+     "observedAt": "2026-03-11T00:00:00Z",
+     "contentDigest": "sha256:2f18101daaff57e288737c6dd6e8bb948551ead949b98f5e549723f9f8393b21",
+     "authenticatedPublisher": "identity-desk",
+     "bundle": {
+      "schemaVersion": 5,
+      "source": "identity-desk:review-1",
+      "producerId": "identity-desk",
+      "claims": [
+       {
+        "id": "identity-desk.acme.same-entity",
+        "subjectType": "identity-pair",
+        "subjectId": "org:acme|company:acme-gmbh",
+        "claimType": "identity-mapping",
+        "fieldOrBehavior": "same-entity",
+        "value": true,
+        "createdAt": "2026-03-10T00:00:00Z",
+        "updatedAt": "2026-03-10T00:00:00Z",
+        "verificationPolicyId": "policy.identity"
+       }
+      ],
+      "evidence": [
+       {
+        "id": "identity-desk.acme.same-entity.evidence",
+        "claimId": "identity-desk.acme.same-entity",
+        "evidenceType": "source_excerpt",
+        "method": "extraction",
+        "sourceRef": "source:identity-desk.acme.same-entity",
+        "excerptOrSummary": "Source states same-entity = true.",
+        "observedAt": "2026-03-10T00:00:00Z",
+        "collectedBy": "collector",
+        "passing": true
+       }
+      ],
+      "policies": [
+       {
+        "id": "policy.fact",
+        "claimType": "fact",
+        "requiredEvidence": [
+         "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+         "the cited source states the value"
+        ],
+        "reviewAuthority": "producer review",
+        "validityRule": {
+         "kind": "historical"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+       },
+       {
+        "id": "policy.identity",
+        "claimType": "identity-mapping",
+        "requiredEvidence": [
+         "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+         "a reviewer confirmed the two references denote one entity"
+        ],
+        "reviewAuthority": "producer review",
+        "validityRule": {
+         "kind": "historical"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+       }
+      ],
+      "events": [
+       {
+        "id": "identity-desk.acme.same-entity.verified",
+        "claimId": "identity-desk.acme.same-entity",
+        "status": "verified",
+        "actor": "producer-review",
+        "method": "review",
+        "evidenceIds": [
+         "identity-desk.acme.same-entity.evidence"
+        ],
+        "createdAt": "2026-03-10T00:00:00Z"
+       }
+      ],
+      "identityLinks": [
+       {
+        "id": "identity-desk.link.acme",
+        "subjects": [
+         {
+          "subjectType": "org",
+          "subjectId": "acme"
+         },
+         {
+          "subjectType": "company",
+          "subjectId": "acme-gmbh"
+         }
+        ],
+        "relation": "equivalent",
+        "reason": "Reviewed match on registry number.",
+        "mappingClaimId": "identity-desk.acme.same-entity"
+       }
+      ]
+     }
+    }
+   ],
+   "authority": {
+    "version": "1",
+    "ownerByClaimId": {
+     "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e": "producer-a",
+     "sha256:3d91e973871c720819faf35d6f02ac0a8c9e50c8e24a3caed67e471c13034e5b": "producer-b",
+     "identity-desk.acme.same-entity": "identity-desk"
+    },
+    "eventDecisions": [
+     {
+      "eventId": "identity-desk.acme.same-entity.verified",
+      "eventDigest": "sha256:6716b0b0a8746b77612e4c3eede5ecdae9ac5626f91277083600409ed3e2dd9a",
+      "publisher": "identity-desk",
+      "admitted": true
+     }
+    ],
+    "identityDecisions": [
+     {
+      "linkDigest": "sha256:b543e3f01698f5e1527fbb55e7e52f60cca246a79bb62e1a207fa0a3f8b01827",
+      "publisher": "identity-desk",
+      "mappingClaimId": "identity-desk.acme.same-entity",
+      "mappingClaimDigest": "sha256:9a81b53887ba4067dc899ba1f55555e6367727c36ed5d4fd919c6b1661c01a7b",
+      "evidenceDigests": [
+       {
+        "id": "identity-desk.acme.same-entity.evidence",
+        "digest": "sha256:d49caa8d8ddfab9d18bca538437735fb09cdce2c7b72c5957aba46d0560372e8"
+       }
+      ],
+      "admitted": true
+     }
+    ],
+    "integrityRef": "sha256:f97d57cea66b8c543440014c5e28ff07f272fe2e8e890ef41aadad2720b6c64f"
+   },
+   "facts": {
+    "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e": {
+     "query": {
+      "slot": {
+       "subjectType": "org",
+       "subjectId": "acme",
+       "fieldOrBehavior": "headquarters",
+       "claimType": "fact"
+      },
+      "now": "2026-06-01T00:00:00Z",
+      "valuePolicy": "single-json-v1"
+     },
+     "fact": {
+      "outcome": "contested",
+      "slot": {
+       "subjectType": "org",
+       "subjectId": "acme",
+       "fieldOrBehavior": "headquarters",
+       "claimType": "fact"
+      },
+      "candidateClaimIds": [
+       "sha256:3d91e973871c720819faf35d6f02ac0a8c9e50c8e24a3caed67e471c13034e5b",
+       "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e"
+      ],
+      "supportingClaimIds": [],
+      "gapCodes": [
+       "contested-value"
+      ]
+     },
+     "identityLinkIds": [
+      "identity-desk.link.acme"
+     ]
+    }
+   }
+  },
+  "equalValues": {
+   "claims": [
+    {
+     "schema_version": "1.0",
+     "id": "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e",
+     "claimType": "fact",
+     "property": "headquarters",
+     "speaker": "user",
+     "posture": "stated",
+     "subject": {
+      "type": "org",
+      "id": "acme"
+     },
+     "value": "Berlin",
+     "source": {
+      "ref": "sitting-a",
+      "locator": "chars:0-20",
+      "excerpt": "Acme is based in Berlin.",
+      "observedAt": "2026-01-10T00:00:00Z"
+     },
+     "visibility": {
+      "kind": "public"
+     }
+    },
+    {
+     "schema_version": "1.0",
+     "id": "sha256:d7852d2d73d10c0169476bb9136242065ea188e1485dca13764294ccc5eb2993",
+     "claimType": "fact",
+     "property": "headquarters",
+     "speaker": "user",
+     "posture": "stated",
+     "subject": {
+      "type": "company",
+      "id": "acme-gmbh"
+     },
+     "value": "Berlin",
+     "source": {
+      "ref": "sitting-b",
+      "locator": "chars:0-20",
+      "excerpt": "Acme GmbH is based in Berlin.",
+      "observedAt": "2026-01-10T00:00:00Z"
+     },
+     "visibility": {
+      "kind": "restricted",
+      "audiences": [
+       "user:only-b"
+      ]
+     }
+    }
+   ],
+   "observations": [
+    {
+     "id": "oa",
+     "observedAt": "2026-03-11T00:00:00Z",
+     "contentDigest": "sha256:9cb0680b1099d66eb8bbbedc4cc6d896e84ed6da5852ecd3ea73360a1d9039e9",
+     "authenticatedPublisher": "producer-a",
+     "bundle": {
+      "schemaVersion": 5,
+      "source": "producer-a:run-1",
+      "producerId": "producer-a",
+      "claims": [
+       {
+        "id": "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e",
+        "subjectType": "org",
+        "subjectId": "acme",
+        "facet": "memory",
+        "claimType": "fact",
+        "fieldOrBehavior": "headquarters",
+        "value": "Berlin",
+        "status": "proposed",
+        "createdAt": "2026-01-10T00:00:00.000Z",
+        "updatedAt": "2026-01-10T00:00:00.000Z",
+        "impactLevel": "medium",
+        "metadata": {
+         "visibility": "public",
+         "memory": {
+          "speaker": "user",
+          "source": {
+           "ref": "sitting-a",
+           "locator": "chars:0-20",
+           "excerpt": "Acme is based in Berlin.",
+           "observedAt": "2026-01-10T00:00:00Z"
+          }
+         }
+        }
+       }
+      ],
+      "evidence": [],
+      "events": [],
+      "policies": []
+     }
+    },
+    {
+     "id": "ob",
+     "observedAt": "2026-03-11T00:00:00Z",
+     "contentDigest": "sha256:c187c798485fc1c898265a4738ea3d1daec7eb3fa6ef27c7adf07ea3060fb870",
+     "authenticatedPublisher": "producer-b",
+     "bundle": {
+      "schemaVersion": 5,
+      "source": "producer-b:run-1",
+      "producerId": "producer-b",
+      "claims": [
+       {
+        "id": "sha256:d7852d2d73d10c0169476bb9136242065ea188e1485dca13764294ccc5eb2993",
+        "subjectType": "company",
+        "subjectId": "acme-gmbh",
+        "facet": "memory",
+        "claimType": "fact",
+        "fieldOrBehavior": "headquarters",
+        "value": "Berlin",
+        "status": "proposed",
+        "createdAt": "2026-01-10T00:00:00.000Z",
+        "updatedAt": "2026-01-10T00:00:00.000Z",
+        "impactLevel": "medium",
+        "metadata": {
+         "visibility": {
+          "audiences": [
+           "user:only-b"
+          ]
+         },
+         "memory": {
+          "speaker": "user",
+          "source": {
+           "ref": "sitting-b",
+           "locator": "chars:0-20",
+           "excerpt": "Acme GmbH is based in Berlin.",
+           "observedAt": "2026-01-10T00:00:00Z"
+          }
+         }
+        }
+       }
+      ],
+      "evidence": [],
+      "events": [],
+      "policies": []
+     }
+    },
+    {
+     "id": "oi",
+     "observedAt": "2026-03-11T00:00:00Z",
+     "contentDigest": "sha256:2f18101daaff57e288737c6dd6e8bb948551ead949b98f5e549723f9f8393b21",
+     "authenticatedPublisher": "identity-desk",
+     "bundle": {
+      "schemaVersion": 5,
+      "source": "identity-desk:review-1",
+      "producerId": "identity-desk",
+      "claims": [
+       {
+        "id": "identity-desk.acme.same-entity",
+        "subjectType": "identity-pair",
+        "subjectId": "org:acme|company:acme-gmbh",
+        "claimType": "identity-mapping",
+        "fieldOrBehavior": "same-entity",
+        "value": true,
+        "createdAt": "2026-03-10T00:00:00Z",
+        "updatedAt": "2026-03-10T00:00:00Z",
+        "verificationPolicyId": "policy.identity"
+       }
+      ],
+      "evidence": [
+       {
+        "id": "identity-desk.acme.same-entity.evidence",
+        "claimId": "identity-desk.acme.same-entity",
+        "evidenceType": "source_excerpt",
+        "method": "extraction",
+        "sourceRef": "source:identity-desk.acme.same-entity",
+        "excerptOrSummary": "Source states same-entity = true.",
+        "observedAt": "2026-03-10T00:00:00Z",
+        "collectedBy": "collector",
+        "passing": true
+       }
+      ],
+      "policies": [
+       {
+        "id": "policy.fact",
+        "claimType": "fact",
+        "requiredEvidence": [
+         "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+         "the cited source states the value"
+        ],
+        "reviewAuthority": "producer review",
+        "validityRule": {
+         "kind": "historical"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+       },
+       {
+        "id": "policy.identity",
+        "claimType": "identity-mapping",
+        "requiredEvidence": [
+         "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+         "a reviewer confirmed the two references denote one entity"
+        ],
+        "reviewAuthority": "producer review",
+        "validityRule": {
+         "kind": "historical"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+       }
+      ],
+      "events": [
+       {
+        "id": "identity-desk.acme.same-entity.verified",
+        "claimId": "identity-desk.acme.same-entity",
+        "status": "verified",
+        "actor": "producer-review",
+        "method": "review",
+        "evidenceIds": [
+         "identity-desk.acme.same-entity.evidence"
+        ],
+        "createdAt": "2026-03-10T00:00:00Z"
+       }
+      ],
+      "identityLinks": [
+       {
+        "id": "identity-desk.link.acme",
+        "subjects": [
+         {
+          "subjectType": "org",
+          "subjectId": "acme"
+         },
+         {
+          "subjectType": "company",
+          "subjectId": "acme-gmbh"
+         }
+        ],
+        "relation": "equivalent",
+        "reason": "Reviewed match on registry number.",
+        "mappingClaimId": "identity-desk.acme.same-entity"
+       }
+      ]
+     }
+    }
+   ],
+   "authority": {
+    "version": "1",
+    "ownerByClaimId": {
+     "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e": "producer-a",
+     "sha256:d7852d2d73d10c0169476bb9136242065ea188e1485dca13764294ccc5eb2993": "producer-b",
+     "identity-desk.acme.same-entity": "identity-desk"
+    },
+    "eventDecisions": [
+     {
+      "eventId": "identity-desk.acme.same-entity.verified",
+      "eventDigest": "sha256:6716b0b0a8746b77612e4c3eede5ecdae9ac5626f91277083600409ed3e2dd9a",
+      "publisher": "identity-desk",
+      "admitted": true
+     }
+    ],
+    "identityDecisions": [
+     {
+      "linkDigest": "sha256:b543e3f01698f5e1527fbb55e7e52f60cca246a79bb62e1a207fa0a3f8b01827",
+      "publisher": "identity-desk",
+      "mappingClaimId": "identity-desk.acme.same-entity",
+      "mappingClaimDigest": "sha256:9a81b53887ba4067dc899ba1f55555e6367727c36ed5d4fd919c6b1661c01a7b",
+      "evidenceDigests": [
+       {
+        "id": "identity-desk.acme.same-entity.evidence",
+        "digest": "sha256:d49caa8d8ddfab9d18bca538437735fb09cdce2c7b72c5957aba46d0560372e8"
+       }
+      ],
+      "admitted": true
+     }
+    ],
+    "integrityRef": "sha256:8247a803a7c7328926304c81b2851d1dbf7f7427c53db495d35d499f642e460a"
+   },
+   "facts": {
+    "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e": {
+     "query": {
+      "slot": {
+       "subjectType": "org",
+       "subjectId": "acme",
+       "fieldOrBehavior": "headquarters",
+       "claimType": "fact"
+      },
+      "now": "2026-06-01T00:00:00Z",
+      "valuePolicy": "single-json-v1"
+     },
+     "fact": {
+      "outcome": "current",
+      "slot": {
+       "subjectType": "org",
+       "subjectId": "acme",
+       "fieldOrBehavior": "headquarters",
+       "claimType": "fact"
+      },
+      "candidateClaimIds": [],
+      "supportingClaimIds": [
+       "sha256:a9759b64a1006c40b7f32f4aad827f5d6ff4b7ad72b3dfa8ffe597930e45135e",
+       "sha256:d7852d2d73d10c0169476bb9136242065ea188e1485dca13764294ccc5eb2993"
+      ],
+      "gapCodes": []
+     },
+     "identityLinkIds": [
+      "identity-desk.link.acme"
+     ]
+    }
+   }
+  }
+ }
+}

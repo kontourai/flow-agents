@@ -17,9 +17,10 @@ import {
   currentProposedReviewItem, foldCandidateVerifications, reviewResourceApiVersion, runSupportVerifier,
   type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
-import { memoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
+import { memoryAccumulationFact, memoryAccumulationMembers, readMemoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
+import { jsonSnapshot, jsonSnapshotEach, jsonSnapshotList, ownField } from "./memory-json.js";
 import {
-  MemoryClaimError, assertMemoryClaim, foldMemoryText, memorySlotKey, readMemoryVisibility,
+  MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryFieldKey, memorySlotKey, readMemoryVisibility,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
 } from "./memory-claims.js";
 
@@ -197,8 +198,12 @@ export interface MemoryClaimChange {
   current?: readonly MemoryClaim[];
   verifications?: readonly unknown[];
   agreement?: MemoryAgreement | null;
-  /** The part of the host's `projectAccumulation` result for this claim's slot; `memoryAccumulationFact` reads it. */
-  accumulation?: MemoryAccumulationFact | null;
+  /**
+   * The host's `projectAccumulation` result for this claim's slot, and (required with it) the query it answered:
+   * `memoryAccumulationFact` reads the pair, so a result for another slot is refused. Null or absent: not evaluated.
+   */
+  accumulation?: unknown;
+  accumulationQuery?: unknown;
   /** Visibility of the source the claim came from; null or absent is undeclared, which reads as sealed. */
   sourceVisibility?: MemoryVisibility | null;
 }
@@ -206,15 +211,40 @@ export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProp
 export type MemoryChange = MemoryClaimChange | MemoryEntityChange;
 
 /**
- * The rival candidates a projection names must be among the claims the Kit was given for the slot. The visibility bounds, the
- * review item and the verification evidence are all built from those claims; a rival the Kit never saw would be silently
- * missing from every one of them, so the projection and the slot must agree.
+ * The claims that share `claim`'s slot, which is what bounds its visibility, what a verifier checks it against and what a
+ * review item pairs it with. Two things put a claim there:
+ *  - the raw slot: the same subject, claim type, property and qualifiers;
+ *  - the projection naming it, as a candidate or as support. Surface joins subjects an admitted identity mapping declares
+ *    equivalent, so a joined claim carries another raw subject and, with equal values, is named only as support.
+ * A claim the projection names must be a stated claim of the same claim type, property and qualifiers (the subject is the one
+ * dimension the mapping may change; the Kit cannot check the mapping itself, which is the host's authority), and must have been
+ * supplied: a member the Kit never saw would be missing from every bound built from the slot. The projection must also have
+ * answered for this claim's slot. More than `MAX_CURRENT_PER_SLOT` is refused, never cut short.
  */
-function boundFact(fact: MemoryAccumulationFact, claimId: string, slot: readonly MemoryClaim[]): MemoryAccumulationFact {
-  const known = new Set([claimId, ...slot.map(other => other.id)]);
-  const missing = fact.candidateClaimIds.filter(id => !known.has(id));
-  if (missing.length) throw new MemoryClaimError("invalid", `the projection names candidate(s) ${missing.join(", ")} that are not among the slot's current claims`);
-  return fact;
+export function memorySlotPeers(claim: MemoryClaim, current: readonly MemoryClaim[], fact?: MemoryAccumulationFact | null): MemoryClaim[] {
+  const slot = memorySlotKey(claim), field = memoryFieldKey(claim);
+  // The fact's slot is compared as Surface compares slots (canonical key, exact claim type), not as spelled: `HEADQUARTERS` and
+  // `headquarters`, or no qualifiers and `{}`, are one slot there.
+  if (fact && memorySlotKey({ subject: { type: fact.slot.subjectType, id: fact.slot.subjectId }, property: fact.slot.fieldOrBehavior, claimType: fact.slot.claimType, ...(fact.slot.qualifiers ? { qualifiers: fact.slot.qualifiers } : {}) }) !== slot) {
+    throw new MemoryClaimError("invalid", "the projection answered for another slot than this claim's");
+  }
+  const members = new Set(fact ? memoryAccumulationMembers(fact) : []);
+  const peers = new Map<string, MemoryClaim>();
+  for (const other of current) {
+    assertMemoryClaim(other);
+    if (other.id === claim.id) continue;
+    // Every claim the projection names is checked, whether or not its raw subject is the claim's: a plan, a what-if or a
+    // retraction is never support for a slot's value, and a different property is a different slot.
+    if (members.has(other.id) && (other.posture !== "stated" || memoryFieldKey(other) !== field)) {
+      throw new MemoryClaimError("invalid", `the projection names claim ${other.id}, which is not a stated claim of this claim type, property and qualifiers`);
+    }
+    if (members.has(other.id) || memorySlotKey(other) === slot) peers.set(other.id, other);
+  }
+  const missing = [...members].filter(id => id !== claim.id && !peers.has(id));
+  if (missing.length) throw new MemoryClaimError("invalid", `the projection names claim(s) ${missing.join(", ")} that are not among the slot's current claims`);
+  // Reading max + 1 and refusing: a silently truncated slot could hide the conflicting claim.
+  if (peers.size > MAX_CURRENT_PER_SLOT) throw new MemoryClaimError("invalid", `more than ${MAX_CURRENT_PER_SLOT} current claims in one slot`);
+  return [...peers.values()].sort((x, y) => x.id.localeCompare(y.id));
 }
 
 /** A claim's id ignores the order of its audiences and edges; so must the decision that embeds it, or one claim gets two decision ids. */
@@ -226,27 +256,32 @@ const canonicalOrder = (claim: MemoryClaim): MemoryClaim => ({
 const MAX_CURRENT_PER_SLOT = 64;
 const SOURCE_BASELINE = "source";
 
-function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
-  assertMemoryClaim(change.claim);
-  const slot = memorySlotKey(change.claim);
-  // The projection, not the raw subject, says who is in the slot: Surface joins subjects an admitted identity mapping
-  // declares equivalent, so a rival it names can carry a different raw subject. Those rivals are part of the slot here
-  // too, or their visibility would bound nothing and the review item would pair the claim with nobody.
-  const fact = change.accumulation ? memoryAccumulationFact(change.accumulation) : null;
-  const named = new Set(fact?.candidateClaimIds ?? []);
-  const current = (change.current ?? []).filter(other => { assertMemoryClaim(other); return other.id !== change.claim.id && (memorySlotKey(other) === slot || named.has(other.id)); });
-  // Reading max + 1 and refusing: a silently truncated slot could hide the conflicting claim.
-  if (current.length > MAX_CURRENT_PER_SLOT) throw new MemoryClaimError("invalid", `more than ${MAX_CURRENT_PER_SLOT} current claims in one slot`);
-  if (change.agreement != null && !agreementWellFormed(change.agreement)) throw new MemoryClaimError("invalid", "agreement needs integer passes >= 1 and 0 <= agreeing <= passes");
-  const { applicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(change.claim.id), value: change.claim.value }, change.verifications ?? []);
+function claimInput(request: MemoryClaimChange): MemoryClaimRoutingInput {
+  // Each field of the request is read once, with nothing the caller defined running, and the claims and lists are copied as
+  // plain JSON: what is validated below is exactly what is recorded, whatever the objects handed in would answer next time.
+  const field = (key: string) => ownField(request, key, `routing change ${key}`);
+  const claim = jsonSnapshot(field("claim"), "routing change claim") as MemoryClaim;
+  const currentClaims = jsonSnapshotEach(field("current"), "routing change current") as MemoryClaim[];
+  const verifications = jsonSnapshotList(field("verifications"), "routing change verifications");
+  const agreementInput = field("agreement"), sourceInput = field("sourceVisibility");
+  const agreement = agreementInput == null ? null : jsonSnapshot(agreementInput, "routing change agreement") as MemoryAgreement;
+  // A source visibility that cannot be copied as plain data (a hole, a getter, a Proxy) is unreadable, and unreadable is
+  // undeclared, which is sealed: it cannot widen anything, so the claim is checked against a sealed source and routed.
+  let sourceVisibility: MemoryVisibility | null = null;
+  if (sourceInput != null) { try { sourceVisibility = jsonSnapshot(sourceInput, "routing change sourceVisibility") as MemoryVisibility; } catch { sourceVisibility = null; } }
+  assertMemoryClaim(claim);
+  if (agreement !== null && !agreementWellFormed(agreement)) throw new MemoryClaimError("invalid", "agreement needs integer passes >= 1 and 0 <= agreeing <= passes");
+  const accumulation = field("accumulation");
+  const fact = accumulation ? memoryAccumulationFact(accumulation, field("accumulationQuery")) : null;
   // Everything order-dependent is sorted here, so the decision id does not depend on the order inputs arrive in.
-  const ordered = [...current].sort((x, y) => x.id.localeCompare(y.id)).map(canonicalOrder);
+  const ordered = memorySlotPeers(claim, currentClaims, fact).map(canonicalOrder);
+  const { applicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(claim.id), value: claim.value }, verifications);
   return {
-    type: "claim", claim: canonicalOrder(change.claim), current: ordered, verifications: [...applicable],
-    agreement: change.agreement ?? null,
-    accumulation: fact ? boundFact(fact, change.claim.id, ordered) : null,
+    type: "claim", claim: canonicalOrder(claim), current: ordered, verifications: [...applicable],
+    agreement,
+    accumulation: fact,
     baselines: [
-      { ref: SOURCE_BASELINE, visibility: readMemoryVisibility(change.sourceVisibility) ?? null },
+      { ref: SOURCE_BASELINE, visibility: readMemoryVisibility(sourceVisibility) ?? null },
       ...ordered.map(other => ({ ref: other.id, visibility: other.visibility ?? null })),
     ],
   };
@@ -256,8 +291,8 @@ function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
 const isEntityOperation = (value: unknown): value is string => typeof value === "string" && (["merge", "split", "alias", "same-as", "related-to"].includes(value) || /^domain:\S+$/.test(value));
 const nonBlank = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
 
-function entityInput(change: MemoryEntityChange): MemoryEntityRoutingInput {
-  const { proposal } = change, alternatives = proposal?.spec?.alternatives;
+function entityInput(request: MemoryEntityChange): MemoryEntityRoutingInput {
+  const proposal = jsonSnapshot(ownField(request, "proposal", "routing change proposal"), "routing change proposal") as SurveyEntityProposal, alternatives = proposal?.spec?.alternatives;
   if (typeof proposal?.id !== "string" || !proposal.id.trim() || !Array.isArray(alternatives) || alternatives.length === 0) throw new MemoryClaimError("invalid", "an entity change needs a Survey entity proposal with alternatives");
   const operations = new Set<string>(), subjects = new Map<string, { subjectType: string; subjectId: string }>();
   for (const alternative of alternatives) {
@@ -274,7 +309,8 @@ function entityInput(change: MemoryEntityChange): MemoryEntityRoutingInput {
 
 export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision {
   const policy = normalizeMemoryRoutingPolicy(policyInput);
-  const input: MemoryRoutingInput = change.type === "claim" ? claimInput(change) : entityInput(change);
+  const type = ownField(change, "type", "routing change");
+  const input: MemoryRoutingInput = type === "claim" ? claimInput(change as MemoryClaimChange) : entityInput(change as MemoryEntityChange);
   return {
     schema_version: MEMORY_ROUTING_VERSION, id: digestOf({ input, policy }),
     changeId: input.type === "claim" ? input.claim.id : input.proposalRef,
@@ -295,12 +331,21 @@ function assertStoredInputShape(input: MemoryRoutingInput): void {
   if (input.type !== "claim") bad("unknown input type");
   if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
   if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
+  let fact: MemoryAccumulationFact | null = null;
   if (input.accumulation !== null) {
-    try { memoryAccumulationFact(input.accumulation); } catch { bad("accumulation is not a projection result"); }
-    // memoryAccumulationFact also sorts; a stored fact must already be in that form, or the id would not be stable.
-    if (canonicalJson(memoryAccumulationFact(input.accumulation)) !== canonicalJson(input.accumulation)) bad("accumulation is not in canonical form");
-    const known = new Set([input.claim.id, ...input.current.map(other => other.id)]);
-    if (input.accumulation.candidateClaimIds.some(id => !known.has(id))) bad("accumulation names a candidate that is not among the current claims");
+    try { fact = readMemoryAccumulationFact(input.accumulation); } catch { bad("accumulation is not a projection result"); }
+    // The reader also sorts; a stored fact must already be in that form, or the id would not be stable.
+    if (canonicalJson(fact) !== canonicalJson(input.accumulation)) bad("accumulation is not in canonical form");
+  }
+  // The stored `current` must be exactly the claim's slot peers: nothing foreign, nothing dropped, within the bound, and the
+  // projection (if any) answering for this claim's slot and naming only stated claims of its property.
+  try {
+    assertMemoryClaim(input.claim);
+    const peers = memorySlotPeers(input.claim, input.current, fact);
+    if (canonicalJson(peers.map(other => other.id)) !== canonicalJson([...input.current].map(other => other.id).sort((x, y) => x.localeCompare(y)))) bad("current holds a claim that is not in the claim's slot");
+  } catch (error) {
+    if (error instanceof MemoryClaimError && /^Memory claim invalid: stored routing input/.test(error.message)) throw error;
+    bad(error instanceof Error ? error.message : "slot membership is malformed");
   }
   if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.visibility === null || readMemoryVisibility(base.visibility) !== undefined))) bad("baselines are malformed");
   // The peers' baselines are re-derivable from the embedded claims; a stored input may not drop one to clear a widening.
@@ -325,7 +370,6 @@ export function recomputeMemoryRouting(decision: MemoryRoutingDecision): Routing
     assertStoredInputShape(decision.input);
     if (decision.input.type === "claim") {
       assertMemoryClaim(decision.input.claim);
-      decision.input.current.forEach(other => assertMemoryClaim(other));
       const { rejected, inapplicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(decision.input.claim.id), value: decision.input.claim.value }, decision.input.verifications);
       if (rejected.length) mismatches.push("a stored verification record is invalid");
       if (inapplicable.length) mismatches.push("a stored verification record is not bound to this claim's value");
@@ -344,13 +388,15 @@ export function recomputeMemoryRouting(decision: MemoryRoutingDecision): Routing
 }
 
 /** Runs a Survey support verifier on the claim against the same-slot claims it may contradict. Undefined when there is nothing to check against. */
-export async function verifyMemoryClaimAgainstCurrent(claim: MemoryClaim, current: readonly MemoryClaim[], verifier: SupportVerifier, options?: RunSupportVerifierOptions): Promise<CandidateVerification | undefined> {
-  const slot = memorySlotKey(claim);
-  const evidence = current.filter(other => other.posture === "stated" && other.id !== claim.id && memorySlotKey(other) === slot)
-    .sort((x, y) => x.id.localeCompare(y.id)).slice(0, 8)
+export async function verifyMemoryClaimAgainstCurrent(claim: MemoryClaim, current: readonly MemoryClaim[], verifier: SupportVerifier, options?: RunSupportVerifierOptions, accumulation?: MemoryAccumulationFact | null): Promise<CandidateVerification | undefined> {
+  // The same membership routing uses: pass the fact `memoryAccumulationFact` read, and a claim joined through an admitted
+  // identity mapping is checked against too. The claims are copied once, as plain JSON, before anything is read from them.
+  const own = jsonSnapshot(claim, "claim to verify") as MemoryClaim;
+  const evidence = memorySlotPeers(own, jsonSnapshotEach(current, "current claims") as MemoryClaim[], accumulation).filter(other => other.posture === "stated")
+    .slice(0, 8)
     .map(other => ({ id: other.id, excerpt: other.source.excerpt, locator: other.source.locator, context: `${other.subject.label ?? other.subject.id}: ${other.property}` }));
   if (evidence.length === 0) return undefined;
-  return runSupportVerifier(verifier, { candidateId: memoryProposedCandidateId(claim.id), value: claim.value, evidence }, options);
+  return runSupportVerifier(verifier, { candidateId: memoryProposedCandidateId(own.id), value: own.value, evidence }, options);
 }
 
 // ---------------------------------------------------------------------------

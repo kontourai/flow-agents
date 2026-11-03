@@ -155,3 +155,33 @@ test("a claim's own value is not part of the proposal, so whatever it holds cann
   }
 });
 function deepValue(n) { let v = 1; for (let i = 0; i < n; i++) v = { a: v }; return v; }
+
+// --- review round 7 ---------------------------------------------------------------------------------------------------------
+
+test("the emitter chooses its fields without running anything the caller defined: an overridden map, a getter or a Proxy is refused", async () => {
+  const { owner, budget } = await claims();
+  const template = await request();
+  const grounded = [{ claim: owner, stance: "supports" }, { claim: budget, stance: "contradicts" }];
+  const candidate = list => ({ operation: "merge", subjects: SUBJECTS, claims: list, confidenceComponents: { name: 0.9 } });
+  const withMap = [...grounded]; withMap.map = () => [{ stance: "supports", id: owner.id, ref: owner.source.ref, observedAt: owner.source.observedAt, locator: "l", excerpt: "e" }];
+  assert.throws(() => memoryEntityProposalInput(({ ...template, candidates: [candidate(withMap)] })), MemoryClaimError, "an own map would collapse two pieces of evidence into one");
+  let reads = 0;
+  const flipping = { ...owner }; Object.defineProperty(flipping, "source", { enumerable: true, get() { return ++reads % 2 ? owner.source : budget.source; } });
+  assert.throws(() => memoryEntityProposalInput(({ ...template, candidates: [candidate([{ claim: flipping, stance: "supports" }])] })), MemoryClaimError, "a source that answers differently each time");
+  assert.equal(reads, 0, "the getter never ran");
+  assert.throws(() => memoryEntityProposalInput(({ ...template, candidates: [candidate(new Proxy(grounded, {}))] })), MemoryClaimError, "a Proxy list");
+  assert.throws(() => memoryEntityProposalInput(({ ...template, candidates: new Proxy([candidate(grounded)], {}) })), MemoryClaimError, "a Proxy list of candidates");
+  assert.throws(() => memoryEntityProposalInput(({ ...template, candidates: [new Proxy(candidate(grounded), {})] })), MemoryClaimError, "a Proxy candidate");
+  const ok = memoryEntityProposalInput(({ ...template, candidates: [candidate(grounded)] }));
+  assert.deepEqual(ok.alternatives[0].evidence.map(item => [item.id, item.stance]), [[owner.id, "supports"], [budget.id, "contradicts"]], "the honest request keeps both");
+});
+
+test("confidence components must be an object, as Survey requires: null, a list and a number are refused, not coerced", async () => {
+  const { owner } = await claims();
+  const template = await request();
+  for (const [what, value] of [["null", null], ["a list", [0.5]], ["a number", 7], ["a string", "high"]]) {
+    assert.throws(() => memoryEntityProposalInput(({ ...template, candidates: [{ operation: "merge", subjects: SUBJECTS, claims: [{ claim: owner, stance: "supports" }], confidenceComponents: value }] })), MemoryClaimError, what);
+  }
+  const absent = memoryEntityProposalInput(({ ...template, candidates: [{ operation: "merge", subjects: SUBJECTS, claims: [{ claim: owner, stance: "supports" }] }] }));
+  assert.deepEqual(absent.alternatives[0].confidenceComponents, {}, "an absent object is empty");
+});

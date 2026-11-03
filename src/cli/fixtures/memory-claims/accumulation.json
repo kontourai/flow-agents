@@ -1,5 +1,5 @@
 {
- "source": "kontourai/surface@b7d932b8b496bb01af7437df5325f0e0b1fecd51 projectAccumulation over the Kit's mapped claims",
+ "source": "@kontourai/surface@6.3.0 projectAccumulation over the Kit's mapped claims (first produced at surface@b7d932b; facts regenerated from the release)",
  "now": "2026-11-02T00:00:00Z",
  "scenarios": {
   "sitting0": {
@@ -243,7 +243,16 @@
      },
      "fact": {
       "outcome": "current",
+      "slot": {
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "fieldOrBehavior": "primary database",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [],
+      "supportingClaimIds": [
+       "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+      ],
       "gapCodes": []
      },
      "edges": []
@@ -261,7 +270,16 @@
      },
      "fact": {
       "outcome": "current",
+      "slot": {
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "fieldOrBehavior": "on-call owner",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [],
+      "supportingClaimIds": [
+       "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb"
+      ],
       "gapCodes": []
      },
      "edges": []
@@ -279,7 +297,16 @@
      },
      "fact": {
       "outcome": "current",
+      "slot": {
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "fieldOrBehavior": "retry budget",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [],
+      "supportingClaimIds": [
+       "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02"
+      ],
       "gapCodes": []
      },
      "edges": []
@@ -824,10 +851,17 @@
      },
      "fact": {
       "outcome": "contested",
+      "slot": {
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "fieldOrBehavior": "primary database",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [
        "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
        "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
       ],
+      "supportingClaimIds": [],
       "gapCodes": [
        "contested-value",
        "supersession-pending"
@@ -854,10 +888,17 @@
      },
      "fact": {
       "outcome": "contested",
+      "slot": {
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "fieldOrBehavior": "retry budget",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [
        "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
        "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
       ],
+      "supportingClaimIds": [],
       "gapCodes": [
        "contested-value"
       ]
@@ -877,7 +918,16 @@
      },
      "fact": {
       "outcome": "current",
+      "slot": {
+       "subjectType": "team",
+       "subjectId": "platform team",
+       "fieldOrBehavior": "lead",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [],
+      "supportingClaimIds": [
+       "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c"
+      ],
       "gapCodes": []
      },
      "edges": []
@@ -1867,7 +1917,16 @@
      },
      "fact": {
       "outcome": "current",
+      "slot": {
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "fieldOrBehavior": "primary database",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [],
+      "supportingClaimIds": [
+       "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c"
+      ],
       "gapCodes": []
      },
      "edges": [
@@ -1891,10 +1950,17 @@
      },
      "fact": {
       "outcome": "contested",
+      "slot": {
+       "subjectType": "service",
+       "subjectId": "widget service",
+       "fieldOrBehavior": "retry budget",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [
        "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
        "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
       ],
+      "supportingClaimIds": [],
       "gapCodes": [
        "contested-value"
       ]
@@ -1914,7 +1980,16 @@
      },
      "fact": {
       "outcome": "current",
+      "slot": {
+       "subjectType": "team",
+       "subjectId": "platform team",
+       "fieldOrBehavior": "lead",
+       "claimType": "knowledge.memory-claim"
+      },
       "candidateClaimIds": [],
+      "supportingClaimIds": [
+       "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c"
+      ],
       "gapCodes": []
      },
      "edges": []

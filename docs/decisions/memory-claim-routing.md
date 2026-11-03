@@ -46,8 +46,9 @@ memory; every other piece stays with its owner.
   host, and the Kit compares no values itself. Slot identity uses Surface's `canonicalClaimKey` plus
   `claimType` (`#204`, design at `7486c6d`), values compare by structural JSON equality, and `validTime`
   is half-open. Consequence: until a reviewer verifies a successor and the host admits it, Surface keeps both
-  candidates, so an unreviewed replacement is contested and routes; a replacement is auto-recorded as
-  `proposed` only after that admission. The visibility
+  candidates, so an unreviewed replacement is contested and routes. After the host admits the verification
+  the slot reads `current` and the replacement is recorded as `proposed` unless another rule fires. The projection decides, and it
+  can decide earlier: Surface projected an equal-value replacement as `current` while its edge was still `pending`. The visibility
   lattice is Surface's (surface@6.3.0): a claim's `visibility` has Surface's form and the widening rule calls
   Surface's `meetVisibility`. Entity merge and split review is Survey's (survey@8.3.0): the Kit emits
   `EntityProposalInput` and routes the proposal, and Survey builds the item and records the outcome. Both packages

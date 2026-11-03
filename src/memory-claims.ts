@@ -159,11 +159,16 @@ export function foldMemoryText(text: string): string {
 export const memoryValuesEqual = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b);
 
 /**
- * The slot a claim competes in: Surface's `canonicalClaimKey` (subject type and id, field, qualifiers) with
- * `claimType` added, as the knowledge-accumulation decision specifies. Surface owns the normalisation.
+ * The field a claim competes in, apart from whose it is: Surface's `canonicalClaimKey` (field, qualifiers) with `claimType`
+ * added, as the knowledge-accumulation decision specifies. Surface compares `claimType` exactly (`fact` and `FACT` are two
+ * slots), so it is not folded here. The subject is a placeholder: two subjects an admitted identity mapping joins share a field.
  */
+export const memoryFieldKey = (claim: Pick<MemoryClaim, "property" | "claimType" | "qualifiers">): string =>
+  canonicalJson([claim.claimType, canonicalClaimKey({ subjectType: "subject", subjectId: "subject", fieldOrBehavior: claim.property, ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}) })]);
+
+/** The slot a claim competes in: its field (see `memoryFieldKey`) and its own subject. Surface owns the normalisation. */
 export const memorySlotKey = (claim: Pick<MemoryClaim, "subject" | "property" | "claimType" | "qualifiers">): string =>
-  canonicalJson([claim.claimType.trim().toLowerCase(), canonicalClaimKey({ subjectType: claim.subject.type, subjectId: claim.subject.id, fieldOrBehavior: claim.property, ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}) })]);
+  canonicalJson([claim.claimType, canonicalClaimKey({ subjectType: claim.subject.type, subjectId: claim.subject.id, fieldOrBehavior: claim.property, ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}) })]);
 
 const INSTANT = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 /**

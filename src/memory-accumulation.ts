@@ -13,7 +13,8 @@
  */
 import type { AccumulationClaim, AccumulationQuery } from "@kontourai/surface";
 import { MemoryClaimError, memoryInstant, readMemoryVisibility, type MemoryClaim } from "./memory-claims.js";
-import { jsonSnapshot } from "./memory-json.js";
+import { types } from "node:util";
+import { jsonSnapshot, jsonSnapshotEach } from "./memory-json.js";
 
 /** Surface's `AccumulationClaim` (a `Claim` plus the provisional `validTime` and `supersedes`), which is what the Kit fills. */
 export type MemoryAccumulationClaim = AccumulationClaim;
@@ -39,8 +40,18 @@ export type MemoryAccumulationQuery = AccumulationQuery;
 export interface MemoryAccumulationFact {
   outcome: "current" | "contested" | "invalid" | "none";
   reason?: string;
+  /**
+   * The slot of the query the host says it ran. A projection result carries no query of its own, so this is the host's word:
+   * the Kit checks it is the claim's slot, and cannot check the result was computed for it.
+   */
+  slot: MemoryAccumulationQuery["slot"];
   /** The claims that are candidates for the slot's value. A contest names every one of them. */
   candidateClaimIds: string[];
+  /**
+   * The claims that support the slot's current value. Surface joins subjects an admitted identity mapping declares equivalent,
+   * so with equal values the slot is `current`, nobody is a candidate, and this list is the only place the joined claims appear.
+   */
+  supportingClaimIds: string[];
   gapCodes: string[];
 }
 
@@ -53,20 +64,21 @@ export interface MemoryAccumulationFact {
  * leaves the slot contested until a reviewer decides. `visibility` goes where Surface reads a declared visibility
  * (`metadata.visibility`); absent stays absent, which Surface reads as sealed.
  */
-export function memoryClaimToAccumulationClaim(claim: MemoryClaim): MemoryAccumulationClaim {
+export function memoryClaimToAccumulationClaim(input: MemoryClaim): MemoryAccumulationClaim {
+  // The claim is copied once, as plain JSON, and everything below reads the copy: a getter or a Proxy cannot hand one value to
+  // a check and another to the mapped claim. A key set to undefined is the same as no key (that is what the claim's id covers),
+  // and Surface digests the object as given, so one claim gives one Surface claim.
+  const claim = jsonSnapshot(input, "memory claim") as MemoryClaim;
   if (claim.posture !== "stated") throw new MemoryClaimError("invalid", `only a stated claim is a candidate for a slot, not a ${claim.posture} one`);
   assertSlotFields(claim);
-  // What the claim's id covers is its JSON content, where a key set to undefined is the same as no key. Surface digests the
-  // object as given, so the mapping copies the parts that can hold such keys as plain JSON: one claim, one Surface claim.
-  const value = jsonSnapshot(claim.value, "claim value"), source = jsonSnapshot(claim.source, "claim source") as MemoryClaim["source"];
-  const qualifiers = claim.qualifiers === undefined ? undefined : jsonSnapshot(claim.qualifiers, "claim qualifiers") as Record<string, string>;
+  const { value, source, qualifiers } = claim;
   // Audiences are a set (the claim id treats them so); sorted and de-duplicated, so one claim has one content digest.
   const visibility = claim.visibility === undefined ? undefined : readMemoryVisibility(claim.visibility);
   if (claim.visibility !== undefined && visibility === undefined) throw new MemoryClaimError("invalid", "visibility must be public or restricted to named audiences");
   const declared = visibility === undefined ? undefined : visibility.kind === "public" ? "public" as const : { audiences: [...visibility.audiences] };
   // Surface parses timestamps strictly, and a claim built directly keeps whatever spelling it was given (a bare date): the
   // mapping is where they become the UTC instants Surface reads.
-  const observed = utc(claim.source.observedAt, "source.observedAt");
+  const observed = utc(source.observedAt, "source.observedAt");
   const validTime = claim.validTime === undefined ? undefined : {
     ...(claim.validTime.from !== undefined ? { from: utc(claim.validTime.from, "validTime.from") } : {}),
     ...(claim.validTime.until !== undefined ? { until: utc(claim.validTime.until, "validTime.until") } : {}),
@@ -88,7 +100,9 @@ export function memoryClaimToAccumulationClaim(claim: MemoryClaim): MemoryAccumu
  * successor. A target that is not available, or is not a stated claim (only those are candidates), is an error here
  * rather than a throw inside the projection.
  */
-export function memoryAccumulationClaims(claims: readonly MemoryClaim[], available: readonly MemoryClaim[] = []): MemoryAccumulationClaim[] {
+export function memoryAccumulationClaims(claimsInput: readonly MemoryClaim[], availableInput: readonly MemoryClaim[] = []): MemoryAccumulationClaim[] {
+  // Copied once, as plain JSON, before anything is read from them (see memoryClaimToAccumulationClaim).
+  const claims = jsonSnapshotEach(claimsInput, "claims") as MemoryClaim[], available = jsonSnapshotEach(availableInput, "available claims") as MemoryClaim[];
   const byId = new Map([...available, ...claims].map(claim => [claim.id, claim]));
   const out = new Map<string, MemoryClaim>();
   // Surface refuses an edge whose target is not in the same bundle, so every claim reachable through edges travels with
@@ -121,7 +135,7 @@ export function memoryAccumulationQuery(claim: MemoryClaim, now: string): Memory
 const OUTCOMES = ["current", "contested", "invalid", "none"];
 /** A list of non-empty strings, read by own index so a hole or an inherited entry is refused rather than skipped or invented. */
 function readStrings(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || types.isProxy(value)) return undefined;
   const length = value.length; // once: a list whose length changes while it is read is not a list we can trust
   if (length > 10_000) return undefined;
   const out: string[] = [];
@@ -139,20 +153,52 @@ function readStrings(value: unknown): string[] | undefined {
  * differently the next time it is read, and Surface's result has none.
  */
 function ownData(record: object, key: string): unknown {
+  if (types.isProxy(record)) return undefined; // a Proxy answers as it likes, differently each time: it reads as absent, so it is refused
   const descriptor = Object.getOwnPropertyDescriptor(record, key);
   return descriptor && "value" in descriptor ? descriptor.value : undefined;
 }
 
-/** Reads the fact out of a `projectAccumulation` result, or throws: a result that does not look like one is not a fact. */
-export function memoryAccumulationFact(result: unknown): MemoryAccumulationFact {
-  const refuse = (): never => { throw new MemoryClaimError("invalid", "not an accumulation projection result: it needs an outcome, candidateClaimIds and gapCodes"); };
+/** Every claim the projection names for the slot, as a candidate or as support. These, not the raw subject, say who is in the slot. */
+export const memoryAccumulationMembers = (fact: Pick<MemoryAccumulationFact, "candidateClaimIds" | "supportingClaimIds">): string[] => [...new Set([...fact.candidateClaimIds, ...fact.supportingClaimIds])].sort();
+
+/** The slot of a query the Kit could have built: four non-blank names and optional qualifiers, under the one value policy it knows. */
+function readQuerySlot(query: unknown): MemoryAccumulationQuery["slot"] {
+  const refuse = (): never => { throw new MemoryClaimError("invalid", "the projection's query is needed to read its result: a slot and the single-json-v1 value policy"); };
+  if (!query || typeof query !== "object" || ownData(query, "valuePolicy") !== "single-json-v1") return refuse();
+  const raw = ownData(query, "slot");
+  if (!raw || typeof raw !== "object") return refuse();
+  const slot = jsonSnapshot(raw, "query slot") as Record<string, unknown>;
+  const names = ["subjectType", "subjectId", "fieldOrBehavior", "claimType"].map(key => slot[key]);
+  if (names.some(name => typeof name !== "string" || !name.trim())) return refuse();
+  const qualifiers = slot.qualifiers;
+  if (qualifiers !== undefined && (typeof qualifiers !== "object" || qualifiers === null || Array.isArray(qualifiers) || Object.values(qualifiers).some(value => typeof value !== "string"))) return refuse();
+  const [subjectType, subjectId, fieldOrBehavior, claimType] = names as string[];
+  return { subjectType, subjectId, fieldOrBehavior, claimType, ...(qualifiers ? { qualifiers: qualifiers as Record<string, string> } : {}) };
+}
+
+/**
+ * Reads the fact out of a `projectAccumulation` result and the query it answered, or throws: a result that does not look like
+ * one is not a fact, and one without its query cannot be told apart from a result for another slot.
+ */
+export function memoryAccumulationFact(result: unknown, query: unknown): MemoryAccumulationFact {
+  return factFrom(result, readQuerySlot(query));
+}
+
+/** Reads a fact that was already read (or stored) back into canonical form, or throws. Its slot is part of it. */
+export function readMemoryAccumulationFact(fact: unknown): MemoryAccumulationFact {
+  if (!fact || typeof fact !== "object") return factFrom(fact, undefined as never);
+  return factFrom(fact, readQuerySlot({ slot: ownData(fact, "slot"), valuePolicy: "single-json-v1" }));
+}
+
+function factFrom(result: unknown, slot: MemoryAccumulationQuery["slot"]): MemoryAccumulationFact {
+  const refuse = (): never => { throw new MemoryClaimError("invalid", "not an accumulation projection result: it needs an outcome, candidateClaimIds, supportingClaimIds and gapCodes"); };
   if (!result || typeof result !== "object") return refuse();
   // Each field is read once, as data (Surface's result is a plain object), so what is checked is what is returned.
   const outcome = ownData(result, "outcome"), reason = ownData(result, "reason");
-  const candidates = readStrings(ownData(result, "candidateClaimIds")), gaps = readStrings(ownData(result, "gapCodes"));
-  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome) || !candidates || !gaps) return refuse();
+  const candidates = readStrings(ownData(result, "candidateClaimIds")), supporting = readStrings(ownData(result, "supportingClaimIds")), gaps = readStrings(ownData(result, "gapCodes"));
+  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome) || !candidates || !supporting || !gaps) return refuse();
   const distinct = [...new Set(candidates)].sort();
   // A contest is between at least two candidates: Surface reports `contested` only when they hold different values.
   if (outcome === "contested" && distinct.length < 2) throw new MemoryClaimError("invalid", "a contested projection names at least two candidates");
-  return { outcome: outcome as MemoryAccumulationFact["outcome"], ...(typeof reason === "string" ? { reason } : {}), candidateClaimIds: distinct, gapCodes: [...new Set(gaps)].sort() };
+  return { outcome: outcome as MemoryAccumulationFact["outcome"], ...(typeof reason === "string" ? { reason } : {}), slot, candidateClaimIds: distinct, supportingClaimIds: [...new Set(supporting)].sort(), gapCodes: [...new Set(gaps)].sort() };
 }
