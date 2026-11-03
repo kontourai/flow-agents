@@ -149,7 +149,7 @@ requires a human is `reviewerKind === "human"` and `reviewerKindInferred === fal
 `resolveReviewerKind`, which infers a kind for a record that has none. Stored review state with a `reviewerKind` that is not one of
 the three, or a `reviewerKindInferred` that is not a boolean, is refused, as Survey refuses an unknown kind. `memoryReviewOutcome(decision, itemName)` only says what a decision *means* (confirm, correct, reject, hold) and does not look at who made it: a host that acts on it directly asks `memoryDecisionMayPromote` first. `memoryDecisionMayPromote(decision, {routed})` (exported by the adapter with `memoryReviewerKind`) is the check a host makes before passing a decision to
 Survey's `entityOutcomeFromDecision` (entity review is Survey's; the Kit does not call it). Each routed claim's review item carries the
-label `memory.reviewer: human-required`, so a workbench can show what the item needs. Review time is the deciding reviewer's own: session events tagged `agent` or `rule`, or by another actor than the decision's, are not borrowed as its time (Survey names decisions per session, so a name can recur). Recall reports the annotations it ignored
+label `memory.reviewer: human-required`, so a workbench can show what the item needs. Review time is the deciding reviewer's own: session events tagged `agent` or `rule` (or marked inferred), or by another actor than the decision's, are not borrowed as its time, and the submission counted is the one made at the instant the decision says it was reviewed (Survey names decisions per session, so a name can recur, and stamps a submission with its decision's `reviewedAt`); with no such submission the time is null. Recall reports the annotations it ignored
 (`review.annotations`) and metrics count them (`reviewer.annotated`); an item with only annotations is `pending`.
 
 ### Data the Kit records is plain data
@@ -163,8 +163,10 @@ the claims recall presents, and the claims the accumulation mapper and the verif
 drop or what could answer differently the next time it is read: accessors, `-0`, holes, class instances and array subclasses,
 cycles, a `__proto__` key, anything over a size or depth bound, and **any Proxy** (a Proxy answers every question as it likes, so
 no list of checks makes one safe; it is refused, not defended against). Request fields are chosen with selectors that run nothing
-the caller defined (no getter, no overridden `map`, no trap). Recall takes only the few small fields it shows from a routing
-decision rather than copying the whole decision. Two deliberate exceptions to refusing: a recall claim that cannot be copied is
+the caller defined (no getter, no overridden `map`, no trap). Recall reads the routing records of the claims it presents and no others, and takes the few small fields it shows from a
+decision; a record that says a claim was not routed is recomputed before it is believed, which costs as much as the decision is
+large (a legitimate decision of about 3 MB took 183 ms to recompute in review), so recall's work is bounded by the records of the
+claims it shows, each already bounded where it was taken in, and not by a separate aggregate budget. Two deliberate exceptions to refusing: a recall claim that cannot be copied is
 *withheld and reported*, and a `sourceVisibility` that cannot be copied is recorded as undeclared, which reads as sealed (it can
 only make a claim route, never widen it). The entity emitter requires `confidenceComponents` to be an object (or absent), as
 Survey does. The Kit is stricter than Survey in one place: `-0` is refused, because it does not survive JSON.

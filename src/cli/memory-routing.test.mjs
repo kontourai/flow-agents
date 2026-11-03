@@ -402,8 +402,9 @@ test("metrics: proposed count, routed share, reviewer decisions and review time,
   assert.ok(reviews.every(review => review.item), `items: ${items.map(item => item.spec.target)}`);
   const reviewDecisions = [], reviewEvents = [];
   reviews.forEach((review, index) => {
-    const session = reviewSession(review.item, review);
     const start = Date.parse("2026-11-02T10:00:00.000Z") + index * 3_600_000;
+    // Survey stamps a decision with the instant it was submitted, and so the submission event.
+    const session = reviewSession(review.item, { ...review, reviewedAt: new Date(start + review.seconds * 1000).toISOString() });
     reviewDecisions.push(...buildReviewDecisionsFromSession(session));
     reviewEvents.push(...buildReviewSessionEvents(session, `session-${index}`).map(event => {
       const at = event.spec.eventType === "decision-submitted" ? start + review.seconds * 1000 : start;
@@ -561,8 +562,8 @@ test("two spellings of one instant are a tie, and a tie keeps the later entry", 
 });
 
 test("review time comes from the session that submitted this decision, not the highest sequence number", () => {
-  const { decision, item, session, made } = twoDecisions(["reject-proposed", "2026-11-01T10:00:00.000Z"], ["reject-proposed", "2026-11-02T10:00:00.000Z"]);
-  const events = (name, verdict, selectedAt, submittedAt, shift) => buildReviewSessionEvents(session(verdict, selectedAt), name).map(event => ({ ...event, spec: { ...event.spec, sequence: event.spec.sequence + shift, occurredAt: event.spec.eventType === "decision-submitted" ? submittedAt : selectedAt } }));
+  const { decision, item, session, made } = twoDecisions(["reject-proposed", "2026-11-01T10:01:40.000Z"], ["reject-proposed", "2026-11-02T10:00:10.000Z"]);
+  const events = (name, verdict, selectedAt, submittedAt, shift) => buildReviewSessionEvents(session(verdict, submittedAt), name).map(event => ({ ...event, spec: { ...event.spec, sequence: event.spec.sequence + shift, occurredAt: event.spec.eventType === "decision-submitted" ? submittedAt : selectedAt } }));
   // Sequence numbers are per session, so either session may have the higher ones: neither highest nor lowest picks the right one.
   for (const [olderShift, newerShift] of [[3, 0], [0, 3]]) {
     const older = events("session-old", "reject-proposed", "2026-11-01T10:00:00.000Z", "2026-11-01T10:01:40.000Z", olderShift);
@@ -1225,16 +1226,16 @@ test("metrics: a routing record that says 'not routed' is believed only if it re
 
 test("review time is the human decision's own: another session's events under a reused decision name are not borrowed", () => {
   const { decision, item } = routedClaim();
-  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" } } };
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T10:00:20.000Z" } };
   const events = (kind, actor, session, start, end) => [
     { kind: "ReviewSessionEvent", metadata: { name: `${session}-a` }, spec: { sessionName: session, sequence: 1, eventType: "item-selected", occurredAt: start, reviewItemName: item.metadata.name, ...(kind ? { reviewerKind: kind } : {}), ...(actor ? { actor: { id: actor } } : {}) } },
     { kind: "ReviewSessionEvent", metadata: { name: `${session}-b` }, spec: { sessionName: session, sequence: 2, eventType: "decision-submitted", occurredAt: end, reviewItemName: item.metadata.name, reviewDecisionName: "decision-1", ...(kind ? { reviewerKind: kind } : {}), ...(actor ? { actor: { id: actor } } : {}) } },
   ];
   const seconds = (reviewEvents) => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents }).reviewSeconds;
-  const agentEvents = events("agent", "agent:bot", "agent-session", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z");
+  const agentEvents = events("agent", "agent:bot", "agent-session", "2026-11-02T09:59:50.000Z", "2026-11-02T10:00:20.000Z");
   assert.equal(seconds(agentEvents), null, "events tagged as an agent's give a human decision no review time");
-  assert.equal(seconds(events("rule", undefined, "rule-session", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null);
-  assert.equal(seconds(events(undefined, "agent:bot", "other-session", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null, "untagged events by a different actor are not the reviewer's");
+  assert.equal(seconds(events("rule", undefined, "rule-session", "2026-11-02T09:59:50.000Z", "2026-11-02T10:00:20.000Z")), null);
+  assert.equal(seconds(events(undefined, "agent:bot", "other-session", "2026-11-02T09:59:50.000Z", "2026-11-02T10:00:20.000Z")), null, "untagged events by a different actor are not the reviewer's");
   assert.equal(seconds(events("human", "person:reviewer", "human-session", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "the human's own events are the time");
   assert.equal(seconds(events(undefined, "person:reviewer", "legacy-session", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "a legacy event by the same actor still counts");
   assert.equal(seconds([...agentEvents, ...events("human", "person:reviewer", "human-session", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")]), 20, "mixed: only the human's");
@@ -1285,15 +1286,53 @@ test("strictest routing record wins whatever the order: a routed record is never
 
 test("review time: events are the deciding reviewer's by their own kind as well as by actor, and a legacy event with no actor stays", () => {
   const { decision, item } = routedClaim();
-  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" } } };
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T10:00:20.000Z" } };
   const pair = (kind, actor, session, start, end) => ["item-selected", "decision-submitted"].map((eventType, index) => ({ kind: "ReviewSessionEvent", metadata: { name: `${session}-${index}` },
     spec: { sessionName: session, sequence: index + 1, eventType, occurredAt: index ? end : start, reviewItemName: item.metadata.name, ...(index ? { reviewDecisionName: "decision-1" } : {}), ...(kind ? { reviewerKind: kind } : {}), ...(actor ? { actor: { id: actor } } : {}) } }));
   const seconds = events => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents: events }).reviewSeconds;
   // With no actor on the events, only their own kind can exclude them.
-  assert.equal(seconds(pair("agent", undefined, "a", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null, "agent-tagged, no actor");
-  assert.equal(seconds(pair("rule", undefined, "r", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null, "rule-tagged, no actor");
+  assert.equal(seconds(pair("agent", undefined, "a", "2026-11-02T09:59:50.000Z", "2026-11-02T10:00:20.000Z")), null, "agent-tagged, no actor");
+  assert.equal(seconds(pair("rule", undefined, "r", "2026-11-02T09:59:50.000Z", "2026-11-02T10:00:20.000Z")), null, "rule-tagged, no actor");
   assert.equal(seconds(pair("human", undefined, "h", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "human-tagged, no actor");
   assert.equal(seconds(pair(undefined, undefined, "l", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "a legacy event with neither kind nor actor stays");
+});
+
+test("review time: an agent or rule event also marked inferred is still not the human's time (review 16)", () => {
+  const { decision, item } = routedClaim();
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T10:00:20.000Z" } };
+  const pair = (extra, start, end) => ["item-selected", "decision-submitted"].map((eventType, index) => ({ kind: "ReviewSessionEvent", metadata: { name: `s-${index}` },
+    spec: { sessionName: "s", sequence: index + 1, eventType, occurredAt: index ? end : start, reviewItemName: item.metadata.name, ...(index ? { reviewDecisionName: "decision-1" } : {}), ...extra } }));
+  const seconds = events => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents: events }).reviewSeconds;
+  const from = "2026-11-02T09:58:20.000Z", to = "2026-11-02T10:00:20.000Z";
+  for (const kind of ["agent", "rule"]) for (const inferred of [true, "yes"]) assert.equal(seconds(pair({ reviewerKind: kind, reviewerKindInferred: inferred }, from, to)), null, `${kind} inferred=${inferred}`);
+  assert.equal(seconds(pair({ reviewerKind: "human", reviewerKindInferred: true }, from, to)), null, "an inferred human event is not an attestation either");
+  assert.equal(seconds(pair({ reviewerKind: "human", reviewerKindInferred: false }, "2026-11-02T10:00:00.000Z", to)), 20, "an attested human event is the time");
+});
+
+test("review time: a submission under a reused decision name from another session of the same reviewer is not this decision's (review 16)", () => {
+  const { decision, item } = routedClaim();
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T10:00:20.000Z" } };
+  const session = (name, start, end) => ["item-selected", "decision-submitted"].map((eventType, index) => ({ kind: "ReviewSessionEvent", metadata: { name: `${name}-${index}` },
+    spec: { sessionName: name, sequence: index + 1, eventType, occurredAt: index ? end : start, actor: { id: "person:reviewer" }, reviewItemName: item.metadata.name, ...(index ? { reviewDecisionName: "decision-1" } : {}) } }));
+  const seconds = events => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents: events }).reviewSeconds;
+  const other = session("other", "2026-11-02T08:00:00.000Z", "2026-11-02T08:05:00.000Z");
+  assert.equal(seconds(other), null, "the only submission happened at another instant: no time, nothing borrowed");
+  const own = session("own", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z");
+  for (const order of [[...other, ...own], [...own, ...other]]) assert.equal(seconds(order), 20, "the submission at the decision's own instant is the one");
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [{ ...human, spec: { ...human.spec, reviewedAt: undefined } }], reviewEvents: own }).reviewSeconds, null, "a decision with no reviewedAt has no time");
+});
+
+test("recall reads and recomputes the routing records of the claims it presents and no others (review 16)", () => {
+  const { claim, decision } = routedClaim();
+  const other = make({ value: "PostgreSQL 17", property: "other property" });
+  const unflagged = routeMemoryChange(change(other, { accumulation: null }));
+  assert.equal(unflagged.outcome, "proposed");
+  // A record about a claim that is not being shown, whose body cannot even be copied (a cycle): it costs nothing, because nothing reads it.
+  const cyclic = { ...plain(unflagged) }; cyclic.self = cyclic;
+  const shown = presentMemoryClaims([claim], { routing: [decision, cyclic] }).presented[0];
+  assert.deepEqual([shown.review.routing, shown.review.label], ["routed", "in-review"]);
+  // The same record, for a claim that IS shown, is read, and a record that cannot be copied is refused as before.
+  assert.throws(() => presentMemoryClaims([other], { routing: [cyclic] }), /cycle/);
 });
 
 test("against the real Survey builders: the decisions and events its workbench stamps are the ones the Kit reads", async () => {

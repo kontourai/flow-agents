@@ -630,15 +630,23 @@ function reviewDwell(decision: ReviewDecision, itemName: string, allEvents: read
   // another actor's (when the decision names its actor). An event that names neither is a legacy event and stays.
   const decider = (decision.spec.actor as { id?: unknown } | undefined)?.id;
   const events = allEvents.filter(event => {
-    const kind = memoryReviewerKind(event as unknown as ReviewDecision);
-    if (kind === "agent" || kind === "rule") return false;
+    // The event's own stamp is read raw, not through `memoryReviewerKind`: an agent or rule event that is also marked inferred
+    // reads there as `unattested`, which would admit it as a legacy event. Any kind stamped on an event other than an attested
+    // human's (an agent, a rule, or one Survey marks inferred) keeps the event out; only an event with no stamp is legacy.
+    const stamp = ownValue(event.spec, "reviewerKind"), inferred = ownValue(event.spec, "reviewerKindInferred");
+    if (stamp === "agent" || stamp === "rule" || (inferred !== undefined && inferred !== false)) return false;
     const actor = (event.spec.actor as { id?: unknown } | undefined)?.id;
     return typeof decider !== "string" || actor === undefined || actor === decider;
   });
-  // The submission of THIS decision. Sequence numbers are per session, so across sessions the latest submission by
-  // time is the one; the sequence only orders submissions within one session.
+  // The submission of THIS decision. A decision does not name its session, but Survey stamps a submission with the same
+  // `reviewedAt` as the decision it submits, so a submission is this decision's only when it happened at the instant the
+  // decision says it was reviewed: a different session of the same reviewer reusing the decision name is not. A decision with no
+  // `reviewedAt`, or none matched, has no time (null, never borrowed). Sequence numbers are per session, so the latest
+  // submission by time is the one; the sequence only orders submissions within one session.
+  const reviewedAt = instantOf(decision.spec.reviewedAt);
+  if (reviewedAt === -Infinity) return undefined; // explicit; an unreadable instant could never equal a real one (the seconds check below also refuses it)
   const submitted = events.filter(event => event.spec.eventType === "decision-submitted" && event.spec.reviewItemName === itemName
-    && event.spec.reviewDecisionName === decision.metadata.name);
+    && event.spec.reviewDecisionName === decision.metadata.name && instantOf(event.spec.occurredAt) === reviewedAt);
   const end = submitted.sort((x, y) => instantOf(y.spec.occurredAt) - instantOf(x.spec.occurredAt) || y.spec.sequence - x.spec.sequence)[0];
   if (!end) return undefined;
   const start = events.filter(event => event.spec.eventType === "item-selected" && event.spec.sessionName === end.spec.sessionName
@@ -741,9 +749,14 @@ export function presentMemoryClaims(claims: readonly unknown[], context: { routi
   // requirement; any other outcome, or a record that does not recompute, is unknown, and unknown is treated as routed. When a claim
   // has several records the strictest one stands, whatever order they come in.
   const routingByClaim = new Map<string, { outcome: "routed" | "proposed"; reasons: string[] }>();
+  // Only the claims being presented are routed for, so a record about any other claim is neither read nor recomputed: recomputing
+  // a record costs as much as the decision is large, and recall pays for what it shows. A claim whose id cannot be read is
+  // withheld below and takes no routing.
+  const shown = new Set<string>();
+  for (const entry of ownEntries(claims, "recall claims")) { try { const id = ownField(entry, "id", "recall claim"); if (typeof id === "string") shown.add(id); } catch { /* withheld below */ } }
   for (const decision of ownEntries(ownField(context, "routing", "recall context"), "recall routing")) {
     const changeType = ownField(decision, "changeType", "recall routing decision"), changeId = ownField(decision, "changeId", "recall routing decision");
-    if (changeType !== "claim" || typeof changeId !== "string") continue;
+    if (changeType !== "claim" || typeof changeId !== "string" || !shown.has(changeId)) continue;
     const reasons = ownEntries(ownField(decision, "reasons", "recall routing decision"), "recall routing reasons").map(reason => ownField(reason, "rule", "recall routing reason")).filter((rule): rule is string => typeof rule === "string");
     const outcome = ownField(decision, "outcome", "recall routing decision");
     const earlier = routingByClaim.get(changeId);

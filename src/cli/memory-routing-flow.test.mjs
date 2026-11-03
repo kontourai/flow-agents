@@ -224,8 +224,9 @@ const MORE = () => {
 
 /** A real Survey rejection of the first routed item, with its dwell: selected, then submitted `seconds` later. */
 function rejection(item, seconds, reviewerKind = "human") {
-  const session = { ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", reviewerKind, decisionsByItemName: { [item.metadata.name]: "reject-proposed" } };
   const start = Date.parse("2026-11-02T10:00:00.000Z");
+  // Survey stamps the decision and its submission with the same instant.
+  const session = { ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: new Date(start + seconds * 1000).toISOString(), reviewerKind, decisionsByItemName: { [item.metadata.name]: "reject-proposed" } };
   const reviewEvents = buildReviewSessionEvents(session, "session-1").map(event => ({ ...event, spec: { ...event.spec, occurredAt: new Date(event.spec.eventType === "decision-submitted" ? start + seconds * 1000 : start).toISOString() } }));
   return { reviewDecisions: buildReviewDecisionsFromSession(session, reviewerKind), reviewEvents };
 }
@@ -750,6 +751,17 @@ test("a stored routing record of another run is refused before figures are deriv
   await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd) }), /another run or an unsupported version/);
 });
 
+test("the decisions a recall reads come only from records that name this run and a known version (review 16)", async t => {
+  for (const [label, envelope] of [["another run", { schema_version: "1.0", runId: "run-2" }], ["an unknown version", { schema_version: "9.9", runId: "run-1" }]]) {
+    const cwd = await workspace(t);
+    const { decisions } = runOf();
+    const unflagged = decisions.find(decision => decision.outcome === "proposed");
+    assert.ok(unflagged, "the premise: the run has an unflagged decision, the kind whose record waives the human requirement");
+    await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { ...envelope, decisions: [unflagged] });
+    await assert.rejects(readMemoryRoutingDecisions("run-1", cwd), /another run or an unsupported version/, label);
+  }
+});
+
 test("a run with bad stored routing evidence is recovered by superseding it, and the original stays as the audit trail", async t => {
   const cwd = await workspace(t);
   const { decisions } = runOf();
@@ -1130,4 +1142,13 @@ test("a stored decision's inferred flag is Survey's boolean: anything else is re
   for (const bad of ["true", 1, 0, null, [], {}]) await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [decision(bad)] }), /reviewerKindInferred is true or false/, JSON.stringify(bad));
   for (const ok of [true, false]) await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [decision(ok)] });
   assert.equal((await readMemoryReviewRecords("run-1", cwd)).decisions.length, 2);
+});
+
+test("a stored event's reviewer kind and inferred flag are held to the same rules as a decision's (review 16)", async t => {
+  const cwd = await workspace(t);
+  const event = (name, extra) => ({ kind: "ReviewSessionEvent", metadata: { name }, spec: { sessionName: "s", sequence: 1, eventType: "item-selected", occurredAt: "2026-11-02T10:00:00.000Z", ...extra } });
+  for (const bad of ["true", 1, 0, null, [], {}]) await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: [event("e", { reviewerKind: "agent", reviewerKindInferred: bad })] }), /reviewerKindInferred is true or false/, JSON.stringify(bad));
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: [event("e", { reviewerKind: "robot" })] }), /reviewerKind is human, agent or rule/);
+  for (const ok of [true, false]) await refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: [event(`e-${ok}`, { reviewerKind: "agent", reviewerKindInferred: ok })] });
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).events.length, 2);
 });

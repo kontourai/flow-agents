@@ -298,6 +298,9 @@ export async function readLatestMemoryMetrics(runId: string, cwd?: string): Prom
 async function storedDecisions(runId: string, cwd?: string): Promise<{ evidenceId: string; decision: MemoryRoutingDecision }[]> {
   const out: { evidenceId: string; decision: MemoryRoutingDecision }[] = [];
   for (const { evidenceId, value } of await readLiveRoutingRecords(runId, cwd)) {
+    // A decision is read as this run's only from a record that says it is: recall takes a decision's "not routed" as a waiver of the
+    // human requirement, so a record that names another run, or a version this Kit does not know, is refused here as everywhere else.
+    if (value.schema_version !== MEMORY_ROUTING_VERSION || value.runId !== runId) throw new MemoryClaimError("invalid", `routing record ${evidenceId} belongs to another run or an unsupported version`);
     for (const decision of value.decisions) out.push({ evidenceId, decision });
   }
   return out;
