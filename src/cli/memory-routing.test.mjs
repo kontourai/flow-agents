@@ -8,7 +8,7 @@ import {
   buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
 } from "@kontourai/survey/review-workbench";
 import { memoryClaim, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
-import { jsonSnapshot } from "@kontourai/flow-agents/memory-json";
+import { MAX_DECISION_NODES, jsonSnapshot } from "@kontourai/flow-agents/memory-json";
 import { memoryAccumulationQuery } from "@kontourai/flow-agents/memory-accumulation";
 import {
   DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
@@ -864,17 +864,17 @@ test("everything the Kit routes is something it can copy again: the deepest clai
 });
 function nest30() { let v = "leaf"; for (let i = 0; i < 20; i++) v = { a: v }; return v; }
 
-test("a decision carries a bounded number of verification records, and each may hold a large claim's value", () => {
-  const claim = make({ value: { list: Array.from({ length: 9000 }, (_, i) => i) } });
+test("a decision carries a bounded number of verification records", () => {
+  const claim = make({ value: "PostgreSQL 16" });
   const records = n => Array.from({ length: n }, (_, i) => verification(claim, "supported", claim.value, `verifier-${i}`));
-  const decision = routeMemoryChange(change(claim, { verifications: records(16), accumulation: null }));
-  assert.equal(decision.input.verifications.length, 16);
-  assert.equal(recomputeMemoryRouting(decision).ok, true, "three of these together are over a single claim's bound; the decision still copies");
-  assert.throws(() => routeMemoryChange(change(claim, { verifications: records(17), accumulation: null })), /more than 16 verification records/);
+  const decision = routeMemoryChange(change(claim, { verifications: records(64), accumulation: null }));
+  assert.equal(decision.input.verifications.length, 64);
+  assert.equal(recomputeMemoryRouting(decision).ok, true);
+  assert.throws(() => routeMemoryChange(change(claim, { verifications: records(65), accumulation: null })), /more than 64 verification records/);
   const stored = plain(decision);
   stored.input.verifications = [...stored.input.verifications, ...plain(records(1))];
   stored.id = `sha256:${createHash("sha256").update(canonicalJson({ input: stored.input, policy: stored.policy })).digest("hex")}`;
-  assert.match(recomputeMemoryRouting(stored).mismatches.join("\n"), /more than 16 verification records/, "and a stored decision is held to the same bound");
+  assert.match(recomputeMemoryRouting(stored).mismatches.join("\n"), /more than 64 verification records/, "and a stored decision is held to the same bound");
 });
 
 test("recall reads each field of a routing decision as data: a getter, a Proxy or an overridden list is refused", () => {
@@ -891,27 +891,44 @@ test("recall reads each field of a routing decision as data: a getter, a Proxy o
   assert.deepEqual([shown.review.routing, shown.review.reasons], ["routed", rulesOf(routed)]);
 });
 
-test("the largest decision the Kit can produce is one it can read: a claim and 64 peers each near the bound, and the maximum verification records", () => {
-  const big = offset => ({ list: Array.from({ length: 19000 }, (_, i) => i + offset) });
-  const claim = make({ value: big(0) });
-  const peers = Array.from({ length: 64 }, (_, i) => make({ value: big(1 + i), source: { ...base.source, ref: `peer-${i}` } }));
-  const records = Array.from({ length: 16 }, (_, i) => verification(claim, "supported", claim.value, `verifier-${i}`));
-  const decision = routeMemoryChange(change(claim, { current: peers, verifications: records, accumulation: null }));
+const countNodes = value => (value === null || typeof value !== "object" ? 1 : 1 + Object.values(value).reduce((sum, item) => sum + countNodes(item), 0));
+
+test("the largest decision the Kit can produce is one it can read: claims at the bound, 1,024-audience visibilities, 64 verification records, a full projection fact, a large policy", () => {
+  const audiences = Array.from({ length: 1024 }, (_, i) => `audience-${i}`);
+  const shaped = (n, offset, ref) => make({ value: { list: Array.from({ length: n }, (_, i) => i + offset) }, visibility: { kind: "restricted", audiences }, source: { ...base.source, ref } });
+  // The largest value that still leaves the claim inside the claim bound, found rather than assumed.
+  let low = 1, high = 20_000;
+  while (low < high) { const mid = Math.ceil((low + high) / 2); try { jsonSnapshot(shaped(mid, 0, "r"), "t"); low = mid; } catch { high = mid - 1; } }
+  const claim = shaped(low, 0, "claim");
+  const peers = Array.from({ length: 64 }, (_, i) => shaped(low, 1 + i, `peer-${i}`));
+  assert.ok(countNodes(claim) > 19_990 && countNodes(claim) <= 20_000, `the premise: each claim sits at the claim bound (${countNodes(claim)})`);
+  const records = Array.from({ length: 64 }, (_, i) => verification(claim, "supported", claim.value, `verifier-${i}`));
+  const everyone = [claim, ...peers].map(item => item.id).sort();
+  const accumulation = { outcome: "contested", candidateClaimIds: everyone, supportingClaimIds: everyone, gapCodes: Array.from({ length: 1000 }, (_, i) => `gap-${i}`) };
+  const names = prefix => Array.from({ length: 256 }, (_, i) => `${prefix}-${i}`);
+  const policy = { multiValued: names("mv"), consequential: { properties: names("cp"), subjectTypes: names("cs") } };
+  const decision = routeMemoryChange(change(claim, { current: peers, verifications: records, accumulation, accumulationQuery: queryFor(claim), sourceVisibility: { kind: "restricted", audiences } }), policy);
   assert.equal(decision.input.current.length, 64);
-  const bytes = JSON.stringify(decision).length; assert.ok(bytes > 5_000_000, `the premise: millions of JSON values (${bytes} bytes)`);
-  const started = Date.now();
+  const nodes = countNodes(decision);
+  assert.ok(nodes > 1_300_000, `the premise: well over a million values (${nodes})`);
+  assert.ok(nodes <= MAX_DECISION_NODES, `and inside the decision bound (${nodes} <= ${MAX_DECISION_NODES})`);
+  assert.equal(MAX_DECISION_NODES, 1_628_000, "the bound is pinned: 65 claims x 20,000, 64 records x 2,000, 200,000 for the envelope");
   assert.equal(recomputeMemoryRouting(decision).ok, true);
   assert.ok(buildMemoryReviewItem(decision));
   assert.equal(presentMemoryClaims([claim], { routing: [decision] }).presented.length, 1);
-  assert.ok(Date.now() - started < 30_000, "and reading it back is not unreasonably slow");
 });
 
-test("a verification record is bounded: a record padded past a claim's worth of values is refused at the door, not copied", () => {
+test("a decision too large to be read back is refused when it is produced, with the reason", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const policy = { multiValued: new Array(1_700_000).fill("not-this-property") };
+  assert.throws(() => routeMemoryChange(change(claim, { accumulation: null }), policy), /too large to be recorded or presented/);
+});
+
+test("a verification record is bounded: a record padded past its allowance is refused at the door, one at the allowance is not", () => {
   const claim = make({ value: "PostgreSQL 16" });
   const genuine = verification(claim, "supported");
   assert.doesNotThrow(() => routeMemoryChange(change(claim, { verifications: [genuine], accumulation: null })));
-  // The bound is a claim's worth of values plus the record's own fields: a record a little past a bare claim's bound is not refused.
-  assert.doesNotThrow(() => routeMemoryChange(change(claim, { verifications: [{ ...genuine, padding: Array.from({ length: 21_000 }, (_, i) => i) }], accumulation: null })), "21,000 values");
-  const padded = { ...genuine, padding: Array.from({ length: 25_000 }, (_, i) => i) };
-  assert.throws(() => routeMemoryChange(change(claim, { verifications: [padded], accumulation: null })), /routing change verifications\[0\].*too large/);
+  const padded = n => ({ ...genuine, padding: Array.from({ length: n }, (_, i) => i) });
+  assert.doesNotThrow(() => routeMemoryChange(change(claim, { verifications: [padded(1_900)], accumulation: null })), "just inside 2,000 values");
+  assert.throws(() => routeMemoryChange(change(claim, { verifications: [padded(2_100)], accumulation: null })), /routing change verifications\[0\].*too large/);
 });

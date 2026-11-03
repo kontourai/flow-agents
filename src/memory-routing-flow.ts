@@ -63,11 +63,11 @@ function locationOf(input: unknown): Location {
 }
 
 /**
- * How many routing decisions, review decisions and review events one run may hold in all. The default is the most the Kit will
+ * How many routing decisions, review decisions and review events one run may hold, each. The default is the most the Kit will
  * derive figures from; a host may lower it. A request that would take a run past it is refused before anything is written,
  * so a run cannot be left holding history its own figures can no longer be derived from.
  */
-function historyLimit(request: unknown): number {
+export function memoryHistoryLimit(request: unknown): number {
   const value = ownField(request, "maxHistoryEntries", "memory routing request maxHistoryEntries");
   if (value === undefined) return MAX_HISTORY_ENTRIES;
   if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > MAX_HISTORY_ENTRIES) throw new MemoryClaimError("invalid", `maxHistoryEntries must be an integer from 1 to ${MAX_HISTORY_ENTRIES}`);
@@ -123,6 +123,45 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
   return (await recordedEntries(where, kind)).filter(isLive);
 }
 
+/** Every write entry point also takes the history limit (see `historyLimit`). */
+interface HistoryLimited { maxHistoryEntries?: number }
+
+/** What a write is about to add, so the state it would leave can be checked before the first byte is written. */
+interface WritePlan { addDecisions?: readonly MemoryRoutingDecision[]; supersede?: readonly string[]; review?: PreparedReview }
+
+/** One gate holds a run's metrics: with two, "this gate's live entry" and the run's latest figures are different things. */
+async function assertMetricsGate(where: Location): Promise<void> {
+  const run = await loadRun(where.runId, where.cwd);
+  const elsewhere = (run.manifest.evidence as FlowEvidenceEntry[]).find(entry => entry.requested_kind === MEMORY_METRICS_EVIDENCE_KIND && entry.gate_id !== where.gate);
+  if (elsewhere) throw new MemoryClaimError("invalid", `this run's metrics are recorded on gate ${elsewhere.gate_id}; one gate holds a run's metrics, so nothing is recorded on ${where.gate}`);
+}
+
+/**
+ * Everything a write must satisfy, checked on the state it WOULD leave, before anything is written: that this gate may hold the run's
+ * metrics, that the routing records that will be live are derivable (right run and version, every decision recomputes, repeats
+ * included), that the decisions being added recompute, that review state is valid, and that no kind of history passes `limit`.
+ * After this, deriving the run's figures cannot fail for a reason decided here, so a request is either refused whole or recorded.
+ * (An I/O failure or a crash between two writes is the one thing it cannot rule out: the next call repairs it.)
+ */
+async function preflight(where: Location, limit: number, plan: WritePlan): Promise<void> {
+  await assertMetricsGate(where);
+  const superseded = new Set(plan.supersede ?? []);
+  const live = (await readMemoryRoutingEvidence(where.runId, where.cwd)).filter(record => !record.superseded && !superseded.has(record.evidenceId));
+  const held = validateRoutingRecords(where.runId, live);
+  for (const decision of plan.addDecisions ?? []) {
+    const check = recomputeMemoryRouting(decision);
+    if (!check.ok) throw new MemoryClaimError("invalid", `routing decision ${decision.id} does not recompute: ${check.mismatches.join("; ")}`);
+    held.add(decision.id);
+  }
+  if (held.size > limit) throw new MemoryClaimError("invalid", `this run would hold ${held.size} routing decisions, over its limit of ${limit}; nothing was recorded`);
+  const known = await readReview(where.runId, where.cwd); // validated on read
+  if (plan.review) {
+    const fresh = freshReview(known, plan.review);
+    if (known.decisions.length + fresh.decisions.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review decisions; nothing was recorded`);
+    if (known.events.length + fresh.events.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review events; nothing was recorded`);
+  }
+}
+
 /**
  * Attaches a batch of routing decisions to `gate`. Every decision must
  * recompute from its own input and policy, or nothing is attached: the run
@@ -130,11 +169,11 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
  * batch again returns the entry already there, so a retry after a lost reply
  * does not double-record.
  */
-export async function recordMemoryRoutingEvidence(request: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+export async function recordMemoryRoutingEvidence(request: Location & HistoryLimited & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
   const input = { ...locationOf(request), decisions: jsonSnapshotEach(ownField(request, "decisions", "memory routing request decisions"), "routing decisions", DECISION_BOUNDS) as unknown as MemoryRoutingDecision[] };
-  const limit = historyLimit(request);
+  const limit = memoryHistoryLimit(request);
   return (await serialized(input, async () => {
-    await assertRoom(input, limit, { decisionIds: input.decisions.map(decision => decision.id) });
+    await preflight(input, limit, { addDecisions: input.decisions });
     const recorded = await recordRouting(input);
     // Metrics are derived from what is recorded, so recording refreshes them in the same unit. It does so even when the
     // routing batch was already there: a retry after a failure between the two writes must repair the metrics, not
@@ -143,15 +182,8 @@ export async function recordMemoryRoutingEvidence(request: Location & { decision
     return recorded;
   })).entry;
 }
+/** Attaches a batch already checked by `preflight`. */
 async function recordRouting(input: Location & { decisions: readonly MemoryRoutingDecision[] }, supersede?: string[]): Promise<{ entry: FlowEvidenceEntry; created: boolean }> {
-  if (!supersede) {
-    await readDerivableDecisions(input.runId, input.cwd); // stored state first: nothing is added to a run whose figures cannot be derived
-    await readReview(input.runId, input.cwd);
-  }
-  for (const decision of input.decisions) {
-    const check = recomputeMemoryRouting(decision);
-    if (!check.ok) throw new MemoryClaimError("invalid", `routing decision ${decision.id} does not recompute: ${check.mismatches.join("; ")}`);
-  }
   const ids = input.decisions.map(decision => decision.id);
   if (new Set(ids).size !== ids.length) throw new MemoryClaimError("invalid", "a batch names the same routing decision twice");
   const record: MemoryRoutingRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions: [...input.decisions] };
@@ -161,21 +193,32 @@ async function recordRouting(input: Location & { decisions: readonly MemoryRouti
 }
 
 /**
- * The way out of a run whose stored routing evidence cannot be derived from (a record that no longer recomputes, or two
- * records that disagree about one decision): attach a corrected record that supersedes the named live routing records. The
- * originals stay in the manifest as the audit trail; figures are derived from the live records only. The corrected decisions
- * must each recompute, and the named records must be this run's live routing records on `gate`, or nothing is attached.
- * An empty `decisions` quarantines the named records without replacing them.
+ * The way out of a run whose stored routing evidence cannot be derived from (a record that no longer recomputes, or one of
+ * another run): attach a corrected record that supersedes the named live routing records. The originals stay in the manifest
+ * as the audit trail, but nothing reads them as current: figures, the recomputation report, the room check and
+ * `readMemoryRoutingDecisions` all read the live records. The request is checked as a whole first: the corrected decisions must each
+ * recompute, the records that stay live must still be derivable and within the history limit, and the named records must be this run's
+ * live routing records on `gate`, or nothing is attached. An identical retry after a lost reply returns the record it made. An empty
+ * `decisions` quarantines the named records without replacing them; that is a trusted-host administrative act, and a quarantine is
+ * not a block-list (recording the same decisions again records them again).
  */
-export async function supersedeMemoryRoutingEvidence(request: Location & { supersedes: readonly string[]; decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+export async function supersedeMemoryRoutingEvidence(request: Location & HistoryLimited & { supersedes: readonly string[]; decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
   const where = locationOf(request);
   const supersedes = ownEntries(ownField(request, "supersedes", "memory routing request supersedes"), "memory routing request supersedes") as string[];
   const decisions = jsonSnapshotEach(ownField(request, "decisions", "memory routing request decisions"), "routing decisions", DECISION_BOUNDS) as unknown as MemoryRoutingDecision[];
+  const limit = memoryHistoryLimit(request);
   if (supersedes.length === 0 || supersedes.some(id => typeof id !== "string" || !id) || new Set(supersedes).size !== supersedes.length) throw new MemoryClaimError("invalid", "name the live routing records to supersede, once each");
   return (await serialized(where, async () => {
-    const live = new Set((await liveEntries(where, MEMORY_ROUTING_EVIDENCE_KIND)).map(entry => entry.id));
+    const ids = decisions.map(decision => decision.id);
+    if (new Set(ids).size !== ids.length) throw new MemoryClaimError("invalid", "a batch names the same routing decision twice");
+    const digest = sha256(bytesOf({ schema_version: MEMORY_ROUTING_VERSION, runId: where.runId, decisions }));
+    const entries = await recordedEntries(where, MEMORY_ROUTING_EVIDENCE_KIND);
+    const made = entries.find(entry => isLive(entry) && entry.sha256 === digest && supersedes.every(id => entries.some(other => other.id === id && other.superseded_by === entry.id)));
+    if (made) { await refreshMetrics(where); return { entry: made, created: false }; } // a lost-reply retry of a recovery that already happened
+    const live = new Set(entries.filter(isLive).map(entry => entry.id));
     const missing = supersedes.filter(id => !live.has(id));
     if (missing.length) throw new MemoryClaimError("invalid", `not live routing records of this run on gate ${where.gate}: ${missing.join(", ")}`);
+    await preflight(where, limit, { addDecisions: decisions, supersede: supersedes });
     const recorded = await recordRouting({ ...where, decisions }, supersedes);
     await refreshMetrics(where);
     return recorded;
@@ -187,33 +230,29 @@ export async function supersedeMemoryRoutingEvidence(request: Location & { super
  * entry so the latest figures are the live ones and earlier figures stay in the
  * manifest. Identical metrics are not attached twice.
  */
-export async function recordMemoryMetricsEvidence(request: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
+export async function recordMemoryMetricsEvidence(request: Location & HistoryLimited & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
   const input = { ...locationOf(request), metrics: jsonSnapshot(ownField(request, "metrics", "memory routing request metrics"), "run metrics") as MemoryRunMetrics };
   if (input.metrics?.runId !== input.runId) throw new MemoryClaimError("invalid", "metrics belong to a different run");
+  const limit = memoryHistoryLimit(request);
   return serialized(input, async () => {
     // Metrics are derived from what is recorded. Figures a caller computed earlier (before a decision or a review was
     // recorded) would supersede the correct ones and make the run read as if nothing happened, so only the figures the
     // recorded evidence derives are recorded; `refreshMemoryRunMetrics` is the way to bring them up to date.
+    await preflight(input, limit, {});
     const review = await readReview(input.runId, input.cwd);
     const derived = deriveMemoryRunMetrics({ runId: input.runId, decisions: await readDerivableDecisions(input.runId, input.cwd), reviewDecisions: review.decisions, reviewEvents: review.events });
     if (canonicalJson(derived) === canonicalJson(input.metrics)) return recordMetrics(input);
     // A retry after a lost reply: these exact figures were recorded earlier and have since been superseded by newer review state.
-    // The entry that holds them is the answer (nothing is written, so nothing stale becomes live); anything else is refused.
-    // Only this gate's entries are candidates, chosen before the figures are compared: another gate's matching entry is never the
-    // answer, and a matching entry on this gate is not hidden by an earlier one elsewhere.
-    const ours = new Map((await recordedEntries(input, MEMORY_METRICS_EVIDENCE_KIND)).map(entry => [entry.id, entry] as const));
-    const earlier = (await readMemoryMetricsEvidence(input.runId, input.cwd)).find(entry => ours.has(entry.evidenceId) && canonicalJson(entry.value) === canonicalJson(input.metrics));
-    if (earlier) return ours.get(earlier.evidenceId)!;
+    // The entry that holds them is the answer (nothing is written, so nothing stale becomes live); anything else is refused. One gate
+    // holds a run's metrics (`preflight` has just checked), so there is no other gate's entry to mistake for this one.
+    const earlier = (await readMemoryMetricsEvidence(input.runId, input.cwd)).find(entry => canonicalJson(entry.value) === canonicalJson(input.metrics));
+    const recorded = earlier && (await recordedEntries(input, MEMORY_METRICS_EVIDENCE_KIND)).find(entry => entry.id === earlier.evidenceId);
+    if (recorded) return recorded;
     throw new MemoryClaimError("invalid", "metrics are not what the evidence recorded for the run derives; refresh them instead of recording figures computed elsewhere");
   });
 }
+/** Attaches figures already checked by `preflight` (the gate rule included). */
 async function recordMetrics(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
-  if (input.metrics.runId !== input.runId) throw new MemoryClaimError("invalid", "metrics belong to a different run");
-  // One gate holds a run's metrics. With two, "this gate's live entry" and "the run's latest figures" are different things, and a
-  // reuse on one gate would silently disagree with `readLatestMemoryMetrics`.
-  const run = await loadRun(input.runId, input.cwd);
-  const elsewhere = (run.manifest.evidence as FlowEvidenceEntry[]).find(entry => entry.requested_kind === MEMORY_METRICS_EVIDENCE_KIND && entry.gate_id !== input.gate);
-  if (elsewhere) throw new MemoryClaimError("invalid", `this run's metrics are recorded on gate ${elsewhere.gate_id}; one gate holds a run's metrics, so they are not also recorded on ${input.gate}`);
   const digest = sha256(bytesOf(input.metrics));
   const live = await liveEntries(input, MEMORY_METRICS_EVIDENCE_KIND);
   return live.find(entry => entry.sha256 === digest) ?? attachJson(input, MEMORY_METRICS_EVIDENCE_KIND, input.metrics, live.map(entry => entry.id));
@@ -243,46 +282,52 @@ export async function readLatestMemoryMetrics(runId: string, cwd?: string): Prom
 
 /**
  * Every decision in the run's routing records, in the order recorded, repeats included (each is a payload that was stored).
- * Figures, the recomputation report and the room check read the LIVE records: a record that cannot be derived from is
- * recovered by attaching a corrected one that supersedes it, and the superseded record stays in the manifest as the audit trail.
+ * Figures, the recomputation report, the room check and `readMemoryRoutingDecisions` read the LIVE records: a record that cannot be
+ * derived from is recovered by attaching a corrected one that supersedes it (`supersedeMemoryRoutingEvidence`), and the
+ * superseded record stays in the manifest, readable with `readMemoryRoutingEvidence`, as the audit trail.
  */
-async function storedDecisions(runId: string, cwd?: string, live = true): Promise<{ evidenceId: string; decision: MemoryRoutingDecision }[]> {
+async function storedDecisions(runId: string, cwd?: string): Promise<{ evidenceId: string; decision: MemoryRoutingDecision }[]> {
   const out: { evidenceId: string; decision: MemoryRoutingDecision }[] = [];
   for (const { evidenceId, superseded, value } of await readMemoryRoutingEvidence(runId, cwd)) {
-    if (live && superseded) continue;
+    if (superseded) continue;
     for (const decision of value.decisions) out.push({ evidenceId, decision });
   }
   return out;
 }
 
-/** Every routing decision recorded for a run, across batches, once each (the first record of an id), in the order recorded. */
+/** Every routing decision currently recorded for a run, across batches, once each (the first record of an id), in the order recorded. */
 export async function readMemoryRoutingDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
   const seen = new Set<string>();
   const decisions: MemoryRoutingDecision[] = [];
-  for (const { decision } of await storedDecisions(runId, cwd, false)) if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
+  for (const { decision } of await storedDecisions(runId, cwd)) if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
   return decisions;
 }
 
 /**
- * The run's recorded decisions, for deriving figures from: every one must belong to the run and still recompute from its own
- * input and policy. A digest proves the file is the one recorded, not that what was recorded follows from the rules, so figures
- * are never derived from a record that disagrees with them (`recomputeRecordedMemoryRouting` reports such a record instead).
+ * Checks routing records that are to be derived from: each must belong to the run and be a known version, and every decision in
+ * it, repeats included, must still recompute from its own input and policy. A digest proves a file is the one recorded, not that
+ * what was recorded follows from the rules, and a second record that reuses a decision's id must not be collapsed away unread.
+ * Returns the distinct decision ids.
  */
-async function readDerivableDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
-  for (const { superseded, value } of await readMemoryRoutingEvidence(runId, cwd)) {
-    if (superseded) continue;
+function validateRoutingRecords(runId: string, records: readonly { value: MemoryRoutingRecord }[]): Set<string> {
+  const ids = new Set<string>();
+  for (const { value } of records) {
     if (value.schema_version !== MEMORY_ROUTING_VERSION || value.runId !== runId) throw new MemoryClaimError("invalid", "a routing record belongs to another run or an unsupported version");
+    for (const decision of value.decisions) {
+      const check = recomputeMemoryRouting(decision);
+      if (!check.ok) throw new MemoryClaimError("invalid", `recorded routing decision ${decision.id} does not recompute, so no figures are derived from it: ${check.mismatches.join("; ")}`);
+      ids.add(decision.id);
+    }
   }
-  // Every stored payload is checked, repeats included, before repeats are collapsed: a second record that reuses a decision's id
-  // with a wrong outcome would otherwise be dropped unread. (A decision's id is the digest of its input and policy, so two payloads
-  // with one id that both recompute are the same decision.)
-  const seen = new Set<string>();
-  const decisions: MemoryRoutingDecision[] = [];
-  for (const { decision } of await storedDecisions(runId, cwd)) {
-    const check = recomputeMemoryRouting(decision);
-    if (!check.ok) throw new MemoryClaimError("invalid", `recorded routing decision ${decision.id} does not recompute, so no figures are derived from it: ${check.mismatches.join("; ")}`);
-    if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
-  }
+  return ids;
+}
+
+/** The run's live routing decisions, for deriving figures from. */
+async function readDerivableDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
+  const live = (await readMemoryRoutingEvidence(runId, cwd)).filter(record => !record.superseded);
+  validateRoutingRecords(runId, live);
+  const seen = new Set<string>(), decisions: MemoryRoutingDecision[] = [];
+  for (const { value } of live) for (const decision of value.decisions) if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
   return decisions;
 }
 
@@ -330,7 +375,7 @@ export interface MemoryRoutingRun {
  * and event handed in so far. Review state passed in is recorded first, so a later call that passes none (an identical
  * retry, or a new batch) still counts the review already recorded instead of overwriting it with a run that has none.
  */
-export async function runMemoryRouting(request: Location & {
+export async function runMemoryRouting(request: Location & HistoryLimited & {
   changes: readonly MemoryChange[];
   policy?: Partial<MemoryRoutingPolicy>;
   queue?: MemoryReviewQueue;
@@ -347,9 +392,9 @@ export async function runMemoryRouting(request: Location & {
   const decisions = routeMemoryChanges(changes, policyInput === undefined ? undefined : jsonSnapshot(policyInput, "routing policy") as Partial<MemoryRoutingPolicy>);
   // Review input is validated before the first write: a bad one must not leave routing recorded behind a refusal.
   const review = prepareReview(request);
-  const limit = historyLimit(request);
+  const limit = memoryHistoryLimit(request);
   const { routing, metrics } = await serialized(input, async () => {
-    await assertRoom(input, limit, { decisionIds: decisions.map(decision => decision.id), review });
+    await preflight(input, limit, { addDecisions: decisions, review });
     const recorded = await recordRouting({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
     return { routing: recorded.entry, metrics: await refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }) };
   });
@@ -396,20 +441,7 @@ function freshReview(known: { decisions: readonly object[]; events: readonly obj
   return { decisions: fresh(review.decisions), events: fresh(review.events) };
 }
 
-/** Refuses, before anything is written, a request that would take the run past `limit` of any kind of history. */
-async function assertRoom(where: Location, limit: number, adding: { decisionIds?: readonly string[]; review?: PreparedReview }): Promise<void> {
-  if (adding.decisionIds) {
-    const held = new Set((await storedDecisions(where.runId, where.cwd)).map(stored => stored.decision.id));
-    for (const id of adding.decisionIds) held.add(id);
-    if (held.size > limit) throw new MemoryClaimError("invalid", `this run would hold ${held.size} routing decisions, over its limit of ${limit}; nothing was recorded`);
-  }
-  if (adding.review) {
-    const known = await readReview(where.runId, where.cwd), fresh = freshReview(known, adding.review);
-    if (known.decisions.length + fresh.decisions.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review decisions; nothing was recorded`);
-    if (known.events.length + fresh.events.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review events; nothing was recorded`);
-  }
-}
-
+/** Attaches the review state the run does not hold yet. */
 async function recordReview(input: Location & { review: PreparedReview }): Promise<void> {
   const known = await readReview(input.runId, input.cwd);
   const { decisions, events } = freshReview(known, input.review);
@@ -452,10 +484,7 @@ async function readReview(runId: string, cwd?: string): Promise<{ decisions: Rev
 export const readMemoryReviewRecords = (runId: string, cwd?: string) => readReview(runId, cwd);
 
 async function refreshMetrics(input: Location & { review?: PreparedReview }): Promise<FlowEvidenceEntry> {
-  // What is already stored must be something figures can be derived from, before this call writes anything: a request that
-  // adds a record and then fails to derive over the run would leave a decision recorded and the figures describing fewer.
-  await readDerivableDecisions(input.runId, input.cwd);
-  await readReview(input.runId, input.cwd);
+  // `preflight` has already checked the state this leaves, so the derivation below cannot fail for a reason decided there.
   if (input.review) await recordReview({ runId: input.runId, gate: input.gate, cwd: input.cwd, review: input.review });
   const decisions = await readDerivableDecisions(input.runId, input.cwd);
   const review = await readReview(input.runId, input.cwd);
@@ -469,12 +498,12 @@ async function refreshMetrics(input: Location & { review?: PreparedReview }): Pr
  * describing fewer decisions than are recorded. Call it as reviewers decide, passing what is new (or everything: what
  * is already recorded is not recorded twice).
  */
-export async function refreshMemoryRunMetrics(request: Location & ReviewInput): Promise<FlowEvidenceEntry> {
+export async function refreshMemoryRunMetrics(request: Location & HistoryLimited & ReviewInput): Promise<FlowEvidenceEntry> {
   const input = locationOf(request);
   const review = prepareReview(request); // before anything is written, and before waiting for the run
-  const limit = historyLimit(request);
+  const limit = memoryHistoryLimit(request);
   return serialized(input, async () => {
-    await assertRoom(input, limit, { review });
+    await preflight(input, limit, { review });
     return refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review });
   });
 }

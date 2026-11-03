@@ -161,7 +161,7 @@ test("a contest is between at least two candidates, and lists are read by index"
     assert.throws(() => readFact({ outcome: "current", candidateClaimIds: sparse, supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, "a hole is refused, not skipped and not filled from the prototype");
   } finally { if (proto) Object.defineProperty(Array.prototype, "1", proto); else delete Array.prototype[1]; }
   for (const bad of [[""], [1], [null], [undefined]]) assert.throws(() => readFact({ outcome: "current", candidateClaimIds: bad, supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, JSON.stringify(bad));
-  assert.throws(() => readFact({ outcome: "invalid", candidateClaimIds: new Array(10_001).fill("a"), supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, "an unbounded list is refused");
+  assert.throws(() => readFact({ outcome: "invalid", candidateClaimIds: new Array(1_001).fill("a"), supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, "an unbounded list is refused");
 });
 
 test("a projection that names a rival the Kit was not given is refused: every bound and item is built from the slot's claims", async () => {

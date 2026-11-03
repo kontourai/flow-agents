@@ -138,7 +138,7 @@ const OUTCOMES = ["current", "contested", "invalid", "none"];
 function readStrings(value: unknown): string[] | undefined {
   if (!Array.isArray(value) || types.isProxy(value)) return undefined;
   const length = value.length; // once: a list whose length changes while it is read is not a list we can trust
-  if (length > 10_000) return undefined;
+  if (length > 1_000) return undefined; // far more than Surface reports; the decision bound assumes it
   const out: string[] = [];
   for (let index = 0; index < length; index++) {
     // A data descriptor, read once: an accessor would run caller code and could answer differently the next time.

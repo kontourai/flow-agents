@@ -320,11 +320,17 @@ export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<Me
   const policy = normalizeMemoryRoutingPolicy(policyInput);
   const type = ownField(change, "type", "routing change");
   const input: MemoryRoutingInput = type === "claim" ? claimInput(change as MemoryClaimChange) : entityInput(change as MemoryEntityChange);
-  return {
+  const decision: MemoryRoutingDecision = {
     schema_version: MEMORY_ROUTING_VERSION, id: digestOf({ input, policy }),
     changeId: input.type === "claim" ? input.claim.id : input.proposalRef,
     changeType: input.type, ...evaluateMemoryRouting(input, policy), input, policy,
   };
+  // What the Kit produces, it must be able to read back: every reader copies a decision against these bounds, so one that does not
+  // fit (a very large policy, say) is refused here with the reason rather than produced and then refused by recompute, recording and recall.
+  try { jsonSnapshot(decision, "routing decision", DECISION_BOUNDS); } catch (error) {
+    throw new MemoryClaimError("invalid", `the routing decision for this change is too large to be recorded or presented: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return decision;
 }
 
 export const routeMemoryChanges = (changes: readonly MemoryChange[], policy?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision[] =>

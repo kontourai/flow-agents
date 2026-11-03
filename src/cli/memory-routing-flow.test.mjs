@@ -763,23 +763,24 @@ test("a run with bad stored routing evidence is recovered by superseding it, and
   await runMemoryRouting({ ...where(cwd), changes: MORE() });
 });
 
-test("one gate holds a run's metrics, and a retry never returns another gate's entry", async t => {
+test("one gate holds a run's metrics: another gate is refused before anything is written, whatever it is asked to record", async t => {
   const cwd = await twoGateWorkspace(t);
   const { decisions } = runOf();
   await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
-  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), gate: "other-gate" }), /metrics are recorded on gate route-gate/);
+  const other = { ...where(cwd), gate: "other-gate" };
+  const kinds = async () => (await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.gate_id === "other-gate").length;
+  await assert.rejects(refreshMemoryRunMetrics(other), /metrics are recorded on gate route-gate/);
+  await assert.rejects(recordMemoryRoutingEvidence({ ...other, decisions: [routeMemoryChange({ type: "claim", claim: make({ property: "x" }), agreement: { passes: 2, agreeing: 2 } })] }), /metrics are recorded on gate route-gate/);
+  await assert.rejects(runMemoryRouting({ ...other, changes: MORE(), reviewEvents: syntheticEvents(0, 2) }), /metrics are recorded on gate route-gate/);
+  await assert.rejects(refreshMemoryRunMetrics({ ...other, reviewEvents: syntheticEvents(0, 2) }), /metrics are recorded on gate route-gate/);
+  assert.equal(await kinds(), 0, "nothing at all was attached to the other gate");
+  assert.equal((await readMemoryRoutingDecisions("run-1", cwd)).length, 3, "no decision was recorded behind a metrics refusal");
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).events.length, 0, "and no review event");
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 3, "so the figures still describe every decision");
+  // Metrics sitting on another gate (attached out of band) are refused too, and never offered as the answer to a retry.
   const stale = deriveMemoryRunMetrics({ runId: "run-1", decisions: [] });
   await rawAttach(cwd, "other-gate", MEMORY_METRICS_EVIDENCE_KIND, stale);
-  await assert.rejects(recordMemoryMetricsEvidence({ ...where(cwd), metrics: stale }), /not what the evidence/, "figures that only another gate holds are not the answer");
-  // Where the gate holds them itself, the retry finds them even if another gate's entry matches first.
-  const own = await twoGateWorkspace(t);
-  await recordMemoryRoutingEvidence({ ...where(own), decisions });
-  const early = (await readLatestMemoryMetrics("run-1", own)).value;
-  await refreshMemoryRunMetrics({ ...where(own), ...rejection(buildMemoryReviewItem(decisions[1]), 4) });
-  const same = await rawAttach(own, "other-gate", MEMORY_METRICS_EVIDENCE_KIND, early);
-  const answer = await recordMemoryMetricsEvidence({ ...where(own), metrics: early });
-  assert.equal(answer.gate_id, "route-gate");
-  assert.notEqual(answer.id, same.id);
+  await assert.rejects(recordMemoryMetricsEvidence({ ...where(cwd), metrics: stale }), /metrics are recorded on gate other-gate/);
 });
 
 test("review state is copied per item: a long list of small items is not over a whole-list budget", async t => {

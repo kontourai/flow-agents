@@ -151,14 +151,16 @@ smaller, so an artifact the Kit makes is never one its own readers refuse:
 |---|---|
 | JSON values in one claim, review decision or review event | 20,000, nested at most 32 deep |
 | Peers a claim is checked against | 64 (more is refused, not cut short) |
-| Support-verification records on one decision | 16, each up to a claim's worth of values (a record embeds the claim's value) |
-| One routing decision | `(64 + 1) x 20,000 + 16 x 22,000 + 20,000` values, nested at most 40 deep (a claim sits a few levels down) |
+| Support-verification records on one decision | 64, each up to 2,000 values (a Survey record is ids and digests, about 15 values) |
+| One routing decision | `(64 + 1) x 20,000 + 64 x 2,000 + 200,000` = 1,628,000 values, nested at most 40 deep (a claim sits a few levels down); the 200,000 is an allowance for baselines, the projection fact and the policy |
 | One extraction response | 250,000 values |
 | One request list | 20,000 entries (a sitting of more than 20,000 turns is refused) |
 | What one run holds across requests | 1,000,000 routing decisions, review decisions and review events each; a host may lower it with `maxHistoryEntries` |
 
 `assembleMemoryClaims` rejects, with the reason, a claim that exceeds the claim bounds, so `distillMemoryClaims` never returns one
-that routing or recall would refuse. A request that would take a run past its history limit is refused before anything is written.
+that routing or recall would refuse, and `routeMemoryChange` copies the decision it just produced against the decision bound, so a
+decision that would not fit (a very large policy, say) is refused when produced, with the reason, instead of being recorded and
+then refused by every reader. A request that would take a run past its history limit is refused before anything is written (see Flow evidence).
 Each bound is per item: there is no aggregate budget for a whole request or a whole batch, and no byte budget for strings. A host
 that accepts untrusted workloads needs those limits itself. The largest decision the Kit can produce copies in well under a second.
 
@@ -179,17 +181,27 @@ A digest only proves a file is the one recorded, so what is read back is checked
 stored payload is checked (a second record that reuses a decision's id is checked too, not collapsed away unread). A routing record
 must belong to the run and be a known version, and every decision in it must still recompute; a review decision needs its kind, a
 name, the item it decides, a status Survey defines and a time; a review event needs its kind, a session, an integer sequence, one
-of Survey's event types and a time. Those are shape checks, not a full Survey validation. `refreshMemoryRunMetrics`,
-`recordMemoryRoutingEvidence` and `runMemoryRouting` check that what is already stored can be derived from **before they write
-anything**, so a request cannot add a record to a run and then fail to derive over it; recording routing decisions refreshes the
-run's metrics in the same serialised unit.
+of Survey's event types and a time. Those are shape checks, not a full Survey validation.
 
-If stored routing evidence is bad (a record that no longer recomputes), every request on that run is refused, which is the point:
-no figures are derived from evidence that disagrees with its own rules. The way out is `supersedeMemoryRoutingEvidence({supersedes,
-decisions})`, which attaches a corrected record (or, with no decisions, none) that supersedes the named live routing records.
-Figures, the recomputation report and the room check read the live records; the superseded record stays in the manifest as the audit
-trail. `recomputeRecordedMemoryRouting(runId)` reads the stored files back (refusing any whose digest no longer matches), recomputes
-every live payload, repeats included, and names the bad ones.
+**A request is refused whole or recorded.** `refreshMemoryRunMetrics`, `recordMemoryRoutingEvidence`, `runMemoryRouting` and
+`supersedeMemoryRoutingEvidence` check, before they write anything, the state the request would leave: that this gate may hold the
+run's metrics (one gate does; a request on another is refused), that every routing record that will be live is derivable, that the
+decisions being added recompute, that review state is valid, and that no kind of history passes `maxHistoryEntries` (default and
+maximum 1,000,000; a host may lower it). After that, deriving the figures cannot fail for a reason decided there. What this cannot
+rule out is an I/O failure or a crash between two writes: if the routing record is attached and the metrics are not, the figures
+describe fewer decisions than are stored until the next call, which repairs them (an identical retry does).
+
+If stored routing evidence is bad (a record that no longer recomputes, or one of another run), every request on that run is
+refused, which is the point: no figures are derived from evidence that disagrees with its own rules. The way out is
+`supersedeMemoryRoutingEvidence({supersedes, decisions})`. It attaches a corrected record that supersedes the named live routing
+records, after checking, as a whole, that the corrected decisions recompute, that the records which stay live are derivable and that
+the history limit holds; an identical retry returns the record it already made. Figures, the recomputation report, the room check and
+`readMemoryRoutingDecisions` read the live records, so after recovery recall shows the corrected routing; the superseded record stays
+in the manifest, readable with `readMemoryRoutingEvidence`, as the audit trail. A clean report over the live records is not a clean
+history, so audit the superseded entries too. Passing no `decisions` quarantines the named records without replacing them: that is a
+trusted-host administrative act, and it is not a block-list (recording the same decisions again records them again).
+`recomputeRecordedMemoryRouting(runId)` reads the stored files back (refusing any whose digest no longer matches), recomputes every
+live payload, repeats included, and names the bad ones.
 
 All of that holds within one process, for callers that reach the run through a directory that exists (an alias made later for a
 directory that did not exist yet is resolved through its nearest existing ancestor). Flow's run lock is not re-entrant, so the check

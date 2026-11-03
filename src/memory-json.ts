@@ -20,15 +20,22 @@ export const MAX_SNAPSHOT_NODES = 20_000;
 export const MAX_SNAPSHOT_DEPTH = 32;
 /** Other claims one claim is checked against (and so embedded with in its routing decision). */
 export const MAX_PEERS = 64;
-/** Support-verification records one routing decision carries. A record embeds the claim's value (Survey binds it to the value), so one holds a claim's worth plus its own fields. */
-export const MAX_VERIFICATIONS = 16;
-export const MAX_VERIFICATION_NODES = MAX_SNAPSHOT_NODES + 2_000;
+/** Support-verification records one routing decision carries, and the values one may hold (a record is digests and ids: about 15 values). */
+export const MAX_VERIFICATIONS = 64;
+export const MAX_VERIFICATION_NODES = 2_000;
 /** Entries in one request list, and in the history a run keeps (decisions, review decisions, review events). */
 export const MAX_RUN_LIST = 20_000;
-/** What a run may accumulate across requests (decisions, review decisions, review events), and the default cap `maxHistoryEntries` lowers. */
+/** What one run holds across requests (routing decisions, review decisions, review events, each), and the default cap `maxHistoryEntries` lowers. */
 export const MAX_HISTORY_ENTRIES = 1_000_000;
-/** A routing decision: the claim and its peers, the verification records, and a fixed envelope (policy, baselines, projection fact). */
-export const MAX_DECISION_NODES = (MAX_PEERS + 1) * MAX_SNAPSHOT_NODES + MAX_VERIFICATIONS * MAX_VERIFICATION_NODES + 20_000;
+/**
+ * What a routing decision holds besides its claims and verification records: a baseline per claim (each visibility may list 1,024
+ * audiences: about 67,000), the projection fact (member ids, gap codes, the slot), the policy, and a few hundred envelope fields.
+ * This is an allowance, not a proof: `routeMemoryChange` copies the decision it produced against the bound before returning it, so
+ * a decision that does not fit is refused there, with the reason, instead of being produced and then refused by every reader.
+ */
+export const MAX_ENVELOPE_NODES = 200_000;
+/** A routing decision: the claim and its peers, the verification records, and the envelope. */
+export const MAX_DECISION_NODES = (MAX_PEERS + 1) * MAX_SNAPSHOT_NODES + MAX_VERIFICATIONS * MAX_VERIFICATION_NODES + MAX_ENVELOPE_NODES;
 /** A claim sits a few levels down in a decision and in an extraction response, so those nest a few levels deeper than a claim. */
 export const MAX_DECISION_DEPTH = MAX_SNAPSHOT_DEPTH + 8;
 /** One extraction pass's response: many proposals, each with a value and provenance. */
