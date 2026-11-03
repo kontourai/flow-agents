@@ -772,6 +772,12 @@ describe("review round 1 regressions (PR #1575)", () => {
       assert.match(out, /next: kept$/, input);
       assert.equal(scrubResidueText(out), out, "idempotent");
     }
+    // exact output: the body is replaced from the first body line, and nothing else moves
+    assert.equal(scrubResidueText(`token: |\n  ${hidden}\n  ${hidden2}\nnext: kept`), "token: |\n  <SECRET>\nnext: kept");
+    assert.equal(scrubResidueText(`a:\n  token: |\n    ${hidden}\n  b: 1`), "a:\n  token: |\n    <SECRET>\n  b: 1");
+    // a value that is itself a blob is a secret first, a blob only if nothing names it
+    assert.equal(scrubResidueText(`password: ${"A".repeat(250)}`), "password: <SECRET>");
+    assert.equal(scrubResidueText(`note ${"A".repeat(250)} end`), "note <BLOB> end");
     const nested = scrubResidueText(`cfg:\n  token: |\n    ${hidden}\n  description: KEEP_SIBLING\n  retries: 4`);
     assert.equal(nested.includes(hidden), false);
     assert.match(nested, /description: KEEP_SIBLING\n  retries: 4$/);
