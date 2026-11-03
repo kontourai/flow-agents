@@ -445,3 +445,14 @@ test("an extraction response that is not plain data is a failed pass, reported, 
     assert.match(result.warnings.join("\n"), /pass 1 failed/);
   }
 });
+
+test("an extraction response larger than one claim's bound is accepted: a long sitting yields many claims in one response", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue, index) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [index], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const proposals = Array.from({ length: 700 }, (_, i) => [at("subject", `service ${i}`, i), at("subjectType", "service", i), at("property", "primary database", i), at("value", `PostgreSQL ${i}`, i), at("posture", "stated", i)]).flat();
+  assert.ok(JSON.stringify(proposals).length > 200_000, "the premise: well over 20,000 JSON values");
+  const result = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals }) });
+  assert.deepEqual(result.warnings, []);
+  assert.equal(result.claims.length, 700);
+});

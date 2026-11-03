@@ -654,3 +654,14 @@ test("a large batch of decisions is recorded: the bound is per decision, not for
   assert.equal((await readMemoryRoutingDecisions("run-1", cwd)).length, 800);
   assert.ok(JSON.stringify(many).length > 400_000, "the premise: far past what one claim may hold");
 });
+
+test("one decision larger than a single claim's bound is recorded and read back: it embeds a large value and 64 peers", async t => {
+  const cwd = await workspace(t);
+  const big = make({ value: { list: Array.from({ length: 19000 }, (_, i) => i) } });
+  const peers = Array.from({ length: 64 }, (_, i) => make({ value: `v${i}`, source: { ...base.source, ref: `peer-${i}` } }));
+  const decision = routeMemoryChange({ type: "claim", claim: big, current: peers, agreement: { passes: 2, agreeing: 2 } });
+  assert.ok(JSON.stringify(decision).length > 60_000, "the premise: well over 20,000 JSON values");
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions: [decision] });
+  assert.deepEqual((await readMemoryRoutingDecisions("run-1", cwd)).map(d => d.id), [decision.id]);
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 1);
+});
