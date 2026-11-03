@@ -33,6 +33,7 @@ function item({ value, agreement = { passes: 4, agreeing: 4 }, observedAt = NOW,
     speaker: "user",
     source: { ref: "sitting:eval", locator: `chars:0-${n}`, excerpt: `excerpt ${n}`, observedAt, role: "user" },
     posture: "stated",
+    visibility: { kind: "public" },
   });
   return { claim, project, agreement, state, routing: { outcome: "proposed" } };
 }

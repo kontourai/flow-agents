@@ -9,13 +9,13 @@ import test from "node:test";
 import { buildReviewDecisionsFromSession, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
 import { INJECTED_MEMORY_CLOSE, INJECTED_MEMORY_OPEN } from "../../kits/knowledge/memory-marker.js";
 import { buildMemoryReviewItem, memoryClaim, routeMemoryChange } from "../../kits/knowledge/adapters/memory-claims/index.mjs";
-import { compileBrief, isEligible, rankItems, writeBriefs } from "../../kits/knowledge/dream/brief.js";
+import { compileBrief, isEligible, isSealed, rankItems, writeBriefs } from "../../kits/knowledge/dream/brief.js";
 import { runDream } from "../../kits/knowledge/dream/run.js";
 import { truncateUtf8 } from "../../kits/knowledge/dream/util.js";
 import { FakeCorpusStore, NOW_ISO, hostFor, noApplyStore, runOptions, scriptedExtract, tempDir, workspace } from "./dream-support.mjs";
 
 let counter = 0;
-function claim({ subject = "svc", property, value, observedAt = NOW_ISO, posture = "stated" }) {
+function claim({ subject = "svc", property, value, observedAt = NOW_ISO, posture = "stated", visibility }) {
   counter += 1;
   return memoryClaim({
     subject: { type: "service", id: subject, label: subject },
@@ -25,6 +25,7 @@ function claim({ subject = "svc", property, value, observedAt = NOW_ISO, posture
     speaker: "user",
     source: { ref: "sitting:fixture", locator: `chars:0-${counter}`, excerpt: `excerpt ${counter}`, observedAt, role: "user" },
     posture,
+    ...(visibility === undefined ? { visibility: { kind: "public" } } : visibility === null ? {} : { visibility }),
   });
 }
 const item = (fields) => ({ claim: claim(fields), project: fields.project ?? null, agreement: fields.agreement === undefined ? { passes: 2, agreeing: 2 } : fields.agreement, state: fields.state ?? "applied", routing: { outcome: fields.outcome ?? "proposed" } });
@@ -58,6 +59,18 @@ test("an entry never carries the injected-memory markers, control characters or 
   assert.equal(brief.entries.length, 1);
   assert.ok(!brief.entries[0].includes(INJECTED_MEMORY_CLOSE) && !brief.entries[0].includes(INJECTED_MEMORY_OPEN));
   assert.ok(!READER_UNSAFE.test(brief.entries[0]));
+});
+
+test("a sealed claim is never in a brief: absent visibility and an empty audience list both read as sealed", () => {
+  const open = item({ value: "public fact" });
+  const restricted = item({ value: "owner fact", visibility: { kind: "restricted", audiences: ["user:owner"] } });
+  const absent = item({ value: "sealed by omission", visibility: null });
+  const empty = item({ value: "sealed by emptiness", visibility: { kind: "restricted", audiences: [] } });
+  assert.equal(isSealed(absent.claim), true);
+  assert.equal(isSealed(empty.claim), true);
+  assert.equal(isSealed(open.claim) || isSealed(restricted.claim), false);
+  assert.deepEqual(rankItems([absent, empty, restricted, open], { now: NOW_ISO }).map((i) => i.claim.value).sort(), ["owner fact", "public fact"]);
+  assert.deepEqual(rankItems([absent, empty], { now: NOW_ISO, includeUnreviewed: true }), []);
 });
 
 test("quarantine: only applied claims are eligible by default; pending needs opt-in, and routed or rejected never", () => {
@@ -209,6 +222,15 @@ for (const [name, proposer, reviewer] of [
     assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, []);
   });
 }
+
+test("end to end: a run with no visibility makes sealed claims, and no brief carries them even once applied", async (t) => {
+  const { ws, store, host } = await ran({ visibility: undefined });
+  t.after(ws.cleanup);
+  for (const proposal of await store.listProposals()) await store.applyCreate(proposal.id, "a-human-reviewer");
+  const report = await runDream(host, runOptions(ws, { visibility: undefined }));
+  assert.equal(report.brief_excluded.sealed, 2);
+  for (const name of fs.readdirSync(path.dirname(ws.briefs())).filter((n) => n.endsWith(".json"))) assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(name), "utf8")).entries, []);
+});
 
 test("end to end: opt-in unreviewed recall includes only uncontested pending claims, labelled", async (t) => {
   const { ws, host } = await ran();

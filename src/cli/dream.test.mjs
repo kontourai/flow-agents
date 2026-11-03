@@ -326,3 +326,24 @@ test("a second run while one holds the lock is refused, and a dead owner's lock 
 test("the script covers every sitting in the fixtures", () => {
   assert.equal(SCRIPT.length, 4);
 });
+
+test("the host's visibility is stamped on every claim and its routing baseline; absent reads as sealed; malformed is refused up front", async (t) => {
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  t.after(ws.cleanup);
+  await assert.rejects(() => runDream(host, runOptions(ws, { visibility: { kind: "restricted" } })), (error) => error.name === "MemoryClaimError");
+  assert.equal(fs.existsSync(ws.cursorFile), false);
+
+  const visibility = { kind: "restricted", audiences: ["user:owner"] };
+  await runDream(host, runOptions(ws, { visibility }));
+  const claims = (await store.listProposals()).map((proposal) => JSON.parse(proposal.candidate.body));
+  assert.ok(claims.length > 0);
+  for (const envelope of claims) {
+    assert.deepEqual(envelope.claim.visibility, visibility);
+    assert.deepEqual(envelope.decision.input.baselines[0].visibility, visibility, "routing saw the source visibility");
+  }
+
+  const bare = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  t.after(bare.ws.cleanup);
+  await runDream(bare.host, runOptions(bare.ws, { visibility: undefined }));
+  for (const proposal of await bare.store.listProposals()) assert.equal(JSON.parse(proposal.candidate.body).claim.visibility, undefined, "no visibility given: the claim carries none, which the claim contract reads as sealed");
+});

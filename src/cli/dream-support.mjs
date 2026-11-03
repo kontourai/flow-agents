@@ -227,8 +227,11 @@ export function hostFor(ws, store, extract, extra = {}) {
 let ticks = 0;
 export const tickingNow = () => new Date(NOW_MS + 1000 * ticks++).toISOString();
 
+/** What the host says these sittings may be shown to. A run without it makes sealed claims, which no brief carries. */
+export const VISIBILITY = { kind: "restricted", audiences: ["user:owner"] };
+
 export const runOptions = (ws, extra = {}) => ({
-  enabled: true, telemetryFile: ws.telemetryFile, transcriptRoots: [ws.transcriptRoot], dreamDir: ws.dreamDir, nowMs: NOW_MS, now: tickingNow, ...extra,
+  enabled: true, visibility: VISIBILITY, telemetryFile: ws.telemetryFile, transcriptRoots: [ws.transcriptRoot], dreamDir: ws.dreamDir, nowMs: NOW_MS, now: tickingNow, ...extra,
 });
 
 export function listFilesDeep(root) {

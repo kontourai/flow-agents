@@ -7,7 +7,10 @@
  * shape). Entries come only from `presentMemoryClaims` (#1571), so every entry
  * says its posture and its review label.
  *
- * Eligibility (the quarantine of unreviewed sources):
+ * Eligibility (the quarantine of unreviewed sources), after one rule that comes
+ * first: a claim whose visibility is sealed (absent, or restricted to no
+ * audience) is never in a brief, because the claim contract (#1571) reads
+ * "sealed" as visible to no one and a brief is injected into sessions.
  *   - an `applied` proposal (a reviewer other than the proposer applied it in
  *     Corpus) whose record is still active: always;
  *   - a `pending` proposal that routing left `proposed`: only when the host sets
@@ -70,7 +73,16 @@ function sanitize(text) {
  * @property {{outcome: "proposed"|"routed"}} [routing] the routing outcome recorded with the proposal
  */
 
+/** Sealed is the narrowest visibility: absent, or restricted to no audience. Mirrors the claim contract's reading. */
+export function isSealed(claim) {
+  const visibility = claim.visibility;
+  if (!visibility) return true;
+  if (visibility.kind === "public") return false;
+  return visibility.kind !== "restricted" || !Array.isArray(visibility.audiences) || visibility.audiences.length === 0;
+}
+
 export function isEligible(item, { includeUnreviewed = false } = {}) {
+  if (isSealed(item.claim)) return false;
   if (item.state === "applied") return true;
   return item.state === "pending" && includeUnreviewed && item.routing?.outcome === "proposed";
 }

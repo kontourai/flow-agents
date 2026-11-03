@@ -71,7 +71,7 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       telemetryFile: config.telemetryFile,
       transcriptRoots: config.transcriptRoots,
       ...(config.dreamDir ? { dreamDir: config.dreamDir } : {}),
-      ...Object.fromEntries(["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs", "proposerId"].filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
+      ...Object.fromEntries(["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs", "proposerId", "visibility"].filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
     });
     stdout.write(`${JSON.stringify(report)}\n`);
     return report.status === "blocked" ? 3 : 0;

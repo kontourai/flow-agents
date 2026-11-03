@@ -35,7 +35,7 @@ import {
   routeMemoryChange,
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
-import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, writeBriefs } from "./brief.js";
+import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, isSealed, writeBriefs } from "./brief.js";
 import { indexProposals } from "./envelope.js";
 import { acquireDreamLock } from "./lock.js";
 import { proposeSitting } from "./propose.js";
@@ -76,10 +76,14 @@ function narrowStore(store) {
 /** Memory proposals as brief input. An applied proposal whose record is gone or retired drops out; a rejected one never appears. */
 async function briefItems(store, index, proposerId) {
   const items = [];
-  const excluded = { rejected: 0, self_approved: 0, inactive: 0 };
+  const excluded = { rejected: 0, self_approved: 0, inactive: 0, sealed: 0 };
   for (const { proposal, envelope } of index.byClaim.values()) {
     if (proposal.state === "rejected") {
       excluded.rejected += 1;
+      continue;
+    }
+    if (isSealed(envelope.claim)) {
+      excluded.sealed += 1;
       continue;
     }
     if (proposal.state === "applied") {
@@ -131,6 +135,8 @@ function pruneReports(dir) {
  * @param {string} [options.dreamDir]  the run's private state: cursor, lock, reports, briefs
  * @param {boolean} [options.enabled]  required for anything but a dry run
  * @param {boolean} [options.dryRun]  read-only: no model call, no write, no lock
+ * @param {{kind: "public"}|{kind: "restricted", audiences: string[]}} [options.visibility]  who the sittings' claims may be shown to,
+ *   in Surface's visibility lattice (#1571). Absent reads as sealed, the narrowest, so omission never widens access.
  * @param {string} [options.trigger]  who started it (recorded in the report)
  * @param {(stage: string) => void | Promise<void>} [options.onStage]  called at each stage boundary; tests inject faults here
  */
@@ -241,7 +247,7 @@ export async function runDream(host, options = {}) {
       }
 
       await stage("distill");
-      const distilled = await distillMemoryClaims({ sitting: residue, extract: host.extract, passes });
+      const distilled = await distillMemoryClaims({ sitting: residue, extract: host.extract, passes, ...(options.visibility ? { visibility: options.visibility } : {}) });
       // Traverse reports a failed provider call as `error` on its result ("reported"); a thrown extract is "failed".
       const failedPasses = distilled.warnings.filter((warning) => /^pass \d+ (failed|reported)/.test(warning)).length;
       if (distilled.claims.length === 0 && failedPasses >= passes) {
@@ -260,7 +266,7 @@ export async function runDream(host, options = {}) {
           claim,
           agreement,
           project,
-          decision: routeMemoryChange({ type: "claim", claim, current, agreement, sourceAudience: null }, options.routingPolicy ?? DEFAULT_MEMORY_ROUTING_POLICY),
+          decision: routeMemoryChange({ type: "claim", claim, current, agreement, sourceVisibility: options.visibility ?? null }, options.routingPolicy ?? DEFAULT_MEMORY_ROUTING_POLICY),
         };
       });
 

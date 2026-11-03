@@ -37,7 +37,7 @@ steps of `flows/dream.flow.json`, each with a gate.
 2. **Distil.** Each sitting goes through `distillMemoryClaims` with two passes. If every
    pass fails and no claim comes back, that is a model outage: the run fails with
    `DREAM_DISTILL_FAILED`. It is not read as a sitting with nothing in it.
-3. **Route.** Every claim gets a recomputable routing decision. A flagged claim also
+3. **Route.** `visibility` (config or option, in Surface's lattice) is stamped on every claim and is the routing source baseline; absent reads as sealed, the narrowest. Every claim gets a recomputable routing decision. A flagged claim also
    becomes a Survey review item. Routing never promotes anything.
 4. **Propose.** Each claim becomes a Corpus create proposal (`category: memory.claim`)
    whose body is one JSON envelope: the claim, its agreement, its routing decision and
@@ -106,6 +106,7 @@ claim, where `dreamDir` defaults to
 `$XDG_DATA_HOME/knowledge-store/knowledge/dream` (the path #672's reader uses). A project
 id is the sitting's working-directory name. Nothing else decides scope.
 
+- **Sealed claims.** A claim whose visibility is sealed (none given, or restricted to no audience) is never in a brief: a brief is injected into sessions, and sealed means visible to no one. Set `visibility` in the config, for a single-owner machine usually `{"kind": "restricted", "audiences": ["user:<you>"]}`; without it the run still proposes, but nothing it proposes reaches a brief.
 - **Eligibility (the quarantine).** An `applied` proposal whose record is active is
   eligible. A `pending` one is eligible only with `includeUnreviewed: true`, and only if
   routing left it `proposed`; it is then labelled unreviewed. A `pending` claim routing
@@ -146,6 +147,7 @@ node kits/knowledge/dream/cli.js run --config /abs/dream.config.json [--dry-run]
   "transcriptRoots": ["/abs/.claude/projects", "/abs/.codex/sessions"],
   "host": "/abs/dream-host.mjs",
   "role": "extraction-default",
+  "visibility": { "kind": "restricted", "audiences": ["user:you"] },
   "includeUnreviewed": false
 }
 ```

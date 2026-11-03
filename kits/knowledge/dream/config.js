@@ -14,7 +14,7 @@ const MAX_CONFIG_BYTES = 64 * 1024;
 const KEYS = new Set([
   "enabled", "telemetryFile", "transcriptRoots", "dreamDir", "host", "role", "passes", "maxSittingsPerRun",
   "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs",
-  "triggerMinIntervalMs", "proposerId",
+  "triggerMinIntervalMs", "proposerId", "visibility",
 ]);
 const POSITIVE_INTEGERS = ["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "idleGapMs", "triggerMinIntervalMs"];
 
