@@ -152,11 +152,13 @@ function readStrings(value: unknown): string[] | undefined {
   return value.length === length ? out : undefined;
 }
 
-/** One own data property, read once. An accessor is refused: it could answer differently the next time it is read. */
-function ownData(record: object, key: string): { present: boolean; value?: unknown; accessor?: true } {
+/**
+ * One own data property, read once. An accessor reads as absent, so it fails the type checks that follow: it could answer
+ * differently the next time it is read, and Surface's result has none.
+ */
+function ownData(record: object, key: string): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(record, key);
-  if (!descriptor) return { present: false };
-  return "value" in descriptor ? { present: true, value: descriptor.value } : { present: true, accessor: true };
+  return descriptor && "value" in descriptor ? descriptor.value : undefined;
 }
 
 /** Reads the fact out of a `projectAccumulation` result, or throws: a result that does not look like one is not a fact. */
@@ -164,10 +166,8 @@ export function memoryAccumulationFact(result: unknown): MemoryAccumulationFact 
   const refuse = (): never => { throw new MemoryClaimError("invalid", "not an accumulation projection result: it needs an outcome, candidateClaimIds and gapCodes"); };
   if (!result || typeof result !== "object") return refuse();
   // Each field is read once, as data (Surface's result is a plain object), so what is checked is what is returned.
-  const read = Object.fromEntries(["outcome", "reason", "candidateClaimIds", "gapCodes"].map(key => [key, ownData(result, key)]));
-  if (Object.values(read).some(entry => entry.accessor)) return refuse();
-  const outcome = read.outcome.value, reason = read.reason.value;
-  const candidates = readStrings(read.candidateClaimIds.value), gaps = readStrings(read.gapCodes.value);
+  const outcome = ownData(result, "outcome"), reason = ownData(result, "reason");
+  const candidates = readStrings(ownData(result, "candidateClaimIds")), gaps = readStrings(ownData(result, "gapCodes"));
   if (typeof outcome !== "string" || !OUTCOMES.includes(outcome) || !candidates || !gaps) return refuse();
   const distinct = [...new Set(candidates)].sort();
   // A contest is between at least two candidates: Surface reports `contested` only when they hold different values.
