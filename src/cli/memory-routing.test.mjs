@@ -807,3 +807,38 @@ test("a routing change's type is read as data", () => {
   assert.throws(() => routeMemoryChange(getter), /accessor/);
   assert.throws(() => routeMemoryChange(Object.defineProperty({ ...ok }, "sourceVisibility", { enumerable: true, get: () => null })), /accessor/);
 });
+
+// --- review round 10 -------------------------------------------------------------------------------------------------------
+
+test("recall does not copy whole routing decisions: a decision the Kit produced for a large value with 64 peers still presents", () => {
+  const big = make({ value: { list: Array.from({ length: 19000 }, (_, i) => i) } });
+  const peers = Array.from({ length: 64 }, (_, i) => make({ value: `v${i}`, source: { ...base.source, ref: `peer-${i}` } }));
+  const decision = routeMemoryChange(change(big, { current: peers, accumulation: null }));
+  assert.equal(recomputeMemoryRouting(decision).ok, true, "the premise: it routes and recomputes");
+  const { presented, withheld } = presentMemoryClaims([big], { routing: [decision] });
+  assert.deepEqual(withheld, []);
+  assert.deepEqual([presented[0].review.routing, presented[0].review.reasons], ["routed", rulesOf(decision)]);
+  assert.ok(buildMemoryReviewItem(decision), "and so does its review item");
+});
+
+test("a review item is built from the decision that was checked: an input that answers differently the second time is not used", () => {
+  const routed = routeMemoryChange(RULE_CASES["contested-by-accumulation"].routes());
+  const genuine = plain(routed.input);
+  const edited = plain(routed.input); edited.claim.value = "different value";
+  let reads = 0;
+  const shifty = { ...plain(routed) };
+  Object.defineProperty(shifty, "input", { enumerable: true, get: () => (++reads === 1 ? genuine : edited) });
+  assert.throws(() => buildMemoryReviewItem(shifty), /accessor/);
+  assert.equal(reads, 0, "the getter never ran, so there is no second answer to build from");
+  assert.equal(recomputeMemoryRouting(shifty).ok, false);
+  assert.equal(reads, 0);
+  assert.throws(() => buildMemoryReviewItem(new Proxy(plain(routed), {})), /Proxy/);
+});
+
+test("metrics read review events without the caller's methods: an overridden filter cannot change the measured time", () => {
+  const decisions = [routeMemoryChange(RULE_CASES["contested-by-accumulation"].routes())];
+  const events = [{ kind: "ReviewSessionEvent", spec: { sessionName: "s", sequence: 1, eventType: "item-selected", occurredAt: "2026-11-02T10:00:00.000Z", reviewItemName: "x" } }];
+  events.filter = () => [];
+  assert.throws(() => deriveMemoryRunMetrics({ runId: "r", decisions, reviewEvents: events }), /extra keys/);
+  assert.throws(() => deriveMemoryRunMetrics({ runId: "r", decisions, reviewEvents: new Proxy([], {}) }), /Proxy/);
+});

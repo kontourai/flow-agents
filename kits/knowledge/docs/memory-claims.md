@@ -130,11 +130,15 @@ Everything the Kit validates and then records or presents is read once and copie
 validated and used: a routing change (claim, current claims, verifications, agreement, entity proposal), a run or evidence
 request, review input, a distill request (the sitting is copied before extraction starts, so claims name the source
 reference and times the model was given), the claims recall presents, and the claims the accumulation mapper and the
-verifier read. The Kit refuses what JSON would change or drop or what could answer differently the next time it is read:
+verifier read, and each extraction pass's response as it arrives (an extractor that reuses and edits an object it returned cannot
+change a claim after it was checked; a response that is not plain data is a failed pass, reported as a warning). The Kit refuses what JSON would change or drop or what could answer differently the next time it is read:
 accessors, `-0`, holes, class instances and array subclasses, cycles, a `__proto__` key, anything over a size or depth bound,
 and **any Proxy** (a Proxy answers every question as it likes, so no list of checks makes one safe; it is refused, not
 defended against). Request fields are chosen with selectors that run nothing the caller defined (no getter, no overridden
-`map`, no trap). Two deliberate exceptions to refusing: a recall claim that cannot be copied is *withheld and reported*, and a
+`map`, no trap). Recall takes only the few small fields it shows from a routing decision rather than copying the whole decision.
+The bounds are per item, not per list: 20,000 JSON nodes for a claim or a review decision, 1,500,000 for a routing decision (it
+embeds a claim and up to 64 peers), 250,000 for one extraction response, and 20,000 entries in any list (so a sitting of more
+than 20,000 turns is refused, not cut short). Two deliberate exceptions to refusing: a recall claim that cannot be copied is *withheld and reported*, and a
 `sourceVisibility` that cannot be copied is recorded as undeclared, which reads as sealed (it can only make a claim route, never
 widen it). The entity emitter requires `confidenceComponents` to be an object (or absent), as Survey does. The Kit is stricter
 than Survey in one place: `-0` is refused, because it does not survive JSON.
@@ -148,8 +152,13 @@ run the host owns, as custom-kind evidence (`memory.routing-decisions`,
 is attached. Re-attaching the same content returns the existing entry; new metrics
 supersede the earlier entry. `recordMemoryMetricsEvidence` records only figures equal to what the run's recorded evidence derives
 (a stale snapshot, or figures computed elsewhere, is refused rather than allowed to supersede the correct ones), and
-`refreshMemoryRunMetrics` is how figures are brought up to date. Stored review records are validated as Survey decisions and
-events when read, since a digest only proves the file is the one recorded; recording routing decisions refreshes the run's metrics in the
+`refreshMemoryRunMetrics` is how figures are brought up to date. Retrying figures that were recorded earlier and have since been
+superseded returns the entry that holds them and writes nothing. A digest only proves a file is the one recorded, so what is read
+back is checked before figures are derived from it: a routing record must belong to the run and be a known version, and every
+decision in it must still recompute (otherwise no figures are derived; `recomputeRecordedMemoryRouting` reports the bad
+decision); a review decision needs its kind, a name, the item it decides, a status Survey defines and a time; a review event
+needs its kind, a session, an integer sequence, one of Survey's event types and a time. Those are shape checks, not a full Survey
+validation; recording routing decisions refreshes the run's metrics in the
 same serialised unit, so metrics never describe fewer decisions than the run holds. All of
 that holds within one process, for callers that reach the run through a directory that exists
 (an alias made later for a directory that did not exist yet is resolved through its nearest

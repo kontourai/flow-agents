@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import { canonicalClaimKey } from "@kontourai/surface";
-import { jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
+import { MAX_EXTRACTION_RESULT_NODES, jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
 // Type-only: proves the schema below is an ordinary Traverse TargetFieldSchema without a runtime dependency.
 import type { TargetFieldSchema } from "@kontourai/traverse";
 
@@ -463,7 +463,9 @@ export async function distillMemoryClaims(input: {
   for (let pass = 0; pass < passes; pass++) {
     let result: ExtractionResultLike;
     try {
-      result = await extract(request);
+      // The response is copied as plain JSON the moment it arrives: an extractor that reuses and edits an object it returned
+      // (or hands back a getter) cannot change a proposal after it has been checked and while it is being stored.
+      result = jsonSnapshot(await extract(request), `pass ${pass + 1} extraction result`, { maxNodes: MAX_EXTRACTION_RESULT_NODES }) as ExtractionResultLike;
     } catch (error) {
       warnings.push(`pass ${pass + 1} failed: ${error instanceof Error ? error.message : String(error)}`);
       continue;

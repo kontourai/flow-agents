@@ -13,12 +13,22 @@ import { MemoryClaimError } from "./memory-claims.js";
 
 export const MAX_SNAPSHOT_NODES = 20_000;
 export const MAX_SNAPSHOT_DEPTH = 32;
+/**
+ * A routing decision embeds its claim and up to 64 peers, each of which may hold a value of `MAX_SNAPSHOT_NODES`, so the
+ * bound for one decision is the sum, not the single-claim bound: a decision the Kit produced must be copyable.
+ */
+export const MAX_DECISION_NODES = 1_500_000;
+/** One extraction pass's response: many proposals, each with a value and provenance. */
+export const MAX_EXTRACTION_RESULT_NODES = 250_000;
 
-export function jsonSnapshot(value: unknown, label: string): unknown {
+export interface SnapshotOptions { maxNodes?: number }
+
+export function jsonSnapshot(value: unknown, label: string, options: SnapshotOptions = {}): unknown {
   const bad = (what: string): never => { throw new MemoryClaimError("invalid", `${label}: ${what}`); };
+  const maxNodes = options.maxNodes ?? MAX_SNAPSHOT_NODES;
   let nodes = 0;
   const walk = (item: unknown, depth: number, ancestors: Set<object>): unknown => {
-    if (++nodes > MAX_SNAPSHOT_NODES) return bad("too large to record");
+    if (++nodes > maxNodes) return bad("too large to record");
     if (item === null || typeof item === "string" || typeof item === "boolean") return item;
     if (typeof item === "number") {
       if (!Number.isFinite(item)) return bad("a number that is not finite cannot be recorded as JSON");
@@ -36,7 +46,7 @@ export function jsonSnapshot(value: unknown, label: string): unknown {
       if (Array.isArray(item)) {
         if (Object.getPrototypeOf(item) !== Array.prototype) return bad("an array subclass cannot be recorded");
         const length = item.length;
-        if (length > MAX_SNAPSHOT_NODES) return bad("too large to record");
+        if (length > maxNodes) return bad("too large to record");
         if (Object.getOwnPropertySymbols(item).length || Object.keys(item).length !== length) return bad("a list with extra keys, symbols or holes cannot be recorded");
         const out: unknown[] = [];
         for (let index = 0; index < length; index++) {
@@ -104,6 +114,6 @@ export function jsonSnapshotList(value: unknown, label: string): unknown[] {
 }
 
 /** A list of independent items, each copied on its own (so the size bound is per item, not per list), read by index. */
-export function jsonSnapshotEach(value: unknown, label: string): unknown[] {
-  return ownEntries(value, label).map((item, index) => jsonSnapshot(item, `${label}[${index}]`));
+export function jsonSnapshotEach(value: unknown, label: string, options: SnapshotOptions = {}): unknown[] {
+  return ownEntries(value, label).map((item, index) => jsonSnapshot(item, `${label}[${index}]`, options));
 }

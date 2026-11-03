@@ -418,3 +418,30 @@ test("a distill request is read without running caller code: a getter, a Proxy o
   await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, visibility: new Proxy({ kind: "public" }, {}) }), MemoryClaimError, "a Proxy visibility");
   await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, visibility: Object.defineProperty({ kind: "restricted" }, "audiences", { enumerable: true, get: () => ["a"] }) }), MemoryClaimError, "a visibility with a getter");
 });
+
+// --- review round 10 -------------------------------------------------------------------------------------------------------
+
+test("an extractor that reuses and edits what it returned cannot change a claim after it was checked: each pass's response is copied on arrival", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const shared = { fieldPath: "claims[].value", candidateValue: { engine: "PostgreSQL", version: 15 }, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" };
+  const others = [["subject", "widget service"], ["subjectType", "service"], ["property", "primary database"], ["posture", "stated"]]
+    .map(([name, candidateValue]) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" }));
+  const response = { proposals: [shared, ...others] };
+  let pass = 0;
+  const extract = async () => { if (pass++ === 1) shared.candidateValue.version = 16; return response; };
+  const result = await distillMemoryClaims({ sitting, passes: 2, extract });
+  for (const claim of result.claims) assert.doesNotThrow(() => assertMemoryClaim(claim), "every returned claim still matches its id");
+  assert.equal(result.claims.length, 2, "the two passes now disagree, and say so, instead of one claim changing under its id");
+  assert.deepEqual(result.claims.map(claim => claim.value.version).sort(), [15, 16]);
+});
+
+test("an extraction response that is not plain data is a failed pass, reported, not a crash or a trusted claim", async () => {
+  const sitting = loadSittings()[0];
+  const getter = { proposals: [] }; Object.defineProperty(getter, "error", { enumerable: true, get: () => "x" });
+  for (const response of [getter, new Proxy({ proposals: [] }, {})]) {
+    const result = await distillMemoryClaims({ sitting, passes: 1, extract: async () => response });
+    assert.deepEqual(result.claims, []);
+    assert.match(result.warnings.join("\n"), /pass 1 failed/);
+  }
+});

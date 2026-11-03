@@ -18,7 +18,7 @@ import {
   type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import { memoryAccumulationFact, memoryAccumulationMembers, readMemoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
-import { jsonSnapshot, jsonSnapshotEach, jsonSnapshotList, ownEntries, ownField } from "./memory-json.js";
+import { MAX_DECISION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
 import {
   MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryFieldKey, memorySlotKey, readMemoryVisibility,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
@@ -266,7 +266,7 @@ function claimInput(request: MemoryClaimChange): MemoryClaimRoutingInput {
   const field = (key: string) => ownField(request, key, `routing change ${key}`);
   const claim = jsonSnapshot(field("claim"), "routing change claim") as MemoryClaim;
   const currentClaims = jsonSnapshotEach(field("current"), "routing change current") as MemoryClaim[];
-  const verifications = jsonSnapshotList(field("verifications"), "routing change verifications");
+  const verifications = jsonSnapshotEach(field("verifications"), "routing change verifications");
   const agreementInput = field("agreement"), sourceInput = field("sourceVisibility");
   const agreement = agreementInput == null ? null : jsonSnapshot(agreementInput, "routing change agreement") as MemoryAgreement;
   // A source visibility that cannot be copied as plain data (a hole, a getter, a Proxy) is unreadable, and unreadable is
@@ -366,9 +366,11 @@ export interface RoutingRecomputation { ok: boolean; mismatches: string[] }
  * the result with what it recorded. Detects an edited outcome, a tampered input,
  * a changed policy, or a rule set that has drifted since the decision was made.
  */
-export function recomputeMemoryRouting(decision: MemoryRoutingDecision): RoutingRecomputation {
+export function recomputeMemoryRouting(request: MemoryRoutingDecision): RoutingRecomputation {
   const mismatches: string[] = [];
   try {
+    // Copied once, so every check below reads the data the next one does.
+    const decision = jsonSnapshot(request, "routing decision", { maxNodes: MAX_DECISION_NODES }) as MemoryRoutingDecision;
     if (decision.schema_version !== MEMORY_ROUTING_VERSION) throw new MemoryClaimError("invalid", "unsupported schema_version");
     const policy = normalizeMemoryRoutingPolicy(decision.policy);
     if (canonicalJson(policy) !== canonicalJson(decision.policy)) mismatches.push("policy is not in normalised form");
@@ -426,8 +428,10 @@ const candidateBase = (claim: MemoryClaim, rank: number) => ({
  * (kontourai/survey#243) owns. When the decision names a current claim it is a
  * current/proposed pair; otherwise a single proposed candidate.
  */
-export function buildMemoryReviewItem(decision: MemoryRoutingDecision): ReviewItem | undefined {
-  if (decision.outcome !== "routed" || decision.input.type !== "claim") return undefined;
+export function buildMemoryReviewItem(request: MemoryRoutingDecision): ReviewItem | undefined {
+  // Copied once: the check below and the item built after it read the same data, not an object that answers twice.
+  const decision = jsonSnapshot(request, "routing decision", { maxNodes: MAX_DECISION_NODES }) as MemoryRoutingDecision;
+  if (decision.outcome !== "routed" || decision.input?.type !== "claim") return undefined;
   // The item is built from the decision's embedded claim, so a decision that no longer recomputes (an edited value under the old
   // claim id, say) must not become a candidate the reviewer sees under that id.
   const check = recomputeMemoryRouting(decision);
@@ -533,6 +537,7 @@ export function deriveMemoryRunMetrics(input: { runId: string; decisions: readon
   for (const decision of routed) for (const reason of decision.reasons) routedByRule[reason.rule] = (routedByRule[reason.rule] ?? 0) + 1;
 
   const reviewDecisions = ownEntries(ownField(input, "reviewDecisions", "metrics input"), "metrics input reviewDecisions") as ReviewDecision[];
+  const reviewEvents = ownEntries(ownField(input, "reviewEvents", "metrics input"), "metrics input reviewEvents") as ReviewSessionEvent[];
   const latest = latestDecisions(reviewDecisions);
   const counts = { confirmed: 0, corrected: 0, rejected: 0, held: 0 };
   const matched = new Set<string>();
@@ -542,7 +547,7 @@ export function deriveMemoryRunMetrics(input: { runId: string; decisions: readon
     if (!made) continue;
     matched.add(name);
     counts[memoryReviewOutcome(made, name)]++;
-    const dwell = reviewDwell(made, name, input.reviewEvents ?? []);
+    const dwell = reviewDwell(made, name, reviewEvents);
     if (dwell !== undefined) { seconds += dwell; timed++; }
   }
   const defectsCaught = counts.corrected + counts.rejected;
@@ -590,8 +595,15 @@ export interface WithheldMemoryClaim { id: string; reason: "rejected-in-review" 
 export function presentMemoryClaims(claims: readonly unknown[], context: { routing?: readonly MemoryRoutingDecision[]; reviewDecisions?: readonly ReviewDecision[] } = {}): { presented: PresentedMemoryClaim[]; withheld: WithheldMemoryClaim[] } {
   // Everything shown is read from a copy taken once, as plain JSON: a claim whose posture answers one way to the check and
   // another to the presentation would otherwise print a claim with no posture. A claim that cannot be copied is withheld.
-  const routingList = jsonSnapshotEach(ownField(context, "routing", "recall context"), "recall routing") as MemoryRoutingDecision[];
-  const routingByClaim = new Map(routingList.filter(decision => decision.changeType === "claim").map(decision => [decision.changeId, decision]));
+  // From each routing decision recall reads four small fields (what was decided, for which claim, and the rule names), so those
+  // are all it takes: copying a whole decision would refuse one the Kit legitimately produced (a large value and 64 peers).
+  const routingByClaim = new Map<string, { outcome: unknown; reasons: string[] }>();
+  for (const decision of ownEntries(ownField(context, "routing", "recall context"), "recall routing")) {
+    const changeType = ownField(decision, "changeType", "recall routing decision"), changeId = ownField(decision, "changeId", "recall routing decision");
+    if (changeType !== "claim" || typeof changeId !== "string") continue;
+    const reasons = ownEntries(ownField(decision, "reasons", "recall routing decision"), "recall routing reasons").map(reason => ownField(reason, "rule", "recall routing reason"));
+    routingByClaim.set(changeId, { outcome: ownField(decision, "outcome", "recall routing decision"), reasons: reasons.filter((rule): rule is string => typeof rule === "string") });
+  }
   const latest = latestDecisions(jsonSnapshotEach(ownField(context, "reviewDecisions", "recall context"), "recall reviewDecisions") as ReviewDecision[]);
   const presented: PresentedMemoryClaim[] = [], withheld: WithheldMemoryClaim[] = [];
   for (const entry of ownEntries(claims, "recall claims")) {
@@ -616,7 +628,7 @@ export function presentMemoryClaims(claims: readonly unknown[], context: { routi
     presented.push({
       id: claim.id, subject, property: claim.property, value, extractedValue: claim.value, posture: claim.posture, ...(claim.validTime ? { validTime: claim.validTime } : {}),
       speaker: claim.speaker, source: { ref: claim.source.ref, excerpt: claim.source.excerpt, observedAt: claim.source.observedAt },
-      review: { label, routing: routing ? (routing.outcome === "routed" ? "routed" : "uncontested") : "not-evaluated", reasons: routing?.reasons.map(reason => reason.rule) ?? [] },
+      review: { label, routing: routing ? (routing.outcome === "routed" ? "routed" : "uncontested") : "not-evaluated", reasons: (routing?.reasons ?? []) as MemoryRoutingRuleId[] },
       text: `[${claim.posture} · ${label}] ${subject}: ${claim.property} = ${typeof value === "string" ? value : canonicalJson(value)}`,
     });
   }

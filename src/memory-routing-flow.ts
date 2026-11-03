@@ -17,8 +17,8 @@ import path from "node:path";
 import { attachEvidence, loadRun, type FlowEvidenceEntry } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
 import { MemoryClaimError } from "./memory-claims.js";
-import { jsonSnapshot, jsonSnapshotList, ownEntries, ownField } from "./memory-json.js";
-import type { ReviewDecision, ReviewItem, ReviewSessionEvent } from "@kontourai/survey";
+import { MAX_DECISION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
+import type { ReviewDecision, ReviewItem, ReviewSessionEvent, ReviewSessionEventType } from "@kontourai/survey";
 import {
   MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
   type MemoryChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics, type SurveyEntityProposal,
@@ -103,9 +103,12 @@ async function attachJson(where: Location, kind: string, body: unknown, supersed
   }
 }
 
-async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceEntry[]> {
+async function recordedEntries(where: Location, kind: string): Promise<FlowEvidenceEntry[]> {
   const run = await loadRun(where.runId, where.cwd);
-  return (run.manifest.evidence as FlowEvidenceEntry[]).filter(entry => entry.requested_kind === kind && entry.gate_id === where.gate && isLive(entry));
+  return (run.manifest.evidence as FlowEvidenceEntry[]).filter(entry => entry.requested_kind === kind && entry.gate_id === where.gate);
+}
+async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceEntry[]> {
+  return (await recordedEntries(where, kind)).filter(isLive);
 }
 
 /**
@@ -116,7 +119,7 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
  * does not double-record.
  */
 export async function recordMemoryRoutingEvidence(request: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
-  const input = { ...locationOf(request), decisions: jsonSnapshotList(ownField(request, "decisions", "memory routing request decisions"), "routing decisions") as unknown as MemoryRoutingDecision[] };
+  const input = { ...locationOf(request), decisions: jsonSnapshotEach(ownField(request, "decisions", "memory routing request decisions"), "routing decisions", { maxNodes: MAX_DECISION_NODES }) as unknown as MemoryRoutingDecision[] };
   return (await serialized(input, async () => {
     const recorded = await recordRouting(input);
     // Metrics are derived from what is recorded, so recording refreshes them in the same unit. It does so even when the
@@ -152,9 +155,14 @@ export async function recordMemoryMetricsEvidence(request: Location & { metrics:
     // recorded) would supersede the correct ones and make the run read as if nothing happened, so only the figures the
     // recorded evidence derives are recorded; `refreshMemoryRunMetrics` is the way to bring them up to date.
     const review = await readReview(input.runId, input.cwd);
-    const derived = deriveMemoryRunMetrics({ runId: input.runId, decisions: await readMemoryRoutingDecisions(input.runId, input.cwd), reviewDecisions: review.decisions, reviewEvents: review.events });
-    if (canonicalJson(derived) !== canonicalJson(input.metrics)) throw new MemoryClaimError("invalid", "metrics are not what the evidence recorded for the run derives; refresh them instead of recording figures computed elsewhere");
-    return recordMetrics(input);
+    const derived = deriveMemoryRunMetrics({ runId: input.runId, decisions: await readDerivableDecisions(input.runId, input.cwd), reviewDecisions: review.decisions, reviewEvents: review.events });
+    if (canonicalJson(derived) === canonicalJson(input.metrics)) return recordMetrics(input);
+    // A retry after a lost reply: these exact figures were recorded earlier and have since been superseded by newer review state.
+    // The entry that holds them is the answer (nothing is written, so nothing stale becomes live); anything else is refused.
+    const earlier = (await readMemoryMetricsEvidence(input.runId, input.cwd)).find(entry => canonicalJson(entry.value) === canonicalJson(input.metrics));
+    const recorded = earlier && (await recordedEntries(input, MEMORY_METRICS_EVIDENCE_KIND)).find(entry => entry.id === earlier.evidenceId);
+    if (recorded) return recorded;
+    throw new MemoryClaimError("invalid", "metrics are not what the evidence recorded for the run derives; refresh them instead of recording figures computed elsewhere");
   });
 }
 async function recordMetrics(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
@@ -192,6 +200,23 @@ export async function readMemoryRoutingDecisions(runId: string, cwd?: string): P
   const decisions: MemoryRoutingDecision[] = [];
   for (const { value } of await readMemoryRoutingEvidence(runId, cwd)) {
     for (const decision of value.decisions) if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
+  }
+  return decisions;
+}
+
+/**
+ * The run's recorded decisions, for deriving figures from: every one must belong to the run and still recompute from its own
+ * input and policy. A digest proves the file is the one recorded, not that what was recorded follows from the rules, so figures
+ * are never derived from a record that disagrees with them (`recomputeRecordedMemoryRouting` reports such a record instead).
+ */
+async function readDerivableDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
+  for (const { value } of await readMemoryRoutingEvidence(runId, cwd)) {
+    if (value.schema_version !== MEMORY_ROUTING_VERSION || value.runId !== runId) throw new MemoryClaimError("invalid", "a routing record belongs to another run or an unsupported version");
+  }
+  const decisions = await readMemoryRoutingDecisions(runId, cwd);
+  for (const decision of decisions) {
+    const check = recomputeMemoryRouting(decision);
+    if (!check.ok) throw new MemoryClaimError("invalid", `recorded routing decision ${decision.id} does not recompute, so no figures are derived from it: ${check.mismatches.join("; ")}`);
   }
   return decisions;
 }
@@ -283,8 +308,8 @@ type ReviewInput = { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?:
 function prepareReview(input: ReviewInput): PreparedReview {
   // The request's own fields are read first without running anything it defines, then each whole list is snapshotted by
   // index: a Proxy request, a getter, a caller-supplied `.map` or a hole cannot change what is recorded.
-  const decisions = jsonSnapshotList(ownField(input, "reviewDecisions", "review input"), "review input") as ReviewDecision[];
-  const events = jsonSnapshotList(ownField(input, "reviewEvents", "review input"), "review input") as ReviewSessionEvent[];
+  const decisions = jsonSnapshotEach(ownField(input, "reviewDecisions", "review input"), "review input") as ReviewDecision[];
+  const events = jsonSnapshotEach(ownField(input, "reviewEvents", "review input"), "review input") as ReviewSessionEvent[];
   decisions.forEach(assertReviewDecision);
   events.forEach(assertReviewEvent);
   return { decisions, events };
@@ -306,6 +331,8 @@ async function recordReview(input: Location & { review: PreparedReview }): Promi
   await attachJson(input, MEMORY_REVIEW_EVIDENCE_KIND, record);
 }
 
+/** Survey's `ReviewSessionEventType`, written as a record so that a type Survey adds is a compile error here, not a silently accepted string. */
+const EVENT_TYPES: Record<ReviewSessionEventType, true> = { "session-started": true, "item-selected": true, "decision-changed": true, "note-changed": true, "decision-submitted": true, "session-completed": true };
 const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 const goodInstant = (value: unknown): boolean => typeof value === "string" && Number.isFinite(Date.parse(value));
 const bad = (what: string): never => { throw new MemoryClaimError("invalid", `review input: ${what}`); };
@@ -321,7 +348,7 @@ function assertReviewDecision(value: unknown): void {
 function assertReviewEvent(value: unknown): void {
   if (!isRecord(value) || value.kind !== "ReviewSessionEvent" || !isRecord(value.spec)) return bad("not a Survey ReviewSessionEvent");
   const { spec } = value;
-  if (typeof spec.sessionName !== "string" || !spec.sessionName || !Number.isInteger(spec.sequence) || typeof spec.eventType !== "string" || !goodInstant(spec.occurredAt)) return bad("an event needs a session, an integer sequence, a type and an occurredAt that is a date-time");
+  if (typeof spec.sessionName !== "string" || !spec.sessionName || !Number.isInteger(spec.sequence) || typeof spec.eventType !== "string" || !Object.hasOwn(EVENT_TYPES, spec.eventType) || !goodInstant(spec.occurredAt)) return bad("an event needs a session, an integer sequence, a Survey event type, a type and an occurredAt that is a date-time");
 }
 
 /** All review state recorded for a run, across batches, once each. */
@@ -339,7 +366,7 @@ export const readMemoryReviewRecords = (runId: string, cwd?: string) => readRevi
 
 async function refreshMetrics(input: Location & { review?: PreparedReview }): Promise<FlowEvidenceEntry> {
   if (input.review) await recordReview({ runId: input.runId, gate: input.gate, cwd: input.cwd, review: input.review });
-  const decisions = await readMemoryRoutingDecisions(input.runId, input.cwd);
+  const decisions = await readDerivableDecisions(input.runId, input.cwd);
   const review = await readReview(input.runId, input.cwd);
   const metrics = deriveMemoryRunMetrics({ runId: input.runId, decisions, reviewDecisions: review.decisions, reviewEvents: review.events });
   return recordMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, metrics });
