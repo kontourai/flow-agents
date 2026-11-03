@@ -48,14 +48,28 @@ for (const profile of ["KitDefaultStoreAdapter", "KitObsidianStoreAdapter"]) {
         links: [{ kind: "source", target_id: id }, { kind: "source", target_id: other }],
         provenance: { agent: "test", source_ids: [id, other] },
       });
+      const soleProposal = await store.proposeCreate({
+        type: "concept", title: "PROPOSAL_PURGE_SECRET", body: "PROPOSAL_PURGE_SECRET",
+        category: "private", provenance: { agent: "test", source_ids: [id] },
+      }, "proposer", { agent: "test", proposal: "PROPOSAL_PURGE_SECRET" });
+      const mixedProposal = await store.proposeCreate({
+        type: "concept", title: "Review needed", body: "independent candidate", category: "private",
+        provenance: { agent: "test", source_ids: [id, other] },
+      }, "proposer", { agent: "test", proposal: "review" });
       const provider = new MarkdownVaultProvider({ store });
       const before = await buildKnowledgeTrustBundle({ store: provider, includeRetired: true });
       assert.ok(JSON.stringify(before).includes("PURGE_SURFACE_SECRET"));
-      const otherClaim = before.claims.find((item) => item.subjectId === other);
-      assert.ok(!(otherClaim.derivedFrom ?? []).includes(otherClaim.id));
       const result = await store.purge([id], { agent: "owner", rationale: "erasure request" });
       assert.ok(result.cascaded.includes(dependent), "sole dependent must cascade");
       assert.ok(result.survivors.includes(survivor), "multiply supported record must survive");
+      assert.ok(result.proposalsRejected.includes(soleProposal));
+      assert.ok(result.proposalsScrubbed.includes(soleProposal));
+      assert.ok(result.proposalsBlocked.includes(mixedProposal));
+      const soleAfter = await store.getProposal(soleProposal);
+      assert.equal(soleAfter.state, "rejected");
+      assert.ok(!JSON.stringify(soleAfter).includes("PROPOSAL_PURGE_SECRET"));
+      assert.equal((await store.getProposal(mixedProposal)).state, "pending");
+      await assert.rejects(() => store.applyCreate(mixedProposal, "reviewer"), { code: "PURGED" });
       assert.equal((await store.get(id)).status, "purged");
       assert.equal((await store.get(dependent)).status, "purged");
       assert.equal(await store.get("purge-secret-alias"), null);

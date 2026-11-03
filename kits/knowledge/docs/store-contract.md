@@ -1945,7 +1945,7 @@ violate that requirement).
 ## Addendum M: Privileged purge (issue #1570)
 
 The owner approved an explicit erasure exception on 2026-11-02. The operation is
-owned by [Corpus Store](https://github.com/kontourai/corpus/blob/b222de99f25ceea679448dd9e4648c3bc73a5938/packages/store/README.md#owner-decisions);
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/74f95d52fa529253316f68d051eb91423e5545ba/packages/store/README.md#owner-decisions);
 this kit must consume that operation rather than implement a second cascade.
 **Implementation status:** the bundled adapters in this revision do not yet
 implement this addendum. Hosts must not assume they support purge or erasure.
@@ -1981,10 +1981,12 @@ before-images until recovery; purge is not a secure-erasure guarantee. A complet
 integration must test each adapter and each actual read path, including a fault
 that skips the cascade and makes conformance fail.
 Create proposals can contain complete candidate records outside the working set.
-The host must account for proposals that carry erased content. Corpus's purge
-branch does not yet include its merged create-proposal operation, and no claim is
-made that purge erases proposal content or settles proposals supported by purged
-sources. Verify the upstream resolution before adopting it.
+The Corpus purge branch has incorporated create proposals: a pending proposal
+that rests only on erased sources is rejected and its candidate scrubbed; one
+with remaining support is blocked from application and returned for review. A
+blocked proposal retains its candidate, which may itself reproduce erased
+content, so the host must review it. The kit's bundled adapters have not yet
+adopted or qualified this behavior. Reverify against the merged package.
 
 When a purged record is projected into a Surface claim, the Knowledge Surface
 adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
