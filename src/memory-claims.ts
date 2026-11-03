@@ -235,11 +235,14 @@ export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim 
   const { subject, source } = value;
   if (!isObject(subject) || !nonEmpty(subject.type) || !nonEmpty(subject.id)) throw new MemoryClaimError("invalid", "subject needs a type and id");
   if (!nonEmpty(value.property) || !nonEmpty(value.speaker) || !nonEmpty(value.claimType)) throw new MemoryClaimError("invalid", "claimType, property and speaker are required");
+  // Optional text fields are text when present: a label that is an object would pass every check here and then fail wherever it is printed.
+  if (subject.label !== undefined && typeof subject.label !== "string") throw new MemoryClaimError("invalid", "a subject label must be text");
   if (value.qualifiers !== undefined && (!isObject(value.qualifiers) || !Object.values(value.qualifiers).every(item => typeof item === "string"))) throw new MemoryClaimError("invalid", "qualifiers must map names to strings");
   if (!("value" in value) || value.value === undefined) throw new MemoryClaimError("invalid", "value is required");
   if (value.posture === undefined) throw new MemoryClaimError("posture-missing", "every claim carries its posture");
   if (!(MEMORY_CLAIM_POSTURES as readonly unknown[]).includes(value.posture)) throw new MemoryClaimError("invalid", "unknown posture");
   if (!isObject(source) || !["ref", "locator", "excerpt", "observedAt"].every(key => nonEmpty(source[key]))) throw new MemoryClaimError("invalid", "source needs ref, locator, excerpt and observedAt");
+  for (const key of ["extractor", "role"]) if (source[key] !== undefined && typeof source[key] !== "string") throw new MemoryClaimError("invalid", `source ${key} must be text`);
   if (value.visibility !== undefined && readMemoryVisibility(value.visibility) === undefined) throw new MemoryClaimError("invalid", "visibility must be public or restricted to named audiences");
   if (value.supersedes !== undefined && (!Array.isArray(value.supersedes) || value.supersedes.length === 0 || !value.supersedes.every(edge =>
     isObject(edge) && /^sha256:[0-9a-f]{64}$/.test(String(edge.claimId)) && (edge.kind === "correction" || edge.kind === "succession") && nonEmpty(edge.reason)))) {

@@ -1039,3 +1039,46 @@ test("the recomputation report names a record that belongs to another run or an 
   assert.deepEqual(report.mismatches.map(item => item.decisionId).sort(), [`(record ${foreign.id})`, `(record ${other.id})`].sort());
   assert.match(report.mismatches[0].mismatches[0], /another run or an unsupported version/);
 });
+
+// --- review round 14 --------------------------------------------------------------------------------------------------------
+
+const storedFile = async (cwd, id) => { const run = await loadRun("run-1", cwd); return path.join(run.dir, run.manifest.evidence.find(entry => entry.id === id).stored_path); };
+
+test("a claim whose optional text is not text is refused before anything is written, not after its evidence is recorded", async t => {
+  const cwd = await workspace(t);
+  const bad = memoryClaim({ ...base, subject: { ...base.subject, label: { toString: null, valueOf: null } }, value: "x" });
+  const before = await attachedCount(cwd);
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: [{ type: "claim", claim: bad, agreement: { passes: 2, agreeing: 2 } }] }), /subject label must be text/);
+  assert.equal(await attachedCount(cwd), before, "nothing was recorded");
+});
+
+test("the metrics readers open only live files, and a retry opens only the one it matches", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  const first = await readLatestMemoryMetrics("run-1", cwd);
+  await refreshMemoryRunMetrics({ ...where(cwd), ...rejection(buildMemoryReviewItem(decisions[1]), 4) });
+  const second = await readLatestMemoryMetrics("run-1", cwd);
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [decisionFixture(9)] });
+  const third = await readLatestMemoryMetrics("run-1", cwd);
+  assert.deepEqual(new Set([first.evidenceId, second.evidenceId, third.evidenceId]).size, 3);
+  fs.writeFileSync(await storedFile(cwd, first.evidenceId), "damaged");
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).evidenceId, third.evidenceId, "the latest reader does not open the damaged old file");
+  assert.equal((await recordMemoryMetricsEvidence({ ...where(cwd), metrics: second.value })).id, second.evidenceId, "a retry of other figures does not open it either");
+  await assert.rejects(recordMemoryMetricsEvidence({ ...where(cwd), metrics: first.value }), /no longer matches its recorded digest/, "while the retry that is answered by the damaged file says so");
+});
+
+test("review records are read live-only too: a superseded record no longer counts and a damaged one blocks nothing", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(0, 3) });
+  const [record] = (await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === MEMORY_REVIEW_EVIDENCE_KIND);
+  // Direct Flow use (the Kit's review API is append-only): replace the record with an empty one.
+  const file = path.join(cwd, "empty-review.json");
+  fs.writeFileSync(file, bytesOfRecord({ schema_version: "1.0", runId: "run-1", decisions: [], events: [] }));
+  await attachEvidence("run-1", { cwd, gate: "route-gate", file, kind: MEMORY_REVIEW_EVIDENCE_KIND, supersede: [record.id] });
+  fs.writeFileSync(await storedFile(cwd, record.id), "damaged");
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).events.length, 0, "the superseded record is not read, so not counted");
+  await refreshMemoryRunMetrics({ ...where(cwd) });
+});

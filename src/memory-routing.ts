@@ -175,12 +175,25 @@ export function normalizeMemoryRoutingPolicy(policyInput: Partial<MemoryRoutingP
   if (!policy || typeof policy !== "object" || Array.isArray(policy)) throw new MemoryClaimError("invalid", "routing policy is malformed");
   const unknown = Object.keys(policy).filter(key => !POLICY_KEYS.has(key));
   if (unknown.length) throw new MemoryClaimError("invalid", `routing policy has fields it does not define: ${unknown.join(", ")}`);
-  const consequential = (policy.consequential ?? {}) as Partial<MemoryRoutingPolicy["consequential"]>;
+  // The list fields are lists. A string would be spread into its characters, a number would not spread at all, and neither is a
+  // list of names; the declared type says so and the runtime boundary does too.
+  const asList = (value: unknown, fallback: readonly string[], what: string): string[] => {
+    if (value === undefined) return [...fallback];
+    if (!Array.isArray(value)) throw new MemoryClaimError("invalid", `routing policy ${what} must be a list of names`);
+    return [...value];
+  };
+  const consequentialInput = policy.consequential as unknown;
+  if (consequentialInput !== undefined && (consequentialInput === null || typeof consequentialInput !== "object" || Array.isArray(consequentialInput))) throw new MemoryClaimError("invalid", "routing policy consequential must be an object");
+  const consequential = (consequentialInput ?? {}) as Partial<MemoryRoutingPolicy["consequential"]>;
+  const unknownConsequential = Object.keys(consequential).filter(key => key !== "properties" && key !== "subjectTypes");
+  if (unknownConsequential.length) throw new MemoryClaimError("invalid", `routing policy consequential has fields it does not define: ${unknownConsequential.join(", ")}`);
   const merged: MemoryRoutingPolicy = {
     ...DEFAULT_MEMORY_ROUTING_POLICY, ...policy,
-    multiValued: [...(policy.multiValued ?? DEFAULT_MEMORY_ROUTING_POLICY.multiValued)],
-    consequential: { properties: [...(consequential.properties ?? [])], subjectTypes: [...(consequential.subjectTypes ?? [])] },
+    multiValued: asList(policy.multiValued, DEFAULT_MEMORY_ROUTING_POLICY.multiValued, "multiValued"),
+    consequential: { properties: asList(consequential.properties, [], "consequential.properties"), subjectTypes: asList(consequential.subjectTypes, [], "consequential.subjectTypes") },
   };
+  // The budget applies to the policy as it will be recorded, defaults included, not only to what was handed in.
+  try { jsonSnapshot(merged, "routing policy", { maxNodes: MAX_POLICY_NODES }); } catch (error) { throw new MemoryClaimError("invalid", error instanceof Error ? error.message.replace(/^Memory claim invalid: /, "") : String(error)); }
   const names = [...merged.multiValued, ...merged.consequential.properties, ...merged.consequential.subjectTypes];
   if (merged.version !== MEMORY_ROUTING_VERSION || !Number.isInteger(merged.minPasses) || merged.minPasses < 1
     || typeof merged.minAgreement !== "number" || !(merged.minAgreement >= 0 && merged.minAgreement <= 1) || names.some(name => typeof name !== "string" || !name.trim())) {
@@ -324,6 +337,13 @@ function entityInput(request: MemoryEntityChange): MemoryEntityRoutingInput {
   return { type: "entity", proposalRef: proposal.id, operations: [...operations].sort(), subjects: [...subjects].sort(([x], [y]) => x < y ? -1 : x > y ? 1 : 0).map(([, subject]) => subject) };
 }
 
+/** Refuses a decision the Kit's own readers would refuse (they all copy it against these bounds). `bounds` is for tests. */
+export function assertDecisionReadable(decision: MemoryRoutingDecision, bounds: { maxNodes?: number; maxDepth?: number } = DECISION_BOUNDS): void {
+  try { jsonSnapshot(decision, "routing decision", bounds); } catch (error) {
+    throw new MemoryClaimError("invalid", `the routing decision for this change is too large to be recorded or presented: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision {
   const policy = normalizeMemoryRoutingPolicy(policyInput);
   const type = ownField(change, "type", "routing change");
@@ -333,6 +353,10 @@ export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<Me
     changeId: input.type === "claim" ? input.claim.id : input.proposalRef,
     changeType: input.type, ...evaluateMemoryRouting(input, policy), input, policy,
   };
+  // A net under the bounds, not a substitute for them: every part of a decision is bounded where it is taken in and a test pins that
+  // the parts sum to less than the decision bound, but a hole in that argument (review 13 found one, in the policy) must not become a
+  // decision the Kit produces and then cannot read. A decision that does not fit is refused here, with the reason.
+  assertDecisionReadable(decision);
   return decision;
 }
 

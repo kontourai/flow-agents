@@ -7,11 +7,11 @@ import { buildCandidateVerification } from "@kontourai/survey";
 import {
   buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
 } from "@kontourai/survey/review-workbench";
-import { memoryClaim, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
+import { assertMemoryClaim, memoryClaim, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
 import { MAX_DECISION_DEPTH, MAX_DECISION_NODES, MAX_ENVELOPE_NODES, MAX_PEERS, MAX_POLICY_NODES, MAX_SNAPSHOT_DEPTH, MAX_SNAPSHOT_NODES, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, jsonSnapshot } from "@kontourai/flow-agents/memory-json";
 import { memoryAccumulationQuery } from "@kontourai/flow-agents/memory-accumulation";
 import {
-  DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
+  DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, assertDecisionReadable, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
   memoryReviewItemName, presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
 } from "@kontourai/flow-agents/memory-routing";
 import { SCHEMAS, distillFixtureSitting, loadEntityProposals, matchesFixture, readJson } from "./memory-claims-support.mjs";
@@ -893,7 +893,7 @@ test("recall reads each field of a routing decision as data: a getter, a Proxy o
 
 const countNodes = value => (value === null || typeof value !== "object" ? 1 : 1 + Object.values(value).reduce((sum, item) => sum + countNodes(item), 0));
 
-test("the largest decision the Kit can produce is one it can read: claims at the bound, 1,024-audience visibilities, 64 verification records, a full projection fact, a large policy", () => {
+test("a near-maximal decision is one the Kit can read: claims at the bound, 1,024-audience visibilities, 64 verification records, a full projection fact, a policy near its bound", () => {
   const audiences = Array.from({ length: 1024 }, (_, i) => `audience-${i}`);
   const shaped = (n, offset, ref) => make({ value: { list: Array.from({ length: n }, (_, i) => i + offset) }, visibility: { kind: "restricted", audiences }, source: { ...base.source, ref } });
   // The largest value that still leaves the claim inside the claim bound, found rather than assumed.
@@ -961,3 +961,56 @@ test("the decision bound covers the sum of its parts: each part is bounded where
   assert.ok(MAX_DECISION_NODES - total > 10_000, "with room to spare, not by a margin of a few values");
   assert.deepEqual([MAX_PEERS, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, MAX_POLICY_NODES, MAX_SNAPSHOT_NODES, MAX_ENVELOPE_NODES, MAX_DECISION_DEPTH, MAX_SNAPSHOT_DEPTH], [64, 64, 2_000, 20_000, 20_000, 200_000, 40, 32], "the parts are pinned");
 });
+
+test("a routing policy is a policy: its lists are lists, its budget counts the defaults, and the net under the bounds fires when a decision does not fit", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const route = policy => routeMemoryChange(change(claim, { accumulation: null }), policy);
+  // The reviewer's case: exactly 20,000 values as handed in, more once the defaults are added.
+  assert.throws(() => route({ multiValued: new Array(19_998).fill("x") }), /routing policy: too large/);
+  assert.doesNotThrow(() => route({ multiValued: new Array(19_900).fill("x") }));
+  // A string is not a list of names: it used to be spread into characters and could outgrow every bound.
+  for (const field of ["multiValued"]) assert.throws(() => route({ [field]: "x".repeat(1_700_000) }), /must be a list of names|too large/, field);
+  assert.throws(() => route({ consequential: { properties: "properties" } }), /consequential\.properties must be a list of names/);
+  assert.throws(() => route({ consequential: { subjectTypes: 7 } }), /consequential\.subjectTypes must be a list of names/);
+  assert.throws(() => route({ consequential: [] }), /consequential must be an object/);
+  assert.throws(() => route({ consequential: null }), /consequential must be an object/);
+  assert.throws(() => route({ consequential: { properties: [], kinds: [] } }), /consequential has fields it does not define: kinds/);
+  assert.throws(() => route([]), /routing policy is malformed/);
+  assert.throws(() => route(3), /routing policy is malformed|expected/);
+  // A stored decision with a malformed policy does not recompute, even with its id recomputed to match.
+  const stored = plain(route({}));
+  stored.policy.multiValued = "xx";
+  stored.id = `sha256:${createHash("sha256").update(canonicalJson({ input: stored.input, policy: stored.policy })).digest("hex")}`;
+  const check = recomputeMemoryRouting(stored);
+  assert.equal(check.ok, false);
+  assert.match(check.mismatches.join("\n"), /multiValued must be a list of names/);
+  // The net: a decision that does not fit its bounds is refused with the reason, whatever let it through.
+  const decision = route({});
+  assert.doesNotThrow(() => assertDecisionReadable(decision));
+  assert.throws(() => assertDecisionReadable(decision, { maxNodes: 50 }), /too large to be recorded or presented/);
+  assert.throws(() => assertDecisionReadable(decision, { maxDepth: 2 }), /too large to be recorded or presented.*too deep/);
+});
+
+test("embedded claims and peers keep their depth budget in a recomputed decision", () => {
+  const rehash = decision => { decision.id = `sha256:${createHash("sha256").update(canonicalJson({ input: decision.input, policy: decision.policy })).digest("hex")}`; return decision; };
+  let value = "leaf"; for (let i = 0; i < 33; i++) value = { a: value };
+  const deep = make({ value });
+  const base = plain(routeMemoryChange(change(make({ value: "PostgreSQL 16" }), { current: [make({ value: "other", source: { ...base_.source, ref: "p" } })], accumulation: null })));
+  const withDeepClaim = plain(base); withDeepClaim.input.claim = plain(deep); withDeepClaim.changeId = deep.id;
+  Object.assign(withDeepClaim, evaluateMemoryRouting(rehash(withDeepClaim).input, withDeepClaim.policy)); rehash(withDeepClaim);
+  assert.match(recomputeMemoryRouting(withDeepClaim).mismatches.join("\n"), /embedded claim.*too deep/, "the claim");
+  const withDeepPeer = plain(base); withDeepPeer.input.current = [plain(make({ value, source: { ...base_.source, ref: "p" } }))];
+  withDeepPeer.input.baselines = [withDeepPeer.input.baselines[0], { ref: withDeepPeer.input.current[0].id, visibility: null }];
+  Object.assign(withDeepPeer, evaluateMemoryRouting(rehash(withDeepPeer).input, withDeepPeer.policy)); rehash(withDeepPeer);
+  assert.match(recomputeMemoryRouting(withDeepPeer).mismatches.join("\n"), /embedded claim.*too deep/, "a peer");
+});
+
+test("optional text on a claim is text: a label, a role or an extractor that is an object is not a claim", () => {
+  const ok = make({ value: "x" });
+  assert.doesNotThrow(() => assertMemoryClaimFor(ok));
+  for (const bad of [{ subject: { ...base.subject, label: { toString: null } } }, { source: { ...base.source, role: { a: 1 } } }, { source: { ...base.source, extractor: 7 } }]) {
+    assert.throws(() => assertMemoryClaimFor(memoryClaim({ ...base, ...bad, value: "x" })), /must be text/);
+  }
+});
+const assertMemoryClaimFor = claim => assertMemoryClaim(claim);
+const base_ = base;

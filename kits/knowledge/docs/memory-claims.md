@@ -160,10 +160,10 @@ smaller, so an artifact the Kit makes is never one its own readers refuse:
 `assembleMemoryClaims` rejects, with the reason, a claim that exceeds the claim bounds, so `distillMemoryClaims` never returns one
 that routing or recall would refuse, and every other part of a decision is bounded where it is taken in (peers, verification records, the policy at
 20,000 values, projection lists at 1,000 entries, a visibility at 1,024 audiences), so a decision the Kit produces always fits the
-decision bound; a test pins that the parts sum to less than it. `recomputeMemoryRouting` applies the same per-item budgets to what a
+decision bound; a test pins that the parts sum to less than it, and `routeMemoryChange` still checks the decision it produced against the bound as a net, refusing one that does not fit with the reason. `recomputeMemoryRouting` applies the same per-item budgets to what a
 decision embeds, so a hand-built decision with a claim or verification record the Kit could not have produced is not recomputable. A request that would take a run past its history limit is refused before anything is written (see Flow evidence).
 Each bound is per item: there is no aggregate budget for a whole request or a whole batch, and no byte budget for strings. A host
-that accepts untrusted workloads needs those limits itself. The largest decision the Kit can produce copies in well under a second.
+that accepts untrusted workloads needs those limits itself. The decision in the worst-case test (65 claims at the claim bound, 1,024-audience visibilities, a full projection fact and a policy near its bound; about 1.6 million values) is produced, recomputed, turned into a review item and presented in about a second on a development laptop.
 
 ## Flow evidence
 
@@ -196,7 +196,7 @@ If stored routing evidence is bad (a record that no longer recomputes, or one of
 refused, which is the point: no figures are derived from evidence that disagrees with its own rules. The way out is
 `supersedeMemoryRoutingEvidence({supersedes, decisions})`. It attaches a corrected record that supersedes the named live routing
 records, after checking, as a whole, that the corrected decisions recompute, that the records which stay live are derivable and that
-the history limit holds; an identical retry returns the record it already made. Figures, the recomputation report, the room check and
+the history limit holds; an identical retry returns the record it already made, for as long as that record is still live (once the replacement has itself been superseded, the same request is refused as naming records that are no longer live). Figures, the recomputation report, the room check and
 `readMemoryRoutingDecisions` read the live records, so after recovery recall shows the corrected routing; the superseded record stays
 in the manifest, readable with `readMemoryRoutingEvidence`, as the audit trail. A clean report over the live records is not a clean
 history, so audit the superseded entries too. Passing no `decisions` quarantines the named records without replacing them: that is a
@@ -210,6 +210,8 @@ and the attach cannot share it: two processes racing can leave a duplicate routi
 metrics entries (`readLatestMemoryMetrics` takes the last), and metrics written by one process can be stale-last against another's
 decisions until the next refresh. Neither loses or corrupts evidence. An atomic conditional attach is a Flow feature
 ([kontourai/flow#295](https://github.com/kontourai/flow/issues/295)).
+
+A routing policy with a field the policy does not define is refused (the decision schema allows none), and its lists must be lists of names; a decision recorded by an earlier build with an extra policy key therefore no longer recomputes (none of this repository's fixtures has one).
 
 One evidence entry holds a batch of decisions rather than one entry per decision,
 because a run decides hundreds of changes and each entry is a locked manifest write.

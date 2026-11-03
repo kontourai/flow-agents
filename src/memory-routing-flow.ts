@@ -245,9 +245,15 @@ export async function recordMemoryMetricsEvidence(request: Location & HistoryLim
     // A retry after a lost reply: these exact figures were recorded earlier and have since been superseded by newer review state.
     // The entry that holds them is the answer (nothing is written, so nothing stale becomes live); anything else is refused. One gate
     // holds a run's metrics (`preflight` has just checked), so there is no other gate's entry to mistake for this one.
-    const earlier = (await readMemoryMetricsEvidence(input.runId, input.cwd)).find(entry => canonicalJson(entry.value) === canonicalJson(input.metrics));
-    const recorded = earlier && (await recordedEntries(input, MEMORY_METRICS_EVIDENCE_KIND)).find(entry => entry.id === earlier.evidenceId);
-    if (recorded) return recorded;
+    // Matched by the digest the entry records (the figures were stored as exactly these bytes), then that one file is verified: no
+    // other superseded file is opened, so a damaged old one cannot block a retry that does not concern it.
+    const digest = sha256(bytesOf(input.metrics));
+    const recorded = (await recordedEntries(input, MEMORY_METRICS_EVIDENCE_KIND)).find(entry => entry.sha256 === digest && typeof entry.stored_path === "string");
+    if (recorded) {
+      const run = await loadRun(input.runId, input.cwd);
+      if (sha256(await readFile(path.join(run.dir, recorded.stored_path as string))) !== recorded.sha256) throw new MemoryClaimError("invalid", `evidence ${recorded.id} no longer matches its recorded digest`);
+      return recorded;
+    }
     throw new MemoryClaimError("invalid", "metrics are not what the evidence recorded for the run derives; refresh them instead of recording figures computed elsewhere");
   });
 }
@@ -280,7 +286,7 @@ const readLiveRoutingRecords = (runId: string, cwd?: string) => readStored<Memor
 
 /** The run's current metrics: the last live entry, so two live entries from a cross-process race still read as one answer. */
 export async function readLatestMemoryMetrics(runId: string, cwd?: string): Promise<StoredMemoryEvidence<MemoryRunMetrics> | undefined> {
-  return (await readMemoryMetricsEvidence(runId, cwd)).filter(entry => !entry.superseded).at(-1);
+  return (await readStored<MemoryRunMetrics>(runId, cwd, MEMORY_METRICS_EVIDENCE_KIND, true)).at(-1);
 }
 
 /**
@@ -387,6 +393,9 @@ export async function runMemoryRouting(request: Location & HistoryLimited & {
   // The proposals handed back are the ones routed: copied here, before the first await, from the same synchronous read.
   const proposals = changes.map(change => ownField(change, "type", "routing change") === "entity" ? jsonSnapshot(ownField(change, "proposal", "routing change proposal"), "routing change proposal") as SurveyEntityProposal : undefined);
   const decisions = routeMemoryChanges(changes, policyInput === undefined ? undefined : jsonSnapshot(policyInput, "routing policy") as Partial<MemoryRoutingPolicy>);
+  // Everything the run hands back is built before anything is written: a decision whose review item cannot be built is refused
+  // here, not after its evidence is recorded.
+  const itemFor = decisions.map(decision => decision.outcome === "routed" && decision.input.type === "claim" ? buildMemoryReviewItem(decision)! : undefined);
   // Review input is validated before the first write: a bad one must not leave routing recorded behind a refusal.
   const review = prepareReview(request);
   const limit = memoryHistoryLimit(request);
@@ -399,7 +408,7 @@ export async function runMemoryRouting(request: Location & HistoryLimited & {
   for (const [index, decision] of decisions.entries()) {
     if (decision.outcome !== "routed") continue;
     if (decision.input.type === "entity") { entityProposals.push(proposals[index]!); continue; }
-    const item = buildMemoryReviewItem(decision)!;
+    const item = itemFor[index]!;
     items.push(item);
     if (input.queue) { await input.queue.publish(item, decision.id); published.push(item.metadata.name); }
   }
@@ -470,7 +479,7 @@ function assertReviewEvent(value: unknown): void {
 /** All review state recorded for a run, across batches, once each. */
 async function readReview(runId: string, cwd?: string): Promise<{ decisions: ReviewDecision[]; events: ReviewSessionEvent[] }> {
   const decisions = new Map<string, ReviewDecision>(), events = new Map<string, ReviewSessionEvent>();
-  for (const { value } of await readStored<MemoryReviewRecord>(runId, cwd, MEMORY_REVIEW_EVIDENCE_KIND)) {
+  for (const { value } of await readStored<MemoryReviewRecord>(runId, cwd, MEMORY_REVIEW_EVIDENCE_KIND, true)) {
     if (value.schema_version !== MEMORY_ROUTING_VERSION || value.runId !== runId) throw new MemoryClaimError("invalid", "a review record belongs to another run or an unsupported version");
     // A digest proves the file is the one that was recorded, not that what was recorded is a Survey decision or event.
     for (const decision of value.decisions) { assertReviewDecision(decision); decisions.set(canonicalJson(decision), decision); }
