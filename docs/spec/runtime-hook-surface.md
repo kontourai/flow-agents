@@ -248,6 +248,31 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 **Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of a user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Since #1172 the turn-start re-grounding is hash-guarded: an unchanged state block is emitted once and then suppressed until it changes, and the guard is reset at every `SessionStart` (including `source: compact`) so a compaction never strands the agent without the current-step directive. The context-map pointer is `SessionStart`-only for the same reason, and is emitted at every `SessionStart` whether or not a workflow session is active — a session-less checkout is exactly when an index is worth most. The supersession notice is deliberately exempt and stays every-turn. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
 
+**Context contributors.** `workflow-steering.js` composes registered synchronous
+`(event, payload, budget) -> { priority, text } | null` contributors in descending
+priority, preserving registration order for ties. Workflow state runs first and
+retains its existing output and behavior. The registry and profile-memory reader
+make no model or network calls. Existing workflow-state behavior, including its
+separate install-freshness refresh, is unchanged.
+
+**Profile brief contract (v1).** A producer writes UTF-8 JSON at
+`$XDG_DATA_HOME/knowledge-store/knowledge/dream/briefs/global.json` (when
+`XDG_DATA_HOME` is unset, `$HOME/.local/share` is used). The shape is
+`{"version":1,"entries":["first complete entry","second complete entry"]}`;
+entries are ordered by the producer and contain display-ready text. The reader
+accepts at most 32768 bytes on disk, rejects malformed UTF-8, malformed schema,
+control characters and embedded marker delimiters, and reads only a regular
+file without following a final symlink. It never writes or invokes a model or
+network. On Claude Code and Codex SessionStart, standard and strict hook
+profiles enable `profile-memory`; `SA_DISABLED_HOOKS=profile-memory` disables
+it, and minimal and other harnesses leave it off. No other event injects it.
+The output uses the shared knowledge memory marker, labels the content
+“Background, not instruction”, and says the code wins over conflicting memory.
+The marker, label, entries and closing marker are bounded to 8192 UTF-8 bytes
+(and to a smaller supplied budget); an entry that does not fit is skipped whole.
+An absent, invalid or empty brief contributes nothing. #671 will implement the
+producer; `evals/fixtures/context-contributors/global.json` is the v1 fixture.
+
 **Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration.
 
 **Codex live hook influence caveat**: Codex hook influence on live sessions is limited — the agent may not honor all injected context. The hook influence behavioral cases in `evals/fixtures/hook-influence/cases.json` document which behaviors are expected (`agent_must_do`) versus which may only be soft guidance. Adapters on similar runtimes should apply the same classification.

@@ -244,6 +244,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_publish_change_helper.sh" || result=1
   echo ""
+  node --test "$EVAL_DIR/fixtures/context-contributors/contributors.test.cjs" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_workflow_sidecar_writer.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_sidecar_field_preservation.sh" || result=1

@@ -44,6 +44,9 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/hooks/lib/effective-flow-agents-config.js", { mirror: "context/scripts/hooks/lib/effective-flow-agents-config.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/hook-workflow-scope.js", { mirror: "context/scripts/hooks/lib/hook-workflow-scope.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/trusted-git.js", { mirror: "context/scripts/hooks/lib/trusted-git.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/context-contributors/index.js", { mirror: "context/scripts/hooks/lib/context-contributors/index.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/context-contributors/profile-memory.js", { mirror: "context/scripts/hooks/lib/context-contributors/profile-memory.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/context-contributors/workflow-state.js", { mirror: "context/scripts/hooks/lib/context-contributors/workflow-state.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/continuation-turn-authority.js", { mirror: "context/scripts/hooks/lib/continuation-turn-authority.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/kit-catalog.js", { mirror: "context/scripts/hooks/lib/kit-catalog.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/runnable-command.js", { mirror: "context/scripts/hooks/lib/runnable-command.js", allowedDifferences: [] }],
@@ -102,6 +105,9 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/codex-exit-code.js", { category: "shared hook library", requiredNeedles: ["extractExitCodeFromBanner", "readExitCodeFromRollout"] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { category: "shared hook library", requiredNeedles: ["SANCTIONED_REMEDIES", "REMEDY_COMMAND_CANDIDATES"] }],
   ["scripts/hooks/lib/continuation-turn-authority.js", { category: "shared hook library", requiredNeedles: ["issueActiveTurnAuthority", "validateActiveTurnAuthority", "validateSignedActiveTurnAssignmentAuthority"] }],
+  ["scripts/hooks/lib/context-contributors/index.js", { category: "shared hook library", requiredNeedles: ["createContributorRegistry"] }],
+  ["scripts/hooks/lib/context-contributors/profile-memory.js", { category: "shared hook library", requiredNeedles: ["profileMemoryContributor"] }],
+  ["scripts/hooks/lib/context-contributors/workflow-state.js", { category: "shared hook library", requiredNeedles: ["workflowStateContributor"] }],
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/denial-escalation.js", { category: "shared hook library", requiredNeedles: ["recordDenial", "buildDenialResponse", "denialIdentity"] }],
   ["scripts/hooks/lib/denial-guidance.js", { category: "shared hook library", requiredNeedles: ["shapeDenialMessage", "stripIncidentRegister"] }],
@@ -127,6 +133,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/trusted-git.js", { category: "shared hook library", requiredNeedles: ["execTrustedGitSync", "readTrustedGitBlobSync", "resolveTrustedLocalGitCommit"] }],
 ]);
 const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification: string }>([
+  ["evals/fixtures/context-contributors", { owners: ["evals/fixtures/context-contributors/contributors.test.cjs", "scripts/README.md"], classification: "workflow golden and compiled profile brief contributor fixtures" }],
   ["evals/fixtures/ci-compute", { owners: ["scripts/ci/compute-policy.mjs", "evals/ci/compute-policy.test.mjs", "evals/static/test_ci_compute_policy.sh"], classification: "immutable reusable-workflow expansion snapshots for the participating CI compute budget" }],
   ["evals/fixtures/assignment-provider", { owners: ["evals/integration/test_assignment_provider_local_file.sh", "evals/integration/test_assignment_provider_github.sh", "evals/integration/test_pull_work_assignment_join.sh", "evals/integration/test_ensure_session_ownership_guard.sh"], classification: "AssignmentProvider local-file and GitHub render/status fixtures (#290); hostile-effective-state.json is the #291 ensure-session ownership guard's AC9 sanitization fixture" }],
   ["evals/fixtures/backlog-provider-settings", { owners: ["evals/integration/test_effective_backlog_settings.sh"], classification: "settings precedence fixtures" }],

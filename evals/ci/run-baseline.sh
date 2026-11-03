@@ -79,7 +79,7 @@ CHECKS=(
   "Stop gate summary record integration|bash evals/integration/test_stop_gate_summary_record.sh"
   "Goal Fit narrative exclusion integration|env -u FLOW_AGENTS_GOAL_FIT_MODE bash evals/integration/test_goal_fit_narrative_exclusion.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
-  "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
+  "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh && node --test evals/fixtures/context-contributors/contributors.test.cjs"
   "Hook influence contract integration|bash evals/integration/test_hook_influence_cases.sh"
   "Flow Kit repository integration|bash evals/integration/test_flow_kit_repository.sh"
   "Kit provisioning integration|bash evals/integration/test_kit_provisioning.sh"
