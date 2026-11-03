@@ -91,8 +91,11 @@ test('unknown targets and store output directories are refused before effects', 
   for (const outDir of ['/somewhere', '']) {
     await assert.rejects(runPromote({ ...opts, outDir }), /outDir.*repo-docs/);
   }
+  for (const key of ['sessionDir', 'repoRoot', 'provenance', 'decided', 'agent']) {
+    await assert.rejects(runPromote({ ...opts, [key]: 'ignored' }), /only valid for the repo-docs target/);
+  }
   await assert.rejects(runPromote({ ...opts, rootName: undefined }), /rootName/);
-  await assert.rejects(runPromote({ target: 'repo-docs', sessionDir: path.join(fixture, 'session'), repoRoot: path.join(fixture, 'repo'), root: '/unexpected' }), /root.*store target/);
+  await assert.rejects(runPromote({ target: 'repo-docs', sessionDir: path.join(fixture, 'session'), repoRoot: path.join(fixture, 'repo'), root: '/unexpected', write: false }), /root.*store target/);
   assert.deepEqual(calls, []);
 });
 
