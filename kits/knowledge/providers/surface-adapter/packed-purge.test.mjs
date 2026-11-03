@@ -10,7 +10,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -72,6 +72,39 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
       } });
       await assert.rejects(() => selected.purge([id], { agent: "owner", rationale: "request" }), { code: "READ_ONLY" });
       assert.equal((await selected.get(id)).body, "legacy content");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  if (profile === "vault") test("vault: legacy guards refuse tombstones reachable through a legacy index", async () => {
+    const root = mkdtempSync(join(tmpdir(), "knowledge-purge-legacy-guards-"));
+    try {
+      const storeRoot = join(root, "vault");
+      const store = new KitAdapter({ storeRoot, corpusStore: { module: corpus, legacyProcessesStopped: true, services: {
+        coordinationDirectory: join(root, "coordination"), lock: corpus.standaloneFileMutationLock,
+        coordinationIdentity: () => () => {}, allowPurge: true,
+      } } });
+      const id = await store.create({ type: "raw", title: "Erased", body: "secret", category: "test", provenance: { agent: "test" } });
+      const live = await store.create({ type: "concept", title: "Live", body: "body", category: "test", provenance: { agent: "test" } });
+      await store.purge([id], { agent: "owner", rationale: "request" });
+
+      // Test-only reconstruction: retain the exact Corpus-produced note bytes
+      // while exposing their paths through the legacy index. This is not a
+      // supported migration procedure for a real vault.
+      const corpusIndex = join(storeRoot, "path-index.json");
+      const paths = JSON.parse(readFileSync(corpusIndex, "utf8"));
+      const stonePath = join(storeRoot, paths.by_id[id].path);
+      const before = readFileSync(stonePath);
+      copyFileSync(corpusIndex, join(storeRoot, ".graph-index.json"));
+      rmSync(corpusIndex);
+      const legacy = new KitAdapter({ storeRoot });
+      const attempts = [
+        ["related link", () => legacy.link(live, [{ target_id: id, kind: "related" }], { agent: "test" })],
+        ["proposer in propose", () => legacy.propose(live, id, { agent: "test", proposal: "change" })],
+        ["proposer in apply", () => legacy.apply(live, id, { agent: "test", new_body: "new", rationale: "change" })],
+        ["proposer in reject", () => legacy.reject(live, id, { agent: "test", reason: "no" })],
+        ["new superseding record", () => legacy.supersede(id, [live], { agent: "test", rationale: "change" })],
+      ];
+      for (const [label, attempt] of attempts) await assert.rejects(attempt, { code: "PURGED" }, label);
+      assert.deepEqual(readFileSync(stonePath), before);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
   test(`${profile}: purge round-trips to a Surface deleted claim`, async () => {
