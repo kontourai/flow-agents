@@ -29,8 +29,11 @@ memory; every other piece stays with its owner.
   Routing never blocks recall. Survey records verification verdicts and reviewer
   decisions but routes on neither, so the policy is the Kit's.
 - **Unmeasured is not agreed, and unknown is not safe.** Too few extraction passes,
-  an unknown audience baseline, a malformed interval, and an unresolved
-  `consequential` property list all resolve toward review, not away from it.
+  an unknown audience baseline and a malformed interval resolve toward review, not away
+  from it. One default goes the other way on purpose: with no `consequential` list the
+  policy routes no supersession as consequential, because the Kit cannot know what a host
+  treats as consequential. A host must set it, and the metrics' `routedByRule` shows
+  whether it did.
 - **A decision is recomputable.** It embeds the input and policy its pure rules
   read, and is recorded as Flow evidence. Recomputation reports an edited outcome, a
   changed policy, or a rule set that has drifted.
