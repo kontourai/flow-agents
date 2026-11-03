@@ -3,7 +3,7 @@
  *
  * The dream run never applies or rejects a proposal: only a reviewer other than
  * the proposer can turn a `pending` proposal into a record (Corpus enforces
- * `SELF_APPROVAL`), and the run has no code path that calls `apply`.
+ * `SELF_APPROVAL`), and the run has no code path that calls `applyCreate`.
  *
  * Corpus has no idempotency key yet (corpus#45), so a retry reconciles against
  * the store instead: every claim already proposed, in any state, is reused by

@@ -61,7 +61,7 @@ const countBy = (items, key) => {
 const redactionHits = (residues) =>
   residues.reduce((total, residue) => total + residue.turns.reduce((n, turn) => n + (turn.text.match(/<(?:SECRET|EMAIL)>/g) ?? []).length, 0), 0);
 
-/** The only store surface the run touches. There is deliberately no apply or reject. */
+/** The only store surface the run touches. There is deliberately no applyCreate or rejectCreate (nor the earlier apply or reject). */
 function narrowStore(store) {
   for (const method of ["proposeCreate", "listProposals"]) {
     if (typeof store?.[method] !== "function") throw dreamError("DREAM_CONFIG_INVALID", `the store must provide ${method}`);

@@ -153,7 +153,7 @@ test("end to end: pending proposals stay out of the brief until a reviewer appli
   assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, [], "nothing is reviewed yet");
 
   const [first] = await store.listProposals();
-  const recordId = await store.apply(first.id, "a-human-reviewer");
+  const recordId = await store.applyCreate(first.id, "a-human-reviewer");
   const report = await runDream(host, runOptions(ws));
   assert.equal(report.status, "noop", "no new telemetry, but the brief still tracks review");
   const brief = assertReaderAccepts(ws.briefs());
@@ -170,7 +170,7 @@ test("end to end: a rejected proposal never reaches the brief and is not propose
   const { ws, store, host } = await ran();
   t.after(ws.cleanup);
   const [first] = await store.listProposals();
-  await store.reject(first.id, "a-human-reviewer", "wrong");
+  await store.rejectCreate(first.id, "a-human-reviewer", "wrong");
   fs.rmSync(ws.cursorFile);
   const report = await runDream(host, runOptions(ws));
   assert.equal((await store.listProposals()).length, 2, "the rejected claim stays rejected: the replay reuses it instead of proposing it again");
@@ -182,7 +182,7 @@ test("end to end: a proposal the distiller itself approved never counts, even if
   const { ws, store, host } = await ran();
   t.after(ws.cleanup);
   const [first] = await store.listProposals();
-  await store.apply(first.id, "a-human-reviewer");
+  await store.applyCreate(first.id, "a-human-reviewer");
   // Forge the one thing Corpus refuses: the proposer as its own reviewer.
   const file = `${store.dir}/${first.id}.json`;
   const forged = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -205,7 +205,7 @@ test("end to end: a project brief per cwd, and a project claim carries its scope
   const { ws, store, host } = await ran();
   t.after(ws.cleanup);
   const proposals = await store.listProposals();
-  for (const proposal of proposals) await store.apply(proposal.id, "a-human-reviewer");
+  for (const proposal of proposals) await store.applyCreate(proposal.id, "a-human-reviewer");
   await runDream(host, runOptions(ws));
   assert.ok(fs.existsSync(ws.briefs("project-ledger.json")));
   const project = assertReaderAccepts(ws.briefs("project-ledger.json"));
@@ -242,7 +242,7 @@ test("the injection hook's real reader accepts what the dream writes and injects
   t.after(() => fs.rmSync(readerRoot, { recursive: true, force: true }));
   const { ws, store, host } = await ran();
   t.after(ws.cleanup);
-  for (const proposal of await store.listProposals()) await store.apply(proposal.id, "a-human-reviewer");
+  for (const proposal of await store.listProposals()) await store.applyCreate(proposal.id, "a-human-reviewer");
   const xdg = path.join(ws.root, "xdg");
   const dreamDir = path.join(xdg, "knowledge-store", "knowledge", "dream"); // where the reader looks
   fs.rmSync(ws.cursorFile, { force: true });

@@ -74,7 +74,8 @@ export function workspace({ transcripts = ["codex-rollout.jsonl", "claude-projec
 
 // ── A Corpus-shaped create-proposal store ─────────────────────────────────────────────────────────────
 // Same proposal shape and rules as kontourai/corpus#42 (KitCreateProposal): pending/applied/rejected, a record
-// only on apply, SELF_APPROVAL when the reviewer is the proposer. Proposals persist as files, so a second "process"
+// only on applyCreate, SELF_APPROVAL when the reviewer is the proposer. The verbs are the corpus#40 amendment's
+// `applyCreate` / `rejectCreate`; the guard below also blocks the earlier overloaded `apply` / `reject`. Proposals persist as files, so a second "process"
 // over the same root sees the first one's.
 
 export class FakeCorpusStore {
@@ -83,7 +84,7 @@ export class FakeCorpusStore {
     this.dir = path.join(root, ".corpus-proposals");
     this.clock = clock;
     this.records = new Map();
-    this.calls = { proposeCreate: 0, apply: 0, reject: 0, listProposals: 0 };
+    this.calls = { proposeCreate: 0, applyCreate: 0, rejectCreate: 0, listProposals: 0 };
     this.failures = [];
     fs.mkdirSync(this.dir, { recursive: true });
   }
@@ -123,8 +124,8 @@ export class FakeCorpusStore {
       .sort((a, b) => a.proposed_at.localeCompare(b.proposed_at) || a.id.localeCompare(b.id));
   }
 
-  async apply(proposalId, reviewerId) {
-    this.calls.apply += 1;
+  async applyCreate(proposalId, reviewerId) {
+    this.calls.applyCreate += 1;
     const proposal = await this.getProposal(proposalId);
     if (!proposal) throw Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" });
     if (proposal.state !== "pending") throw Object.assign(new Error("not pending"), { code: "MISSING_EVIDENCE" });
@@ -135,8 +136,8 @@ export class FakeCorpusStore {
     return recordId;
   }
 
-  async reject(proposalId, reviewerId, rationale) {
-    this.calls.reject += 1;
+  async rejectCreate(proposalId, reviewerId, rationale) {
+    this.calls.rejectCreate += 1;
     const proposal = await this.getProposal(proposalId);
     this.#write({ ...proposal, state: "rejected", reviewer_id: reviewerId, decided_at: this.clock(), rationale });
   }
@@ -145,11 +146,13 @@ export class FakeCorpusStore {
   retire(recordId) { this.records.set(recordId, { ...this.records.get(recordId), status: "retired" }); }
 }
 
-/** A store whose apply and reject throw: any call from the run fails the test where it happens. */
+const SETTLING_VERBS = new Set(["apply", "reject", "applyCreate", "rejectCreate"]);
+
+/** A store whose settling verbs throw: any call from the run fails the test where it happens. */
 export function noApplyStore(store) {
   return new Proxy(store, {
     get(target, prop) {
-      if (prop === "apply" || prop === "reject") return () => { throw new Error(`the dream run called store.${String(prop)}`); };
+      if (SETTLING_VERBS.has(prop)) return () => { throw new Error(`the dream run called store.${String(prop)}`); };
       const value = target[prop];
       return typeof value === "function" ? value.bind(target) : value;
     },

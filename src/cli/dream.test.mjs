@@ -221,19 +221,19 @@ test("disabled by default: a real run refuses unless enabled", async (t) => {
   assert.equal(fs.existsSync(ws.dreamDir), false);
 });
 
-test("no self-approval: the run never applies or rejects, even when the store offers both", async (t) => {
+test("no self-approval: the run never applies or rejects, even when the store offers the verbs", async (t) => {
   const { ws, store, host } = await fixture();
   t.after(ws.cleanup);
   await runDream(host, runOptions(ws)); // host.store is noApplyStore(store): apply/reject throw if touched
-  assert.equal(store.calls.apply, 0);
-  assert.equal(store.calls.reject, 0);
+  assert.equal(store.calls.applyCreate, 0);
+  assert.equal(store.calls.rejectCreate, 0);
   assert.equal(store.records.size, 0);
   // The store the run hands to everything else is narrowed to propose/list/get as well.
   const seen = [];
   const spy = new Proxy(store, { get: (target, prop) => { seen.push(String(prop)); const value = target[prop]; return typeof value === "function" ? value.bind(target) : value; } });
   fs.rmSync(ws.cursorFile);
   await runDream({ ...host, store: spy }, runOptions(ws));
-  assert.ok(!seen.includes("apply") && !seen.includes("reject"), `the run reached for ${seen.filter((n) => ["apply", "reject"].includes(n))}`);
+  assert.ok(!seen.some((n) => ["apply", "reject", "applyCreate", "rejectCreate"].includes(n)), `the run reached for ${seen.filter((n) => ["apply", "reject", "applyCreate", "rejectCreate"].includes(n))}`);
 });
 
 test("cap and deferral: sittings over the per-run cap are left for the next run, each distilled once", async (t) => {
