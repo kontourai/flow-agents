@@ -1216,6 +1216,16 @@ describe("review round 1 regressions (PR #1575)", () => {
   });
 });
 
+describe("kit manifest", () => {
+  test("kit.json is unchanged by the Codex bundle's runtime-name rewrite", () => {
+    // `flow-agents init --runtime codex` rewrites "Claude Code" to "Codex" in shipped text, and
+    // `workflow doctor` hashes the installed kit.json against the packaged one. A manifest that
+    // names the other runtime therefore reads as drifted on every Codex install.
+    const manifest = fs.readFileSync(path.join(KIT, "kit.json"), "utf8");
+    assert.equal(manifest.includes("Claude Code"), false);
+  });
+});
+
 describe("injected-memory marker", () => {
   test("the marker module is dependency-free and its names and values are stable", () => {
     const markerFile = path.join(KIT, "memory-marker.js");

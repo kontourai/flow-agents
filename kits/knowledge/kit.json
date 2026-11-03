@@ -286,7 +286,7 @@
     {
       "id": "knowledge.runtime-session-residue-suite",
       "path": "promote/runtime-session.test.js",
-      "description": "Eval cases for unified agentic memory WI-1 (#669): AC1 workflow-sidecar residue pinned byte-identical to the pre-#669 ingestSession output and both sources validated by the residue schema; AC2 synthetic Claude Code project JSONL and Codex rollout fixtures (real record shapes) yield user/assistant-text sittings with provenance while tool results, sidechains, meta entries, harness tags and the injected-memory block are dropped, and the candidate cursor never passes a drifted, malformed or partial line; AC3 seeded secret, email and home-path canaries never reach residue, including one the transcript asks the distiller to keep."
+      "description": "Eval cases for unified agentic memory WI-1 (#669): AC1 workflow-sidecar residue pinned byte-identical to the pre-#669 ingestSession output and both sources validated by the residue schema; AC2 synthetic project-transcript JSONL and rollout fixtures for both supported runtimes (real record shapes) yield user/assistant-text sittings with provenance while tool results, sidechains, meta entries, harness tags and the injected-memory block are dropped, and the candidate cursor never passes a drifted, malformed or partial line; AC3 seeded secret, email and home-path canaries never reach residue, including one the transcript asks the distiller to keep."
     },
     {
       "id": "knowledge.context-check-suite",
