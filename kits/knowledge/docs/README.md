@@ -363,7 +363,8 @@ change their chains, token costs (and so budget admission and answers), and a hi
 untimed or cross-slot successor also leaves both claims current. Asked for by id, a hidden, absent, or
 not-yet-known claim returns the same plain `no_answer`; a default scan never names one. Reconciliation
 and proposals cover only claims the reader may see. A claim that is unverifiable because of its own
-validity (stale, untimed, outside its valid time, or declared unverifiable) reconciles as `unverifiable`;
+validity (stale, untimed, outside its valid time, or declared unverifiable) reconciles as `unverifiable` when
+the change intersects it (an unaffected claim stays `clean`);
 supersession trouble (a cycle, an ambiguous id, a missing edge time) says nothing about whether the change
 contradicts the claim, so recorded contradiction evidence and ordinary `affected` status are reported as usual. Stated limits: admission of an edge uses the times and
 slot of both ends, so a hidden claim's times can decide whether a chain through it collapses, though never
