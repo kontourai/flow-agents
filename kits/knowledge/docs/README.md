@@ -739,10 +739,16 @@ Ownership boundaries:
   over its size limit. Later lines are still processed, and their sitting hashes
   stop a re-run from returning them twice. A trailing partial line in the
   telemetry file is left for the next run. A transcript that ends in an
-  unterminated line, grows or is replaced while it is read, or is swapped for a
+  unfinished line, grows or is replaced while it is read, or is swapped for a
   symlink after the root check (`TRANSCRIPT_PARTIAL_TAIL`,
   `TRANSCRIPT_CHANGED_DURING_READ`) holds the cursor; its complete lines are
-  still returned. The transcript is opened without following a final symlink,
+  still returned. A final record that is already whole JSON counts as complete
+  without its newline. A transcript that is missing holds the cursor
+  (`TRANSCRIPT_MISSING_RECENT`) while its telemetry event is younger than
+  `missingTranscriptGraceMs` (default 1 hour), and is skipped
+  (`TRANSCRIPT_MISSING`) after that, because retention cleanup deletes old
+  transcripts for good. Content appended after a read is newer than the
+  telemetry event being served; the next event for that transcript re-reads it. The transcript is opened without following a final symlink,
   read through that one descriptor, and its path and inode are re-checked after
   the read. A truncated, rotated or rewritten telemetry
   file makes the prefix digest mismatch, so the run blocks and the cursor stays
@@ -758,8 +764,11 @@ Ownership boundaries:
   complete lines are not valid UTF-8, the session id is not a UUID (so free text
   and secrets never reach sitting ids or cursor keys), a conversation record has
   no source timestamp (Ferry would substitute the clock, making hashes
-  nondeterministic), a Claude transcript has no `sessionId`, or a Codex rollout
-  does not open with a `session_meta`. Drift is reported as `UNKNOWN_TRANSCRIPT_FORMAT`, holds the
+  nondeterministic; only records Ferry imports are checked, and lines the kit
+  excludes are never inspected), a record carries a user or assistant role but
+  has a type the kit does not recognise (`api-request-blob` is the one known
+  non-conversation type), a Claude transcript has no `sessionId`, or a Codex
+  rollout does not open with a `session_meta`. Drift is reported as `UNKNOWN_TRANSCRIPT_FORMAT`, holds the
   cursor, and never crashes the run.
 - **Temporary shims** (`promote/runtime-ferry-shims.js`) cover what the Thread
   does not carry yet, each tied to an upstream issue and to be deleted when it
@@ -780,13 +789,16 @@ Out of scope here: store writes (#670), scheduling or dreaming (#671),
 injection (#672), OpenCode and pi transcripts, and telemetry schema changes.
 Known gaps: the cursor does not drain a rotated telemetry predecessor (a
 rotation blocks until an operator resets the cursor); the map of sitting
-hashes is never pruned; a transcript that no longer exists is skipped and
-reported (`TRANSCRIPT_MISSING`) rather than held, because retention cleanup
-would otherwise pin the cursor forever; the injected-memory filter fails
-closed, so an unterminated opening marker hides the text after it in that and
-later messages until a closing marker, and a marker spelled across two text
-parts is not recognised; two transcript files that carry the same session id
-share sitting ids; a transcript whose conversation records were renamed
+hashes is never pruned; the injected-memory filter fails closed, so an
+unterminated opening marker hides the rest of that message (reported as the
+note `INJECTED_MEMORY_UNTERMINATED`), a close with no open removes the text
+before it, and a marker spelled across two text parts is not recognised; Node
+has no `openat2(RESOLVE_BENEATH)`, so a parent directory swapped by someone who
+can already write inside an authorized root is not defeated (the final
+component is opened without following symlinks and its path and inode are
+re-checked); a new Claude record type that carries a message role reads as
+drift and holds the cursor until it is added to the known list; two
+transcript files that carry the same session id share sitting ids; a transcript whose conversation records were renamed
 wholesale (so Ferry sees no conversation and warns about nothing) is
 indistinguishable from a bookkeeping-only file, so it is skipped and reported
 as `NO_CONVERSATION` rather than blocked as drift.
