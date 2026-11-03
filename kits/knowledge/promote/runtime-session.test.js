@@ -945,6 +945,7 @@ describe("review round 1 regressions (PR #1575)", () => {
       ["https://u:token=@localhost/path", "https://u:<SECRET>@localhost/path"],
       // a quoted value is one string even when its closing quote comes after the "@"
       ['https://app:password="correct@Horse7319"@db.example.com/app', "https://app:<SECRET>@db.example.com/app"],
+      ["https://app:password='correct@Horse7319'@db.example.com/app", "https://app:<SECRET>@db.example.com/app"],
     ]) {
       assert.equal(scrubResidueText(input), expected, input);
       assert.equal(scrubResidueText(expected), expected, `${input}: idempotent`);
@@ -980,6 +981,8 @@ describe("review round 1 regressions (PR #1575)", () => {
       "many keys in one quoted span": '`password="${"token=a ".repeat(40000)}"`',
       "url + quoted key chain": '\'https://u:token="p@h/x \'.repeat(60000) + \'end"\'',
       "url + unquoted key chain": "'https://u:token=p@h/x '.repeat(60000)",
+      "span that would shrink": "'https://u:token=password=\"a@h/x '.repeat(40000) + 'token\"=TAILTAIL'",
+      "alternating key chain": "'https://u:token=\"a@h/x password=b@h/x '.repeat(30000) + 'end\"'",
       "dense urls": "'https://u:p@h/ '.repeat(60000)",
       "trailing digits": '`${"1".repeat(2000000)}x`',
       "one huge identifier": '`${"a-".repeat(1000000)}token=${"S".repeat(10)}`',
