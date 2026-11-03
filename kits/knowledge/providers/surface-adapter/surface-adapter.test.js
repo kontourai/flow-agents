@@ -352,6 +352,7 @@ test("purged graph records round-trip as Surface deleted claims without content 
     id: "opaque-erased-id", type: "note", title: "must-not-escape-title", body: "must-not-escape-body",
     attributes: {
       record_type: "raw", category: "purged", status: "purged", created_at: at, updated_at: at,
+      record_provenance: { agent: "test", source_ids: ["live-id"] },
       mutation_log: [{ op: "purged", at, agent: "owner", rationale: "erasure request" }],
     },
     provenance: { source: "knowledge:opaque-erased-id", retrieved_at: at },
@@ -371,6 +372,7 @@ test("purged graph records round-trip as Surface deleted claims without content 
   const bundle = JSON.parse(JSON.stringify(await buildKnowledgeTrustBundle({ store, includeRetired: true })));
   const claim = bundle.claims.find((c) => c.subjectId === erased.id);
   assert.equal(claim.value, null);
+  assert.equal(claim.derivedFrom, undefined);
   assert.deepEqual(claim.metadata.surfaceRetention, {
     state: "deleted", erasedAt: at, actor: "owner", rationale: "erasure request",
   });
@@ -401,8 +403,8 @@ test("Surface derivation inputs use provenance source ids and source links, not 
     provenance: { source: `knowledge:${id}`, retrieved_at: at },
   });
   const store = { readGraph: async () => ({
-    nodes: [makeNode("provenance-source"), makeNode("link-source"), makeNode("example"),
-      makeNode("dependent", { record_provenance: { agent: "test", source_ids: ["provenance-source"] } })],
+    nodes: [makeNode("dependent", { record_provenance: { agent: "test", source_ids: ["provenance-source"] } }),
+      makeNode("provenance-source"), makeNode("link-source"), makeNode("example")],
     edges: [
       { from: "dependent", to: "link-source", type: "evidence-of", attributes: { vault_link_kind: "source" } },
       { from: "dependent", to: "example", type: "evidence-of", attributes: { vault_link_kind: "example" } },
@@ -413,4 +415,21 @@ test("Surface derivation inputs use provenance source ids and source links, not 
   assert.deepEqual(new Set(bySubject.get("dependent").derivedFrom),
     new Set([bySubject.get("provenance-source").id, bySubject.get("link-source").id]));
   assert.ok(!bySubject.get("dependent").derivedFrom.includes(bySubject.get("example").id));
+});
+
+test("self-source references do not prevent projecting other records", async () => {
+  const at = "2026-11-02T12:00:00.000Z";
+  const makeNode = (id, extra = {}) => ({
+    id, type: "note", title: id, body: id,
+    attributes: { record_type: "raw", category: "test", created_at: at, updated_at: at, ...extra },
+    provenance: { source: `knowledge:${id}`, retrieved_at: at },
+  });
+  const store = { readGraph: async () => ({
+    nodes: [makeNode("self", { record_provenance: { agent: "test", source_ids: ["self", "other"] } }), makeNode("other")],
+    edges: [{ from: "self", to: "self", type: "evidence-of", attributes: { vault_link_kind: "source" } }],
+  }) };
+  const bundle = await buildKnowledgeTrustBundle({ store });
+  const self = bundle.claims.find((claim) => claim.subjectId === "self");
+  const other = bundle.claims.find((claim) => claim.subjectId === "other");
+  assert.deepEqual(self.derivedFrom, [other.id]);
 });

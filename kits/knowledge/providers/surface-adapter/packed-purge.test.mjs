@@ -37,6 +37,7 @@ for (const profile of ["KitDefaultStoreAdapter", "KitObsidianStoreAdapter"]) {
         type: "raw", title: "Other source", body: "remaining support",
         category: "private", provenance: { agent: "test" },
       });
+      await store.update(other, { links: [{ kind: "source", target_id: other }] }, { agent: "test" });
       const dependent = await store.create({
         type: "compiled", title: "Derived", body: "PURGE_SURFACE_SECRET derived",
         category: "private", links: [{ kind: "source", target_id: id }],
@@ -50,6 +51,8 @@ for (const profile of ["KitDefaultStoreAdapter", "KitObsidianStoreAdapter"]) {
       const provider = new MarkdownVaultProvider({ store });
       const before = await buildKnowledgeTrustBundle({ store: provider, includeRetired: true });
       assert.ok(JSON.stringify(before).includes("PURGE_SURFACE_SECRET"));
+      const otherClaim = before.claims.find((item) => item.subjectId === other);
+      assert.ok(!(otherClaim.derivedFrom ?? []).includes(otherClaim.id));
       const result = await store.purge([id], { agent: "owner", rationale: "erasure request" });
       assert.ok(result.cascaded.includes(dependent), "sole dependent must cascade");
       assert.ok(result.survivors.includes(survivor), "multiply supported record must survive");

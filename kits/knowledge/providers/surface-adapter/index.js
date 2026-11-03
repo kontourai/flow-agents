@@ -158,7 +158,9 @@ export async function buildKnowledgeTrustBundle(options = {}) {
       ...(Array.isArray(node.attributes.record_provenance?.source_ids) ? node.attributes.record_provenance.source_ids : []),
       ...edges.filter((edge) => edge.from === node.id && edge.attributes?.vault_link_kind === "source").map((edge) => edge.to),
     ]);
-    const derivedFrom = [...sourceIds].map((id) => claimIdByNodeId.get(id)).filter(Boolean);
+    // Surface rejects self-derivation; stores can accept a self-source, which
+    // cannot provide independent support and must not break the entire bundle.
+    const derivedFrom = [...sourceIds].filter((id) => id !== node.id).map((id) => claimIdByNodeId.get(id)).filter(Boolean);
 
     const createdAt = created_at || node.provenance?.retrieved_at || nowIso;
     const updatedAt = updated_at || node.provenance?.retrieved_at || nowIso;

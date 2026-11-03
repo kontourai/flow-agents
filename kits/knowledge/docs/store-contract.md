@@ -782,7 +782,7 @@ It NEVER deletes records. Superseded records remain fully queryable with their p
 **Supersede-not-delete invariant:**
 > Calling `supersede` MUST NOT remove any record. Supersede remains the default for
 > ordinary changes, and moving a record to `archive/` preserves its historical access.
-> The separately authorized purge operation in Addendum K is the erasure exception.
+> The separately authorized purge operation in Addendum M is the erasure exception.
 
 **Bundled implementation gap:** Obsidian archive path reuse can overwrite an earlier
 predecessor and make `get(earlierId)` return a later record. See the
@@ -964,7 +964,7 @@ These are normative retention requirements. The bundled Obsidian
 [archive collision gap](#known-obsidian-archive-retention-gap) can violate full-record
 retrieval and original-byte retention; a surviving source id or graph link does not
 cure it. Retirement does not authorize deletion or overwrite of retained records.
-The separately privileged purge exception is specified in Addendum K.
+The separately privileged purge exception is specified in Addendum M.
 
 ### B.7 Proposal-Artifact Lifecycle (close-on-apply)
 
@@ -1942,7 +1942,7 @@ returns superseded snapshots is covered for that adapter by `evals/consolidation
 required to retain `get()` access, but the Obsidian archive collision gap above can
 violate that requirement).
 
-## Addendum K: Privileged purge (issue #1570)
+## Addendum M: Privileged purge (issue #1570)
 
 The owner approved an explicit erasure exception on 2026-11-02. The operation is
 owned by [Corpus Store](https://github.com/kontourai/corpus/blob/b222de99f25ceea679448dd9e4648c3bc73a5938/packages/store/README.md#owner-decisions);
@@ -1981,9 +1981,10 @@ before-images until recovery; purge is not a secure-erasure guarantee. A complet
 integration must test each adapter and each actual read path, including a fault
 that skips the cascade and makes conformance fail.
 Create proposals can contain complete candidate records outside the working set.
-Corpus's purge branch is reconciling with its create-proposal operation; until
-that resolution is adopted and tested, no claim is made that purge erases
-proposal content or settles proposals supported by purged sources.
+The host must account for proposals that carry erased content. Corpus's purge
+branch does not yet include its merged create-proposal operation, and no claim is
+made that purge erases proposal content or settles proposals supported by purged
+sources. Verify the upstream resolution before adopting it.
 
 When a purged record is projected into a Surface claim, the Knowledge Surface
 adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
@@ -2007,7 +2008,8 @@ must account for those tombstones independently. The Surface adapter projects
 `source_ids` and `source` links to derivation inputs when the input has a claim
 in the selected bundle. Surface's erasure recomputation can then report deletion
 pressure on survivors. Filtering and external or missing inputs can omit support
-from that bundle; request all relevant inputs for a complete trace. The purge
+from that bundle and may conservatively reduce a survivor's derived status to
+`unknown`; request all relevant inputs for a complete trace. The purge
 result and retained `support-purged` entries also identify survivors for producer
 review, including content that might reproduce erased material.
 Surface erasure interpretation requires a released `@kontourai/surface` containing
