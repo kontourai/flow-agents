@@ -4,10 +4,13 @@
  * Transcript parsing is `@kontourai/ferry`'s job (see runtime-transcript.js).
  * Each function below exists only because a specific Thread capability is
  * missing, links the upstream issue, and should be DELETED when that issue
- * ships. Every shim reads ONE record-level fact from ONE raw line, never
- * message content, and never interprets timestamps beyond "is a source time
- * present". The caller removes flagged lines before Ferry imports the rest,
- * so there is no join on ids, text or time to get wrong.
+ * ships. Each reads record-level flags from ONE raw line, never message
+ * content, and never interprets timestamps beyond "is a source time present".
+ * The caller removes flagged lines before Ferry imports the rest, so there is
+ * no join on ids, text or time to get wrong.
+ *
+ * `unrecognizedConversation` is not a Ferry gap: it is the drift sentinel for a
+ * record that looks like a conversation turn but that Ferry will not import.
  *
  *   - kontourai/thread#76  Claude Code `origin.kind`, `isCompactSummary` and
  *                          `isVisibleInTranscriptOnly` are dropped.
@@ -38,6 +41,10 @@ function hasSourceTime(value) {
   return false;
 }
 
+// Claude records that carry a `message.role` but are raw API payloads, not
+// conversation (17k+ in a local corpus). A new such type reads as drift until added.
+const CLAUDE_NON_CONVERSATION_TYPES = new Set(["api-request-blob"]);
+
 const CLAUDE_FLAG_PRECHECK = /"origin"|"isCompactSummary"|"isVisibleInTranscriptOnly"/;
 
 /**
@@ -47,15 +54,23 @@ const CLAUDE_FLAG_PRECHECK = /"origin"|"isCompactSummary"|"isVisibleInTranscript
  *    `kind` is anything but `human` (observed: `task-notification`, `peer`,
  *    `auto-continuation`). A record with no `origin` is an ordinary prompt.
  *  - `missingTime` (thread#79): a user/assistant record with no source time.
+ *  - `unrecognizedConversation`: a record with a user/assistant `message.role`
+ *    whose `type` is neither of those nor a known non-conversation type.
  * @param {string} line
- * @returns {{ harnessEntry: boolean, missingTime: boolean }}
+ * @returns {{ harnessEntry: boolean, missingTime: boolean, unrecognizedConversation: boolean }}
  */
 export function claudeLineFacts(line) {
-  const facts = { harnessEntry: false, missingTime: false };
+  const facts = { harnessEntry: false, missingTime: false, unrecognizedConversation: false };
   const record = parseObject(line);
   if (!record) return facts;
   const conversation = record.type === "user" || record.type === "assistant";
-  if (conversation && !hasSourceTime(record.timestamp)) facts.missingTime = true;
+  // Ferry skips `isMeta` and (by default) `isSidechain` records, so their time does not matter.
+  const importedByFerry = conversation && record.isMeta !== true && record.isSidechain !== true;
+  if (importedByFerry && !hasSourceTime(record.timestamp)) facts.missingTime = true;
+  const role = record.message && typeof record.message === "object" ? record.message.role : undefined;
+  if ((role === "user" || role === "assistant") && !conversation && !CLAUDE_NON_CONVERSATION_TYPES.has(record.type)) {
+    facts.unrecognizedConversation = true;
+  }
   if (record.type === "user" && CLAUDE_FLAG_PRECHECK.test(line)) {
     const origin = record.origin;
     const nonHumanOrigin =
@@ -70,17 +85,26 @@ export function claudeLineFacts(line) {
  * Facts about one raw Codex line.
  *  - `developerMessage` (thread#78): a `message` item with `role: "developer"`,
  *    which Ferry imports as a `user` message.
- *  - `missingTime` (thread#79): a conversation record with no source time.
+ *  - `missingTime` (thread#79): a record Ferry imports (every `response_item`,
+ *    and the `agent_message` / `agent_reasoning` events) with no source time.
+ *    Other events (`token_count`, `task_complete`, ...) are not imported, so
+ *    their time does not matter.
+ *  - `unrecognizedConversation`: a record with a user/assistant `payload.role`
+ *    whose `type` is not `response_item`.
  * @param {string} line
- * @returns {{ developerMessage: boolean, missingTime: boolean }}
+ * @returns {{ developerMessage: boolean, missingTime: boolean, unrecognizedConversation: boolean }}
  */
 export function codexLineFacts(line) {
-  const facts = { developerMessage: false, missingTime: false };
+  const facts = { developerMessage: false, missingTime: false, unrecognizedConversation: false };
   const record = parseObject(line);
   if (!record) return facts;
-  if ((record.type === "response_item" || record.type === "event_msg") && !hasSourceTime(record.timestamp)) {
-    facts.missingTime = true;
-  }
+  const payloadType = record.payload && typeof record.payload === "object" ? record.payload.type : undefined;
+  const imported =
+    record.type === "response_item" ||
+    (record.type === "event_msg" && (payloadType === "agent_message" || payloadType === "agent_reasoning"));
+  if (imported && !hasSourceTime(record.timestamp)) facts.missingTime = true;
+  const role = record.payload && typeof record.payload === "object" ? record.payload.role : undefined;
+  if ((role === "user" || role === "assistant") && record.type !== "response_item") facts.unrecognizedConversation = true;
   facts.developerMessage =
     record.type === "response_item" && record.payload?.type === "message" && record.payload.role === "developer";
   return facts;

@@ -42,11 +42,67 @@ const ASSIGNMENT = new RegExp(
   `(["']?\\b${SECRET_NAME}["']?\\s*[:=]\\s*(?:(?:bearer|basic)\\s+)?)(?:"[^"]*"|'[^']*'|[^\\s"',;}]{4,})`,
   "gi",
 );
-// YAML block scalar: `token: |` followed by indented lines.
-const BLOCK_SCALAR = new RegExp(
-  `(\\b${SECRET_NAME}\\s*:[ \\t]*[|>][+-]?[ \\t]*\\r?\\n)(?:[ \\t]+[^\\r\\n]*(?:\\r?\\n|$))+`,
-  "gi",
+// YAML block scalar header: `token: |`, `"token": >-`, `- token: |2 # note`.
+const BLOCK_SCALAR_HEADER = new RegExp(
+  `^([ \\t]*(?:-[ \\t]+)?)(["']?)${SECRET_NAME}\\2[ \\t]*:[ \\t]*[|>][0-9+-]*[ \\t]*(?:#.*)?$`,
+  "i",
 );
+
+/**
+ * Replace the body of every secret-named YAML block scalar. The body is the
+ * run of blank lines and lines indented deeper than the key; the first line at
+ * the key's indent or less (a sibling key) ends it and is kept.
+ */
+function scrubBlockScalars(text) {
+  if (!/[|>]/.test(text)) return text;
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const header = BLOCK_SCALAR_HEADER.exec(lines[i].replace(/\r$/, ""));
+    out.push(lines[i]);
+    if (!header) continue;
+    const keyIndent = header[1].length;
+    let last = i;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const line = lines[j].replace(/\r$/, "");
+      if (line.trim() === "") continue;
+      if (line.length - line.trimStart().length <= keyIndent) break;
+      last = j;
+    }
+    if (last > i) {
+      out.push(`${" ".repeat(keyIndent + 2)}<SECRET>`);
+      i = last;
+    }
+  }
+  return out.join("\n");
+}
+// A secret-named key anywhere inside a span: `API_TOKEN=` / `"token":`.
+const EMBEDDED_ASSIGNMENT = new RegExp(`["']?\\b${SECRET_NAME}["']?\\s*[:=]`, "i");
+
+/**
+ * Redact the value of every secret-named assignment. A quoted value runs to the
+ * next matching quote, so an unmatched opening quote would otherwise pair with
+ * the opening quote of a later assignment and hide that assignment's key while
+ * leaving its value. When the span contains another secret-named key, redact
+ * only up to that key and let the next pass handle it.
+ */
+function scrubAssignments(text) {
+  const redact = (match, prefix) => {
+    const value = match.slice(prefix.length);
+    if (value[0] !== '"' && value[0] !== "'") return `${prefix}<SECRET>`;
+    const embedded = EMBEDDED_ASSIGNMENT.exec(value.slice(1));
+    // The space keeps the placeholder from fusing with the next key on the following pass.
+    return embedded ? `${prefix}<SECRET> ${value.slice(1 + embedded.index)}` : `${prefix}<SECRET>`;
+  };
+  let current = text;
+  for (let pass = 0; pass < 16; pass += 1) {
+    const next = current.replace(ASSIGNMENT, redact);
+    if (next === current) break;
+    current = next;
+  }
+  return current;
+}
+
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const POSIX_HOME = /(^|[^A-Za-z0-9._~-])\/(?:Users|home)\/[^/\s"'`<>]+/g;
 const WINDOWS_HOME = /\b[A-Z]:\\Users\\[^\\\s"'`<>]+/gi;
@@ -62,8 +118,8 @@ export function scrubResidueText(value) {
   for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, "<SECRET>");
   text = text.replace(URL_CREDENTIAL, "$1<SECRET>$2");
   text = text.replace(BEARER, "$1<SECRET>");
-  text = text.replace(BLOCK_SCALAR, "$1<SECRET>\n");
-  text = text.replace(ASSIGNMENT, "$1<SECRET>");
+  text = scrubBlockScalars(text);
+  text = scrubAssignments(text);
   text = text.replace(EMAIL, "<EMAIL>");
   text = text.replace(WINDOWS_HOME, "~");
   text = text.replace(POSIX_HOME, "$1~");
