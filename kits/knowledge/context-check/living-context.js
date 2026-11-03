@@ -532,11 +532,11 @@ export function deriveLivingContext({ repoRoot, input }) {
     const evidenceKnown = claim.extension.reconciliationRecordedAt !== undefined && claim.extension.reconciliationRecordedAt <= ctx.knownAt;
     const { reconciliation_evidence: evidence, ...rest } = claim;
     const known = evidence && evidenceKnown ? { ...rest, reconciliation_evidence: evidence } : rest;
-    // Only facts about the claim itself turn reconciliation unverifiable: it was never timed, it declares itself
-    // unverifiable, it is stale at now, or it asserts nothing at valid_at. They are judged from the claim, not read
+    // Only facts about the claim itself turn reconciliation unverifiable: it was never timed, it is stale at now, or
+    // it asserts nothing at valid_at (a claim that declares itself unverifiable already reconciles as such). They are judged from the claim, not read
     // back from the recall's winning reason, because supersession trouble (a cycle, an ambiguous id, a missing edge
     // time) outranks them in recall and says nothing about whether the change contradicts the claim.
-    const intrinsicallyUnverifiable = claim.extension.recordedAt === undefined || claim.status === "unverifiable" || freshnessFor(claim, ctx).stale || outsideValidTime(claim, ctx);
+    const intrinsicallyUnverifiable = claim.extension.recordedAt === undefined || freshnessFor(claim, ctx).stale || outsideValidTime(claim, ctx);
     return intrinsicallyUnverifiable && known.status !== "unverifiable" ? { ...known, status: "unverifiable" } : known;
   };
   const reconciliation = reconcilable.map((candidate) => reconciliationFor(view(candidate), changedSurfaces, revision));
