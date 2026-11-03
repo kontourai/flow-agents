@@ -142,7 +142,7 @@ survey#359), an unknown value, a value that is not text, an inherited or getter-
 `unattested`, and `unattested` is not human. Stored review state with a `reviewerKind` that is not one of the three is refused, as
 Survey will refuse it. When Survey releases the field, the shim is the function to repoint; if it lands somewhere other than
 `spec.reviewerKind`, routed claims stay unpromoted until it is repointed, and nothing is promoted wrongly, so survey#359 is not a
-MERGE-AFTER for this change. `memoryDecisionMayPromote(decision, {routed})` is the check a host makes before passing a decision to
+MERGE-AFTER for this change. `memoryReviewOutcome(decision, itemName)` only says what a decision *means* (confirm, correct, reject, hold) and does not look at who made it: a host that acts on it directly asks `memoryDecisionMayPromote` first. `memoryDecisionMayPromote(decision, {routed})` (exported by the adapter with `memoryReviewerKind`) is the check a host makes before passing a decision to
 Survey's `entityOutcomeFromDecision` (entity review is Survey's; the Kit does not call it). Each routed claim's review item carries the
 label `memory.reviewer: human-required`, so a workbench can show what the item needs. Recall reports the annotations it ignored
 (`review.annotations`) and metrics count them (`reviewer.annotated`); an item with only annotations is `pending`.

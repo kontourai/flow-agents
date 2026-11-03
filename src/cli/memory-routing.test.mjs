@@ -1157,3 +1157,10 @@ test("metrics: an item no routed change made is unmatched only if a decision may
   assert.deepEqual([at([raw(stranger, "human", "s-human")]).unmatched, at([raw(stranger, "human", "s-human")]).annotated], [1, 0], "unknown, human");
   for (const kind of ["agent", "rule", undefined]) assert.deepEqual([at([raw(stranger, kind, `s-${kind}`)]).unmatched, at([raw(stranger, kind, `s-${kind}`)]).annotated], [0, 1], `unknown, ${kind}`);
 });
+
+test("the Knowledge kit's adapter exposes the human-reviewer rule: the shim and the promotion check are the module's own functions", async () => {
+  const adapter = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  assert.equal(adapter.memoryReviewerKind, memoryReviewerKind);
+  assert.equal(adapter.memoryDecisionMayPromote, memoryDecisionMayPromote);
+  for (const name of ["presentMemoryClaims", "deriveMemoryRunMetrics", "buildMemoryReviewItem", "routeMemoryChange", "memoryReviewOutcome"]) assert.equal(typeof adapter[name], "function", name);
+});

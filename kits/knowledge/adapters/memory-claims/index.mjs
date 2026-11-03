@@ -5,7 +5,7 @@ export {
 } from '@kontourai/flow-agents/memory-claims';
 export {
   DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, MEMORY_ROUTING_VERSION,
-  buildMemoryReviewItem, memoryVisibilityWithin, deriveMemoryRunMetrics, memoryProposedCandidateId, memoryReviewItemName, memoryReviewOutcome,
+  buildMemoryReviewItem, memoryVisibilityWithin, deriveMemoryRunMetrics, memoryProposedCandidateId, memoryReviewItemName, memoryReviewOutcome, memoryReviewerKind, memoryDecisionMayPromote,
   presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
 } from '@kontourai/flow-agents/memory-routing';
 export {
