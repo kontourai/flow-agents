@@ -135,6 +135,25 @@ test("a sealed claim still contests: disagreement does not depend on who may rea
   assert.equal(classifyCurrent([a, sealed]).contested.length, 2);
 });
 
+test("end to end: a sealed rival in the store still contests a readable claim: disagreement does not depend on who may read it", async (t) => {
+  const { ws, store, host } = await ran();
+  t.after(ws.cleanup);
+  const [first] = await store.listProposals();
+  await store.applyCreate(first.id, "a-human-reviewer");
+  const stored = JSON.parse(first.candidate.body);
+  const { id: _id, schema_version: _v, visibility: _vis, ...fields } = stored.claim;
+  const rival = memoryClaim({ ...fields, value: "something else entirely", source: { ...fields.source, locator: "chars:0-1", excerpt: "x" } }); // no visibility: sealed
+  const entry = { claim: rival, agreement: { passes: 2, agreeing: 2 }, project: null };
+  const decision = routeMemoryChange({ type: "claim", claim: rival, current: [], agreement: entry.agreement, sourceVisibility: null });
+  const { encodeEnvelope } = await import("../../kits/knowledge/dream/envelope.js");
+  await store.proposeCreate({ title: "sealed rival", category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: "elsewhere:1", contentHash: "sha256:x", visibilityKey: "k" } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.sealed, 1);
+  assert.equal(report.brief_excluded.contested, 2, "the applied claim and its sealed rival");
+  const entries = JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries;
+  assert.ok(!entries.some((entry) => entry.includes("banker's rounding")), "the readable claim is held back too");
+});
+
 test("end to end: conflicting claims from two sittings reach neither the brief nor the report's count of current claims", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
