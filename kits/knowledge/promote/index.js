@@ -371,6 +371,12 @@ function publishProposals(sessionDir, requestedOutDir, linked, healthResult, res
  * @returns {Promise<object>} the promote result.
  */
 export async function runPromote(opts = {}) {
+  if (opts.target === "store") {
+    if (opts.outDir) throw new Error("outDir is only valid for the repo-docs target");
+    const { proposeMemory } = await import("./store-target.js");
+    return proposeMemory(opts);
+  }
+  if (opts.target && opts.target !== "repo-docs") throw new Error(`unknown promote target: ${opts.target}`);
   const { sessionDir, repoRoot, provenance = {}, decided, agent, write = true } = opts;
   if (!sessionDir) throw new Error("runPromote requires { sessionDir }");
   if (!repoRoot) throw new Error("runPromote requires { repoRoot }");
