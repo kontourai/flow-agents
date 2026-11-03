@@ -1,4 +1,6 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
+import { canonicalJson } from "@kontourai/relay";
 import assert from "node:assert/strict";
 import { Ajv } from "ajv";
 import { buildCandidateVerification } from "@kontourai/survey";
@@ -677,15 +679,18 @@ test("the projection fact is validated and put in canonical form at the door, so
   }
 });
 
-test("a stored decision whose projection fact was edited or is not canonical is refused by recomputation", () => {
+test("a stored decision whose projection fact was edited or is not canonical is refused even when its digest was recomputed to match", () => {
   const claim = make({ value: "PostgreSQL 16" });
   const routed = routeMemoryChange(change(claim, { current: [current], accumulation: contested(claim.id, current.id) }));
   assert.equal(recomputeMemoryRouting(routed).ok, true);
+  // Whoever edits a stored decision can recompute its id; only checks on the input itself stand after that.
+  const rehash = d => { d.id = `sha256:${createHash("sha256").update(canonicalJson({ input: d.input, policy: d.policy })).digest("hex")}`; return d; };
   for (const [what, edit] of [["not an object", d => { d.input.accumulation = "contested"; }], ["an unknown outcome", d => { d.input.accumulation.outcome = "maybe"; }],
-    ["candidates not a list", d => { d.input.accumulation.candidateClaimIds = "x"; }], ["unsorted candidates", d => { d.input.accumulation.candidateClaimIds.reverse(); }], ["missing", d => { delete d.input.accumulation; }]]) {
-    const d = plain(routed);
-    edit(d);
+    ["candidates not a list", d => { d.input.accumulation.candidateClaimIds = "x"; }], ["unsorted candidates", d => { d.input.accumulation.candidateClaimIds.reverse(); }], ["missing", d => { delete d.input.accumulation; }],
+    ["an extra field", d => { d.input.accumulation.supportingClaimIds = []; }]]) {
+    const d = rehash((() => { const copy = plain(routed); edit(copy); return copy; })());
     const check = recomputeMemoryRouting(d);
     assert.equal(check.ok, false, what);
+    assert.match(check.mismatches.join("\n"), /stored routing input: accumulation|stored routing input/, what);
   }
 });
