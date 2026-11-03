@@ -14,9 +14,17 @@ import {
 } from "@kontourai/flow-agents/memory-routing-flow";
 import { attachEvidence } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
-import { buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
+import { buildReviewDecisionsFromSession as surveyDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 import { loadEntityProposals } from "./memory-claims-support.mjs";
+
+/**
+ * What the host that authenticated the reviewer attests as `reviewerKind` (kontourai/survey#359). Survey's workbench builders do not set it
+ * yet, so a decision these tests build is attested by the host here, as `human` unless a test names another kind: the tests below are
+ * about human reviewers, and the tests that are about agents and rules say so.
+ */
+const attestedAs = (decisions, reviewerKind) => decisions.map(decision => ({ ...decision, spec: { ...decision.spec, reviewerKind } }));
+const buildReviewDecisionsFromSession = (session, reviewerKind = "human") => attestedAs(surveyDecisionsFromSession(session), reviewerKind);
 
 // A host flow owns the gate. This probe flow is the smallest one that has one.
 const HOST_FLOW = {
@@ -217,11 +225,11 @@ const MORE = () => {
 };
 
 /** A real Survey rejection of the first routed item, with its dwell: selected, then submitted `seconds` later. */
-function rejection(item, seconds) {
+function rejection(item, seconds, reviewerKind = "human") {
   const session = { ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "reject-proposed" } };
   const start = Date.parse("2026-11-02T10:00:00.000Z");
   const reviewEvents = buildReviewSessionEvents(session, "session-1").map(event => ({ ...event, spec: { ...event.spec, occurredAt: new Date(event.spec.eventType === "decision-submitted" ? start + seconds * 1000 : start).toISOString() } }));
-  return { reviewDecisions: buildReviewDecisionsFromSession(session), reviewEvents };
+  return { reviewDecisions: buildReviewDecisionsFromSession(session, reviewerKind), reviewEvents };
 }
 
 test("a refresh racing a new batch never leaves metrics describing fewer decisions than are recorded", async t => {
@@ -1081,4 +1089,39 @@ test("review records are read live-only too: a superseded record no longer count
   fs.writeFileSync(await storedFile(cwd, record.id), "damaged");
   assert.equal((await readMemoryReviewRecords("run-1", cwd)).events.length, 0, "the superseded record is not read, so not counted");
   await refreshMemoryRunMetrics({ ...where(cwd) });
+});
+
+// --- routed review needs a human reviewer (owner decision 2026-11-03) -------------------------------------------------------------
+
+test("an agent's decision on a routed item is recorded as an annotation and the item stays pending, through the evidence layer", async t => {
+  const cwd = await workspace(t);
+  const first = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const item = first.items[0];
+  const agent = rejection(item, 10, "agent");
+  await refreshMemoryRunMetrics({ ...where(cwd), ...agent });
+  const afterAgent = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.deepEqual([afterAgent.reviewer.rejected, afterAgent.reviewer.pending, afterAgent.reviewer.annotated, afterAgent.reviewer.defectsCaught], [0, first.decisions.filter(d => d.outcome === "routed").length, 1, 0]);
+  assert.equal(afterAgent.reviewSeconds, null, "an annotation's dwell is not review time");
+  // The agent's record is evidence like any other (recorded once, read back with its kind), and a human decision then stands.
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).decisions[0].spec.reviewerKind, "agent");
+  await refreshMemoryRunMetrics({ ...where(cwd), ...rejection(item, 20, "human") });
+  const afterHuman = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.deepEqual([afterHuman.reviewer.rejected, afterHuman.reviewer.annotated, afterHuman.reviewer.defectsCaught, afterHuman.reviewSeconds], [1, 1, 1, 20]);
+  assert.equal(afterHuman.reviewer.pending, afterAgent.reviewer.pending - 1);
+});
+
+test("a stored decision's reviewer kind is validated the way Survey will: human, agent or rule, or absent", async t => {
+  const cwd = await workspace(t);
+  const decision = kind => ({ ...decisionFixture(1), spec: { ...decisionFixture(1).spec, ...(kind === undefined ? {} : { reviewerKind: kind }) } });
+  for (const kind of ["human", "agent", "rule", undefined]) assert.doesNotThrow(() => { /* shape only; see the refresh below */ decision(kind); });
+  for (const bad of ["Human", "operator", "", 1, null, ["human"]]) {
+    await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [decision(bad)] }), /reviewerKind is human, agent or rule/, JSON.stringify(bad));
+  }
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: [{ ...syntheticEvents(0, 1)[0], spec: { ...syntheticEvents(0, 1)[0].spec, reviewerKind: "robot" } }] }), /reviewerKind is human, agent or rule/, "an event carries the kind too");
+  for (const ok of ["human", "agent", "rule", undefined]) await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [{ ...decision(ok), metadata: { name: `d-${ok}` } }] });
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).decisions.length, 4);
+  // And a stored record with a bad kind is refused when read, however it got there.
+  const other = await workspace(t);
+  await rawAttach(other, "route-gate", MEMORY_REVIEW_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [decision("robot")], events: [] });
+  await assert.rejects(readMemoryReviewRecords("run-1", other), /reviewerKind is human, agent or rule/);
 });

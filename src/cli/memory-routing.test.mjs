@@ -5,16 +5,24 @@ import assert from "node:assert/strict";
 import { Ajv } from "ajv";
 import { buildCandidateVerification } from "@kontourai/survey";
 import {
-  buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
+  buildReviewDecisionsFromSession as surveyDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
 } from "@kontourai/survey/review-workbench";
 import { assertMemoryClaim, memoryClaim, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
 import { MAX_DECISION_DEPTH, MAX_DECISION_NODES, MAX_ENVELOPE_NODES, MAX_PEERS, MAX_POLICY_NODES, MAX_SNAPSHOT_DEPTH, MAX_SNAPSHOT_NODES, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, jsonSnapshot } from "@kontourai/flow-agents/memory-json";
 import { memoryAccumulationQuery } from "@kontourai/flow-agents/memory-accumulation";
 import {
-  DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, assertDecisionReadable, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
+  DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, assertDecisionReadable, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, memoryDecisionMayPromote, memoryReviewerKind, evaluateMemoryRouting, memoryProposedCandidateId,
   memoryReviewItemName, presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
 } from "@kontourai/flow-agents/memory-routing";
 import { SCHEMAS, distillFixtureSitting, loadEntityProposals, matchesFixture, readJson } from "./memory-claims-support.mjs";
+
+/**
+ * What the host that authenticated the reviewer attests as `reviewerKind` (kontourai/survey#359). Survey's workbench builders do not set it
+ * yet, so a decision these tests build is attested by the host here, as `human` unless a test names another kind: the tests below are
+ * about human reviewers, and the tests that are about agents and rules say so.
+ */
+const attestedAs = (decisions, reviewerKind) => decisions.map(decision => ({ ...decision, spec: { ...decision.spec, reviewerKind } }));
+const buildReviewDecisionsFromSession = (session, reviewerKind = "human") => attestedAs(surveyDecisionsFromSession(session), reviewerKind);
 
 const ajv = new Ajv({ strict: false, allErrors: true });
 const validateDecision = ajv.compile(readJson(SCHEMAS, "memory-routing-decision.schema.json"));
@@ -381,7 +389,7 @@ test("metrics: proposed count, routed share, reviewer decisions and review time,
     { decisions: 8, claimsProposed: 8, uncontested: 4, routed: 4, routedShare: 0.5 },
   );
   assert.deepEqual(before.routedByRule, { "low-extraction-agreement": 2, "consequential-supersession": 1, "contested-by-accumulation": 2 });
-  assert.deepEqual(before.reviewer, { decisions: 0, confirmed: 0, corrected: 0, rejected: 0, held: 0, pending: 4, unmatched: 0, defectsCaught: 0 });
+  assert.deepEqual(before.reviewer, { decisions: 0, confirmed: 0, corrected: 0, rejected: 0, held: 0, pending: 4, unmatched: 0, annotated: 0, defectsCaught: 0 });
   assert.equal(before.reviewSeconds, null, "no events, no review time: never estimated");
   assert.equal(before.reviewSecondsPerCaughtDefect, null);
 
@@ -409,7 +417,7 @@ test("metrics: proposed count, routed share, reviewer decisions and review time,
 
   const after = deriveMemoryRunMetrics({ runId, decisions, reviewDecisions: [...reviewDecisions, ...stray], reviewEvents });
   assert.equal(validateMetrics(plain(after)), true, JSON.stringify(validateMetrics.errors));
-  assert.deepEqual(after.reviewer, { decisions: 3, confirmed: 1, corrected: 1, rejected: 1, held: 0, pending: 1, unmatched: 1, defectsCaught: 2 });
+  assert.deepEqual(after.reviewer, { decisions: 3, confirmed: 1, corrected: 1, rejected: 1, held: 0, pending: 1, unmatched: 1, annotated: 0, defectsCaught: 2 });
   assert.equal(after.reviewSeconds, 180);
   assert.equal(after.reviewTimedDecisions, 3);
   assert.equal(after.reviewSecondsPerCaughtDefect, 90);
@@ -435,7 +443,7 @@ test("a claim routed twice in one run is counted once, with its later decision; 
 test("an entity change is matched to the Survey decision on its proposal, whose review item name is the proposal id", () => {
   const { merge } = loadEntityProposals();
   const decision = routeMemoryChange({ type: "entity", proposal: merge });
-  const reviewed = [{ apiVersion: "survey.kontourai.io/v1alpha1", kind: "ReviewDecision", metadata: { name: "d1" }, spec: { reviewItemName: merge.id, candidateId: "c", status: "verified", reviewedAt: "2026-11-02T10:00:00.000Z" } }];
+  const reviewed = [{ apiVersion: "survey.kontourai.io/v1alpha1", kind: "ReviewDecision", metadata: { name: "d1" }, spec: { reviewItemName: merge.id, candidateId: "c", status: "verified", reviewedAt: "2026-11-02T10:00:00.000Z", reviewerKind: "human" } }];
   const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: reviewed });
   assert.deepEqual([metrics.claimsProposed, metrics.routed, metrics.reviewer.confirmed, metrics.reviewer.pending], [0, 1, 1, 0]);
   assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision] }).reviewer.pending, 1);
@@ -459,7 +467,7 @@ test("a held decision is a reviewer decision with no resolution: not pending, no
   const item = buildMemoryReviewItem(decision);
   const session = { ...reviewSession(item, { decision: "could-not-confirm" }), notesByItemName: { [item.metadata.name]: "Could not reach the source." } };
   const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: buildReviewDecisionsFromSession(session) });
-  assert.deepEqual(metrics.reviewer, { decisions: 1, confirmed: 0, corrected: 0, rejected: 0, held: 1, pending: 0, unmatched: 0, defectsCaught: 0 });
+  assert.deepEqual(metrics.reviewer, { decisions: 1, confirmed: 0, corrected: 0, rejected: 0, held: 1, pending: 0, unmatched: 0, annotated: 0, defectsCaught: 0 });
 });
 
 // ---------------------------------------------------------------------------
@@ -941,7 +949,7 @@ test("a verification record is bounded: a record padded past its allowance is re
 });
 
 test("figures derive over a run's whole history, which may be longer than any one request list", () => {
-  const decisions = Array.from({ length: 20_001 }, (_, i) => ({ changeId: `c${i}`, changeType: "claim", outcome: "proposed", reasons: [] }));
+  const decisions = Array.from({ length: 20_001 }, (_, i) => ({ changeId: `c${i}`, changeType: "claim", outcome: "proposed", reasons: [], input: { type: "claim" } }));
   assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions }).decisions, 20_001);
   const reviewDecisions = Array.from({ length: 20_001 }, (_, i) => ({ kind: "ReviewDecision", metadata: { name: `d${i}` }, spec: { reviewItemName: `i${i}`, status: "rejected", reviewedAt: "2026-11-02T10:00:00.000Z" } }));
   assert.doesNotThrow(() => deriveMemoryRunMetrics({ runId: "r", decisions: [], reviewDecisions }));
@@ -1014,3 +1022,120 @@ test("optional text on a claim is text: a label, a role or an extractor that is 
 });
 const assertMemoryClaimFor = claim => assertMemoryClaim(claim);
 const base_ = base;
+
+// --- routed review needs a human reviewer (owner decision 2026-11-03; kontourai/survey#359 adds reviewerKind) ---------------------
+
+/** A claim that routes (a contradiction with a peer), its routing decision, and its Survey review item. */
+function routedClaim() {
+  const claim = make({ value: "PostgreSQL 16" }), peer = make();
+  const decision = routeMemoryChange(change(claim, { current: [peer], accumulation: contested(claim.id, peer.id) }));
+  return { claim, decision, item: buildMemoryReviewItem(decision) };
+}
+const decide = (item, kind, how = "accept-proposed", at = "2026-11-02T10:00:00.000Z", editedValue) => {
+  const [decision] = surveyDecisionsFromSession(reviewSession(item, { decision: how, reviewedAt: at, ...(editedValue !== undefined ? { editedValue } : {}) }));
+  const { reviewerKind: _drop, ...spec } = decision.spec;
+  return { ...decision, metadata: { ...decision.metadata, name: `${how}-${kind}-${at}` }, spec: kind === undefined ? spec : { ...spec, reviewerKind: kind } };
+};
+
+test("the reviewer kind is read strictly, and anything that is not exactly human, agent or rule is unattested, which is not human", () => {
+  const { item } = routedClaim();
+  for (const kind of ["human", "agent", "rule"]) assert.equal(memoryReviewerKind(decide(item, kind)), kind);
+  assert.equal(memoryReviewerKind(decide(item, undefined)), "unattested", "absent (a record made before survey#359)");
+  for (const bad of ["Human", " human", "human ", "person", "operator", "", 1, true, null, ["human"], { kind: "human" }]) {
+    assert.equal(memoryReviewerKind(decide(item, bad)), "unattested", JSON.stringify(bad));
+    assert.equal(memoryDecisionMayPromote(decide(item, bad)), false, `${JSON.stringify(bad)} cannot promote`);
+  }
+  const inherited = decide(item, undefined); inherited.spec = Object.create({ reviewerKind: "human" }, Object.getOwnPropertyDescriptors(inherited.spec));
+  assert.equal(memoryReviewerKind(inherited), "unattested", "an inherited value is not the decision's own");
+  const getter = decide(item, undefined); Object.defineProperty(getter.spec, "reviewerKind", { enumerable: true, get: () => "human" });
+  assert.equal(memoryReviewerKind(getter), "unattested", "a getter is not data");
+  const actorOnly = decide(item, undefined); actorOnly.spec.actor = { id: "person:reviewer", reviewerKind: "human" };
+  assert.equal(memoryReviewerKind(actorOnly), "unattested", "the field is on the decision, not nested where an actor could assert it");
+  assert.equal(memoryReviewerKind(null), "unattested");
+  assert.equal(memoryReviewerKind({}), "unattested");
+  assert.equal(memoryDecisionMayPromote(decide(item, "human")), true);
+  assert.equal(memoryDecisionMayPromote(decide(item, "agent")), false);
+  assert.equal(memoryDecisionMayPromote(decide(item, "agent"), { routed: false }), true, "a claim routing did not flag takes any reviewer");
+  assert.equal(memoryDecisionMayPromote(decide(item, undefined), { routed: false }), true);
+  assert.equal(memoryDecisionMayPromote(decide(item, undefined), { routed: undefined }), false, "unknown routing is routed");
+});
+
+test("a routed claim is promoted only by a human: an agent, a rule or an unattested outcome annotates it and changes nothing", () => {
+  const { claim, decision, item } = routedClaim();
+  assert.equal(decision.outcome, "routed");
+  assert.equal(item.metadata.labels["memory.reviewer"], "human-required", "the item says what it needs");
+  const recall = decisions => presentMemoryClaims([claim], { routing: [decision], reviewDecisions: decisions });
+  const before = recall([]).presented[0];
+  assert.deepEqual([before.review.label, before.review.annotations], ["in-review", 0]);
+  for (const kind of ["agent", "rule", undefined, "person"]) {
+    for (const how of ["accept-proposed", "reject-proposed", "keep-current"]) {
+      const out = recall([decide(item, kind, how)]);
+      assert.equal(out.withheld.length, 0, `${kind}/${how}: an agent's rejection does not withhold the claim`);
+      const shown = out.presented[0];
+      assert.deepEqual([shown.review.label, shown.value, shown.review.annotations, shown.review.routing], ["in-review", "PostgreSQL 16", 1, "routed"], `${kind}/${how}`);
+      assert.match(shown.text, /^\[stated · in-review\]/);
+    }
+    const edited = recall([decide(item, kind, "accept-proposed", "2026-11-02T10:00:00.000Z", "PostgreSQL 99")]).presented[0];
+    assert.deepEqual([edited.review.label, edited.value], ["in-review", "PostgreSQL 16"], `${kind}: an agent's edit does not correct the claim`);
+  }
+  // The same decisions from a human stand.
+  assert.equal(recall([decide(item, "human")]).presented[0].review.label, "confirmed");
+  const corrected = recall([decide(item, "human", "accept-proposed", "2026-11-02T10:00:00.000Z", "PostgreSQL 15.4")]).presented[0];
+  assert.deepEqual([corrected.review.label, corrected.value], ["corrected", "PostgreSQL 15.4"]);
+  assert.deepEqual(recall([decide(item, "human", "reject-proposed")]).withheld.map(w => w.reason), ["rejected-in-review"]);
+});
+
+test("order between human and agent decisions: a later agent never displaces a human, and an earlier agent never blocks one", () => {
+  const { claim, decision, item } = routedClaim();
+  const recall = decisions => presentMemoryClaims([claim], { routing: [decision], reviewDecisions: decisions });
+  const confirmedThenAgentRejects = recall([decide(item, "human", "accept-proposed", "2026-11-02T10:00:00.000Z"), decide(item, "agent", "reject-proposed", "2026-11-02T12:00:00.000Z")]);
+  assert.deepEqual([confirmedThenAgentRejects.presented[0].review.label, confirmedThenAgentRejects.presented[0].review.annotations], ["confirmed", 1], "a later agent rejection does not withhold a confirmed claim");
+  const agentThenHuman = recall([decide(item, "agent", "accept-proposed", "2026-11-02T09:00:00.000Z"), decide(item, "human", "reject-proposed", "2026-11-02T10:00:00.000Z")]);
+  assert.deepEqual(agentThenHuman.withheld.map(w => w.reason), ["rejected-in-review"], "the human's rejection stands over an earlier agent acceptance");
+  const twoHumans = recall([decide(item, "human", "accept-proposed", "2026-11-02T10:00:00.000Z"), decide(item, "human", "reject-proposed", "2026-11-02T11:00:00.000Z")]);
+  assert.equal(twoHumans.withheld.length, 1, "the later of two humans stands");
+  const reversed = recall([decide(item, "human", "reject-proposed", "2026-11-02T11:00:00.000Z"), decide(item, "human", "accept-proposed", "2026-11-02T10:00:00.000Z")]);
+  assert.equal(reversed.withheld.length, 1, "whatever order they arrive in");
+});
+
+test("a claim routing did not flag is reviewed by whoever reviews it, and a claim whose routing is not known is treated as routed", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const unrouted = routeMemoryChange(change(claim, { accumulation: null }));
+  assert.equal(unrouted.outcome, "proposed");
+  const name = memoryReviewItemName(claim.id);
+  const raw = (kind, status = "verified") => ({ apiVersion: "survey.kontourai.io/v1alpha1", kind: "ReviewDecision", metadata: { name: `d-${kind}` }, spec: { reviewItemName: name, candidateId: `${name}.proposed`, status, reviewedAt: "2026-11-02T10:00:00.000Z", ...(kind ? { reviewerKind: kind } : {}) } });
+  assert.equal(presentMemoryClaims([claim], { routing: [unrouted] }).presented[0].review.label, "unreviewed", "stays proposed until reviewed");
+  for (const kind of ["agent", "rule", "human", undefined]) assert.equal(presentMemoryClaims([claim], { routing: [unrouted], reviewDecisions: [raw(kind)] }).presented[0].review.label, "confirmed", `unrouted, ${kind}`);
+  // No routing record: not known to be unrouted.
+  assert.equal(presentMemoryClaims([claim], { reviewDecisions: [raw("agent")] }).presented[0].review.label, "unreviewed", "unknown routing, agent");
+  assert.equal(presentMemoryClaims([claim], { reviewDecisions: [raw("agent")] }).presented[0].review.annotations, 1);
+  assert.equal(presentMemoryClaims([claim], { reviewDecisions: [raw("human")] }).presented[0].review.label, "confirmed", "unknown routing, human");
+});
+
+test("metrics: an agent's decision on a routed item is an annotation, the item stays pending, and nothing is counted as reviewed", () => {
+  const { decision, item } = routedClaim();
+  const run = (reviewDecisions, reviewEvents) => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions, ...(reviewEvents ? { reviewEvents } : {}) });
+  const agent = run([decide(item, "agent")]);
+  assert.deepEqual(agent.reviewer, { decisions: 0, confirmed: 0, corrected: 0, rejected: 0, held: 0, pending: 1, unmatched: 0, annotated: 1, defectsCaught: 0 });
+  assert.equal(agent.reviewSeconds, null);
+  assert.deepEqual(run([decide(item, "rule", "reject-proposed")]).reviewer, { decisions: 0, confirmed: 0, corrected: 0, rejected: 0, held: 0, pending: 1, unmatched: 0, annotated: 1, defectsCaught: 0 }, "an agent's rejection is no caught defect");
+  assert.deepEqual(run([decide(item, undefined)]).reviewer.annotated, 1, "an unattested decision annotates too");
+  const human = run([decide(item, "human")]);
+  assert.deepEqual([human.reviewer.confirmed, human.reviewer.pending, human.reviewer.annotated], [1, 0, 0]);
+  const both = run([decide(item, "agent", "reject-proposed", "2026-11-02T12:00:00.000Z"), decide(item, "human", "accept-proposed", "2026-11-02T10:00:00.000Z")]);
+  assert.deepEqual([both.reviewer.confirmed, both.reviewer.rejected, both.reviewer.pending, both.reviewer.annotated, both.reviewer.decisions], [1, 0, 0, 1, 1], "the human's decision counts; the later agent's only annotates");
+  assert.equal(validateMetrics(both), true, JSON.stringify(validateMetrics.errors));
+});
+
+test("an entity merge or split is promoted only by a human too: the proposal's review item takes a human decision", () => {
+  const { merge } = loadEntityProposals();
+  const decision = routeMemoryChange({ type: "entity", proposal: merge });
+  const spec = kind => ({ apiVersion: "survey.kontourai.io/v1alpha1", kind: "ReviewDecision", metadata: { name: `d-${kind}` }, spec: { reviewItemName: merge.id, candidateId: "c", status: "verified", reviewedAt: "2026-11-02T10:00:00.000Z", ...(kind ? { reviewerKind: kind } : {}) } });
+  for (const kind of ["agent", "rule", undefined]) {
+    const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [spec(kind)] });
+    assert.deepEqual([metrics.reviewer.confirmed, metrics.reviewer.pending, metrics.reviewer.annotated], [0, 1, 1], String(kind));
+  }
+  assert.deepEqual(((m) => [m.reviewer.confirmed, m.reviewer.pending, m.reviewer.annotated])(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [spec("human")] })), [1, 0, 0]);
+  assert.equal(memoryDecisionMayPromote(spec("agent")), false, "the helper a host asks before calling Survey's entityOutcomeFromDecision");
+  assert.equal(memoryDecisionMayPromote(spec("human")), true);
+});

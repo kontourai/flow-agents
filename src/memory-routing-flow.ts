@@ -468,11 +468,17 @@ function assertReviewDecision(value: unknown): void {
   if (typeof metadata.name !== "string" || !metadata.name || typeof spec.reviewItemName !== "string" || !spec.reviewItemName) return bad("a decision needs a name and the review item it decides");
   if (!["verified", "assumed", "rejected", "proposed"].includes(spec.status)) return bad(`a decision has a status Survey does not define: ${String(spec.status)}`);
   if (!goodInstant(spec.reviewedAt)) return bad("a decision needs a reviewedAt that is a date-time");
+  assertReviewerKind(spec);
+}
+/** Survey refuses an unknown `reviewerKind` (survey#359); so does the Kit. Absent is allowed: it reads as not human. */
+function assertReviewerKind(spec: Record<string, unknown>): void {
+  if (spec.reviewerKind !== undefined && (typeof spec.reviewerKind !== "string" || !["human", "agent", "rule"].includes(spec.reviewerKind))) bad(`a reviewerKind is human, agent or rule: ${String(spec.reviewerKind)}`);
 }
 /** The shape of a Survey ReviewSessionEvent the review-time figure reads. */
 function assertReviewEvent(value: unknown): void {
   if (!isRecord(value) || value.kind !== "ReviewSessionEvent" || !isRecord(value.spec)) return bad("not a Survey ReviewSessionEvent");
   const { spec } = value;
+  assertReviewerKind(spec);
   if (typeof spec.sessionName !== "string" || !spec.sessionName || !Number.isInteger(spec.sequence) || typeof spec.eventType !== "string" || !Object.hasOwn(EVENT_TYPES, spec.eventType) || !goodInstant(spec.occurredAt)) return bad("an event needs a session, an integer sequence, a Survey event type, a type and an occurredAt that is a date-time");
 }
 

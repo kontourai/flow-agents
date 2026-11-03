@@ -72,7 +72,8 @@
         "held",
         "pending",
         "unmatched",
-        "defectsCaught"
+        "defectsCaught",
+        "annotated"
       ],
       "properties": {
         "decisions": {
@@ -109,6 +110,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "corrected + rejected."
+        },
+        "annotated": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Review decisions that only annotated a routed item: an agent's, a rule's or an unattested reviewer's. They promote nothing and leave the item pending; only a human reviewer's decision promotes a routed claim."
         }
       }
     },

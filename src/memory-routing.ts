@@ -490,7 +490,8 @@ export function buildMemoryReviewItem(request: MemoryRoutingDecision): ReviewIte
     ...(claim.supersedes ?? []).map(edge => edge.claimId),
   ]);
   const prior = current.find(other => against.has(other.id));
-  const labels = { "memory.posture": claim.posture };
+  // The item says what it needs: a routed claim is promoted only by a human reviewer's outcome (the host attests the kind).
+  const labels = { "memory.posture": claim.posture, "memory.reviewer": "human-required" };
   const item: ReviewItem = prior
     ? currentProposedReviewItem({ name, target, current: candidateBase(prior, 1), proposed: candidateBase(claim, 2), rationale, labels, producerPolicy: { decisionMode: "current-proposed" } })
     : {
@@ -523,15 +524,59 @@ export function memoryReviewOutcome(decision: ReviewDecision, itemName: string):
 /** When a value is an instant, as a number; anything else sorts before every real instant, so it never beats one. */
 const instantOf = (text: string | undefined): number => { const ms = text === undefined ? NaN : Date.parse(text); return Number.isFinite(ms) ? ms : -Infinity; };
 
-/** Latest decision per review item, by instant (`11:00+02:00` is earlier than `10:00Z`, whatever the text says). A tie keeps the later array entry. */
-function latestDecisions(decisions: readonly ReviewDecision[]): Map<string, ReviewDecision> {
-  const latest = new Map<string, ReviewDecision>();
-  for (const decision of decisions) {
-    const name = decision.spec.reviewItemName, previous = latest.get(name);
-    if (!previous || instantOf(decision.spec.reviewedAt) >= instantOf(previous.spec.reviewedAt)) latest.set(name, decision);
-  }
-  return latest;
+/** Who made a review decision, as the host that authenticated the reviewer attested it. `unattested` is anything that is not one of the three. */
+export type MemoryReviewerKind = "human" | "agent" | "rule" | "unattested";
+const REVIEWER_KINDS: readonly string[] = ["human", "agent", "rule"];
+
+/**
+ * SHIM for kontourai/survey#359. Survey is adding `reviewerKind: "human" | "agent" | "rule"` to review outcomes and decisions: asserted
+ * by the host that authenticated the reviewer, never by the reviewer, and absent on records made before it existed. Survey 8.3.0
+ * does not have it, so until a release does this is the one place the Kit reads it: the decision's own `spec.reviewerKind`, as data.
+ * It fails closed. A missing field, an unknown value, a value that is not text, or one that is only inherited reads as `unattested`,
+ * and `unattested` is not human: it can annotate a routed claim and cannot promote it. When Survey releases the field, this is the
+ * function to repoint (if it lands somewhere other than `spec.reviewerKind`, routed claims stay unpromoted until it is; nothing is
+ * promoted wrongly).
+ */
+export function memoryReviewerKind(decision: ReviewDecision): MemoryReviewerKind {
+  const spec = (decision as { spec?: unknown } | null)?.spec;
+  if (!spec || typeof spec !== "object") return "unattested";
+  const descriptor = Object.getOwnPropertyDescriptor(spec, "reviewerKind");
+  const kind = descriptor && "value" in descriptor ? descriptor.value : undefined;
+  return typeof kind === "string" && REVIEWER_KINDS.includes(kind) ? kind as MemoryReviewerKind : "unattested";
 }
+
+/**
+ * Whether a review decision may CHANGE a claim's state: promote it to confirmed or corrected, or withhold it as rejected (owner
+ * decision, 2026-11-03). A routed claim (a contradiction, a consequential supersession, an entity merge or split, a visibility
+ * widening, a low-agreement claim) is promoted only by a HUMAN reviewer's outcome; an agent or rule decision annotates it and
+ * changes nothing, so it stays `proposed` and routed. A claim routing found nothing to flag stays `proposed` until reviewed, and
+ * any reviewer's decision applies to it: `routed: false` says so. `routed` defaults to true and an unknown routing is routed, so a
+ * host that cannot say the claim was evaluated and not flagged must not pass false. A host that hands a decision to Survey's
+ * `entityOutcomeFromDecision` (entity merge/split review is Survey's) asks this first.
+ */
+export function memoryDecisionMayPromote(decision: ReviewDecision, options: { routed?: boolean } = {}): boolean {
+  return options.routed === false || memoryReviewerKind(decision) === "human";
+}
+
+/**
+ * The decision that stands for one review item, and how many decisions only annotated it. Among the decisions that may change the
+ * claim, the latest by instant (`11:00+02:00` is earlier than `10:00Z`, whatever the text says; a tie keeps the later array entry).
+ * On a routed claim a later agent decision never displaces an earlier human one, and a human one is displaced only by a later human one.
+ */
+function settle(decisions: readonly ReviewDecision[], routed: boolean | undefined): { made: ReviewDecision | undefined; annotated: number } {
+  let made: ReviewDecision | undefined, annotated = 0;
+  for (const decision of decisions) {
+    if (!memoryDecisionMayPromote(decision, routed === false ? { routed: false } : {})) { annotated++; continue; }
+    if (!made || instantOf(decision.spec.reviewedAt) >= instantOf(made.spec.reviewedAt)) made = decision;
+  }
+  return { made, annotated };
+}
+
+const groupByItem = (decisions: readonly ReviewDecision[]): Map<string, ReviewDecision[]> => {
+  const byItem = new Map<string, ReviewDecision[]>();
+  for (const decision of decisions) { const list = byItem.get(decision.spec.reviewItemName); if (list) list.push(decision); else byItem.set(decision.spec.reviewItemName, [decision]); }
+  return byItem;
+};
 
 const reviewItemNameOf = (decision: MemoryRoutingDecision) => decision.input.type === "claim" ? memoryReviewItemName(decision.changeId) : decision.input.proposalRef;
 
@@ -544,7 +589,11 @@ export interface MemoryRunMetrics {
   routed: number;
   routedShare: number | null;
   routedByRule: Record<string, number>;
-  reviewer: { decisions: number; confirmed: number; corrected: number; rejected: number; held: number; pending: number; unmatched: number; defectsCaught: number };
+  /**
+   * `decisions` counts the decisions that stand for an item (a human's on a routed one). `annotated` counts decisions that only
+   * annotated: an agent's or rule's (or an unattested one) on a routed item, which promote nothing and leave it pending.
+   */
+  reviewer: { decisions: number; confirmed: number; corrected: number; rejected: number; held: number; pending: number; unmatched: number; annotated: number; defectsCaught: number };
   reviewSeconds: number | null;
   reviewTimedDecisions: number;
   reviewSecondsPerCaughtDefect: number | null;
@@ -583,16 +632,22 @@ export function deriveMemoryRunMetrics(input: { runId: string; decisions: readon
 
   const reviewDecisions = ownEntries(ownField(input, "reviewDecisions", "metrics input"), "metrics input reviewDecisions", MAX_HISTORY_ENTRIES) as ReviewDecision[];
   const reviewEvents = ownEntries(ownField(input, "reviewEvents", "metrics input"), "metrics input reviewEvents", MAX_HISTORY_ENTRIES) as ReviewSessionEvent[];
-  const latest = latestDecisions(reviewDecisions);
+  const byItem = groupByItem(reviewDecisions);
+  const routedNames = new Set(routed.map(reviewItemNameOf)), unroutedNames = new Set(decisions.filter(decision => decision.outcome !== "routed").map(reviewItemNameOf));
   const counts = { confirmed: 0, corrected: 0, rejected: 0, held: 0 };
   const matched = new Set<string>();
-  let seconds = 0, timed = 0;
-  for (const decision of routed) {
-    const name = reviewItemNameOf(decision), made = latest.get(name);
-    if (!made) continue;
+  let seconds = 0, timed = 0, annotated = 0, unmatched = 0;
+  for (const [name, made] of byItem) {
+    // On a routed item a human decision stands and an agent's or rule's (or an unattested one) annotates it and leaves it pending.
+    // An item routing found nothing to flag takes any reviewer; an item no change of this run made is not known to be unrouted, so
+    // it takes only a human.
+    const settled = settle(made, routedNames.has(name) ? true : unroutedNames.has(name) ? false : undefined);
+    annotated += settled.annotated;
+    if (!routedNames.has(name)) { if (settled.made) unmatched++; continue; } // a decision for an item no routed change made
+    if (!settled.made) continue;
     matched.add(name);
-    counts[memoryReviewOutcome(made, name)]++;
-    const dwell = reviewDwell(made, name, reviewEvents);
+    counts[memoryReviewOutcome(settled.made, name)]++;
+    const dwell = reviewDwell(settled.made, name, reviewEvents);
     if (dwell !== undefined) { seconds += dwell; timed++; }
   }
   const defectsCaught = counts.corrected + counts.rejected;
@@ -603,7 +658,7 @@ export function deriveMemoryRunMetrics(input: { runId: string; decisions: readon
     claimsProposed: decisions.filter(decision => decision.changeType === "claim").length,
     uncontested: decisions.length - routed.length, routed: routed.length,
     routedShare: decisions.length ? routed.length / decisions.length : null, routedByRule,
-    reviewer: { decisions: total, ...counts, pending: routed.length - matched.size, unmatched: latest.size - matched.size, defectsCaught },
+    reviewer: { decisions: total, ...counts, pending: routed.length - matched.size, unmatched, annotated, defectsCaught },
     reviewSeconds, reviewTimedDecisions: timed,
     reviewSecondsPerCaughtDefect: reviewSeconds !== null && defectsCaught > 0 ? reviewSeconds / defectsCaught : null,
   };
@@ -625,7 +680,8 @@ export interface PresentedMemoryClaim {
   validTime?: MemoryClaim["validTime"];
   speaker: string;
   source: { ref: string; excerpt: string; observedAt: string };
-  review: { label: MemoryReviewLabel; routing: "not-evaluated" | "uncontested" | "routed"; reasons: MemoryRoutingRuleId[] };
+  /** `annotations`: decisions by an agent, a rule or an unattested reviewer on a routed (or not-evaluated) claim, which changed nothing. */
+  review: { label: MemoryReviewLabel; routing: "not-evaluated" | "uncontested" | "routed"; reasons: MemoryRoutingRuleId[]; annotations: number };
   /** Posture and review label are in the text, so a consumer that prints only `text` still shows both. */
   text: string;
 }
@@ -649,7 +705,7 @@ export function presentMemoryClaims(claims: readonly unknown[], context: { routi
     const reasons = ownEntries(ownField(decision, "reasons", "recall routing decision"), "recall routing reasons").map(reason => ownField(reason, "rule", "recall routing reason"));
     routingByClaim.set(changeId, { outcome: ownField(decision, "outcome", "recall routing decision"), reasons: reasons.filter((rule): rule is string => typeof rule === "string") });
   }
-  const latest = latestDecisions(jsonSnapshotEach(ownField(context, "reviewDecisions", "recall context"), "recall reviewDecisions") as ReviewDecision[]);
+  const decisionsByItem = groupByItem(jsonSnapshotEach(ownField(context, "reviewDecisions", "recall context"), "recall reviewDecisions") as ReviewDecision[]);
   const presented: PresentedMemoryClaim[] = [], withheld: WithheldMemoryClaim[] = [];
   for (const entry of ownEntries(claims, "recall claims")) {
     let claim: MemoryClaim;
@@ -661,8 +717,11 @@ export function presentMemoryClaims(claims: readonly unknown[], context: { routi
     const routing = routingByClaim.get(claim.id);
     let label: MemoryReviewLabel = routing?.outcome === "routed" ? "in-review" : "unreviewed";
     let value = claim.value;
-    // A reviewer's decision is about the claim, whether or not its routing record came along with it.
-    const name = memoryReviewItemName(claim.id), made = latest.get(name);
+    // A reviewer's decision is about the claim, whether or not its routing record came along with it. On a routed claim only a human's
+    // changes it (promotes it, corrects it, or withholds it); an agent's or rule's is an annotation. With no routing record the claim
+    // is not known to be unrouted, so it is treated as routed.
+    const name = memoryReviewItemName(claim.id);
+    const { made, annotated } = settle(decisionsByItem.get(name) ?? [], routing ? routing.outcome === "routed" : undefined);
     if (made) {
       const outcome = memoryReviewOutcome(made, name);
       if (outcome === "rejected") { withheld.push({ id: claim.id, reason: "rejected-in-review" }); continue; }
@@ -673,7 +732,7 @@ export function presentMemoryClaims(claims: readonly unknown[], context: { routi
     presented.push({
       id: claim.id, subject, property: claim.property, value, extractedValue: claim.value, posture: claim.posture, ...(claim.validTime ? { validTime: claim.validTime } : {}),
       speaker: claim.speaker, source: { ref: claim.source.ref, excerpt: claim.source.excerpt, observedAt: claim.source.observedAt },
-      review: { label, routing: routing ? (routing.outcome === "routed" ? "routed" : "uncontested") : "not-evaluated", reasons: (routing?.reasons ?? []) as MemoryRoutingRuleId[] },
+      review: { label, routing: routing ? (routing.outcome === "routed" ? "routed" : "uncontested") : "not-evaluated", reasons: (routing?.reasons ?? []) as MemoryRoutingRuleId[], annotations: annotated },
       text: `[${claim.posture} · ${label}] ${subject}: ${claim.property} = ${typeof value === "string" ? value : canonicalJson(value)}`,
     });
   }
