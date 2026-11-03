@@ -36,8 +36,9 @@ exact `1.0` behavior and loading the `1.0` module still needs no Surface or Surv
   now that Surface defines the per-viewer view.
 - **Limited disclosure, stated.** Asked for by id, hidden, absent, and not-yet-known claims return the same
   plain `no_answer`; a scan never names them; parse errors for claims the reader may not see are dropped;
-  diagnostics name the claim, never its position; a duplicate id is an error only when every copy is
-  visible. Admission of a chain through a hidden claim uses that claim's times and slot, so it can decide
+  diagnostics of every parser family name the claim, never its position; a reader's view of an id uses only
+  the copies they may see and that are known at `known_at`, so a hidden or future duplicate changes nothing
+  and two entitled copies are an error; an edge the reader may not see explains nothing. Admission of a chain through a hidden claim uses that claim's times and slot, so it can decide
   whether the chain collapses, though never what the reader is shown.
 - **As-of follows the merged Surface accumulation decision** (kontourai/surface#204, Surface main
   `7486c6d`, `docs/decisions/knowledge-accumulation.md`). Knowledge time filters on a
@@ -59,8 +60,8 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
   the manifest fields are this kit's, not a portable bundle extension.
 - **Freshness is Surface's.** Expiry resolves through `claimIntrinsicExpiry` (`expiresAt` wins;
   `ttlSeconds` anchors on a verification at or before `known_at`, else recording) and a claim is stale when `now > expiry`,
-  checked against Surface's own `reapplyVerifiedFreshness` at the boundary. A stale claim is
-  `unverifiable`. Ephemeris is the time actor that wakes a Flow run at a deadline and derives
+  checked against Surface's own `reapplyVerifiedFreshness` at the boundary. A stale claim that would
+  otherwise be current is `unverifiable`; a superseded one stays `superseded` with `freshness.stale: true`. Ephemeris is the time actor that wakes a Flow run at a deadline and derives
   nothing, so it is not consumed.
 - **Abstention is a separate step.** Recall returns evidence and never an answer. The answer step
   sends only a `current` recall to an independent `@kontourai/survey` `SupportVerifier` and keeps

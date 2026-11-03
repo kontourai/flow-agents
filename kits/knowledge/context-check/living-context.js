@@ -179,6 +179,14 @@ export function validateLivingContextResult(result) {
     if (recall?.status === "current" && recall.freshness?.stale === true) errors.push(`$/recalls/${index}: a stale recall must not be current`);
     if (plainObject(recall?.freshness)) {
       const { as_of: asOf, expires_at: expiresAt, stale } = recall.freshness;
+      let boundNow;
+      try { boundNow = new Date(parseInstant(result.input?.as_of?.now, "input.as_of.now")).toISOString(); } catch { boundNow = undefined; }
+      if (boundNow !== undefined && asOf !== boundNow) errors.push(`$/recalls/${index}: freshness.as_of must equal input.as_of.now`);
+      for (const [key, value] of [["as_of", asOf], ["expires_at", expiresAt]]) {
+        if (value === undefined) continue;
+        try { parseInstant(value, `freshness.${key}`); } catch (cause) { errors.push(`$/recalls/${index}: ${cause.message}`); }
+      }
+      if (Array.isArray(recall.reasons) && recall.reasons.includes("stale_at_as_of") !== (stale === true)) errors.push(`$/recalls/${index}: the stale_at_as_of reason must match freshness.stale`);
       if (expiresAt === undefined && stale === true) errors.push(`$/recalls/${index}: freshness cannot be stale without an expiry`);
       if (expiresAt !== undefined && stale !== (Date.parse(asOf) > Date.parse(expiresAt))) errors.push(`$/recalls/${index}: freshness.stale must equal as_of > expires_at`);
     }
@@ -233,15 +241,18 @@ function indexClaims(manifests, ctx) {
   for (const claim of manifests.flatMap((manifest) => manifest.claims)) copies.set(claim.id, [...(copies.get(claim.id) ?? []), claim]);
   const byId = new Map();
   for (const [id, group] of copies) {
-    if (group.length === 1) { byId.set(id, group[0]); continue; }
-    // An id that two claims share is ambiguous and is served to no one. The reader is told only when every copy
-    // is one they may see: a collision that involves a hidden claim must not be observable.
-    if (group.every((claim) => isVisible(claim, ctx))) throw error("DUPLICATE_CLAIM_ID", `claim id '${id}' appears more than once across the selected Knowledge roots`);
+    // The reader's view of an id is built only from copies they may see and that are known at known_at: a hidden or
+    // not-yet-known copy must neither change their answer nor be observable, and must not discard a visible one.
+    const entitled = group.filter((claim) => isVisible(claim, ctx) && isKnown(claim, ctx));
+    if (entitled.length > 1) throw error("DUPLICATE_CLAIM_ID", `claim id '${id}' appears more than once across the selected Knowledge roots`);
+    // With no entitled copy the claim is structure only (it can sit inside a chain that collapses); the first copy stands.
+    byId.set(id, entitled[0] ?? group[0]);
   }
   return byId;
 }
 
 const viewerOf = (ctx) => ({ audiences: [ctx.reader] });
+const edgeVisible = (claim, ctx) => Surface.visibilityAllows(claim.extension.supersessionVisibility, viewerOf(ctx));
 const isVisible = (claim, ctx) => Surface.visibilityAllows(claim.extension.visibility, viewerOf(ctx));
 /** Known at known_at: recorded by then, or not yet timed (an untimed claim is indeterminate, not absent). */
 const isKnown = (claim, ctx) => !(claim.extension.recordedAt !== undefined && claim.extension.recordedAt > ctx.knownAt);
@@ -298,7 +309,8 @@ function evaluateSupersession(byId, ctx) {
 /** What a non-active edge says about a visible claim. Only a successor this reader may see can explain anything. */
 function edgeAnnotation(claim, supersession, ctx) {
   const state = supersession.states.get(claim.id);
-  if (!state || state.state === "active" || !state.successor || !isVisible(state.successor, ctx)) return {};
+  // Only an edge this reader may see, to a successor they may see, can explain anything about the claim.
+  if (!state || state.state === "active" || !state.successor || !isVisible(state.successor, ctx) || !edgeVisible(claim, ctx)) return {};
   switch (state.state) {
     case "unknown_time": return { unverifiable: "supersession_time_unknown" };
     case "unknown_boundary": return { unverifiable: "succession_boundary_unknown" };
@@ -325,7 +337,7 @@ function supersessionChain(claim, byId, supersession, ctx) {
       continue;
     }
     const state = states.get(current);
-    if (state?.state === "inactive" && listed(state.successor)) forward.push({ claim_id: state.successor.id, relation: "superseded_by", kind: state.kind, active: false });
+    if (state?.state === "inactive" && listed(state.successor) && edgeVisible(byId.get(current), ctx)) forward.push({ claim_id: state.successor.id, relation: "superseded_by", kind: state.kind, active: false });
     break;
   }
   const backward = [];
@@ -338,7 +350,7 @@ function supersessionChain(claim, byId, supersession, ctx) {
         if (reached.has(candidate.id) || !listed(candidate) || candidate.extension.recordedAt === undefined) continue;
         const active = view.supersededBy[candidate.id]?.includes(target);
         const state = states.get(candidate.id);
-        const inactive = state?.state === "inactive" && state.successor?.id === target;
+        const inactive = state?.state === "inactive" && state.successor?.id === target && edgeVisible(candidate, ctx);
         if (!active && !inactive) continue;
         reached.add(candidate.id);
         backward.unshift({ claim_id: candidate.id, relation: "supersedes", ...(active && direct(candidate.id, target) || inactive ? { kind: kindOf(candidate.id) } : {}), active: Boolean(active) });

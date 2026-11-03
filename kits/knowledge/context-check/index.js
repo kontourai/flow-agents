@@ -154,7 +154,8 @@ export function normalizeManifestClaims(document, root, extension) {
       // caller's view needs it to collapse supersession chains that pass through it. Diagnostics for an entitled
       // caller name the claim's own id, never a position, so hidden entries cannot be counted.
       if (extension?.isUnavailableToCaller?.(claim)) return;
-      if (extension && cause.code === "INVALID_CLAIM_MANIFEST") throw error("INVALID_CLAIM_MANIFEST", cause.message.replace(/claims\[\d+\]/, `claim '${typeof claim?.id === "string" ? claim.id.slice(0, 80) : "(no id)"}'`));
+      // Every parser error family names the claim by id, never by array position.
+      if (extension && typeof cause?.message === "string") throw error(cause.code ?? "INVALID_CLAIM_MANIFEST", cause.message.replaceAll(/claims\[\d+\]/g, `claim '${typeof claim?.id === "string" ? claim.id.slice(0, 80) : "(no id)"}'`));
       throw cause;
     }
   });

@@ -345,8 +345,11 @@ successor, and a cycle among visible claims leaves them `unverifiable` (`superse
 carries its own visibility (`supersession_visibility`, by default that of the claim that carries it); an
 unreadable one is sealed and the edge is followed for no one. A malformed claim that Surface says the
 reader may not see, or that was recorded after `known_at`, is dropped without an error, so a parse error
-never describes it; an entitled reader's error names the claim, never its array position. A duplicate id
-is an error only when every copy is visible to the reader. Asked for by id, a hidden, absent, or
+never describes it; an entitled reader's error, whatever its family, names the claim, never its array
+position. A reader's view of an id is built only from the copies they may see and that are known at
+`known_at`: a hidden or not-yet-known duplicate neither changes their answer nor is observable, and two
+entitled copies are a `DUPLICATE_CLAIM_ID` error. An edge the reader may not see (its
+`supersession_visibility`) explains nothing: no chain link, no reason, no status change. Asked for by id, a hidden, absent, or
 not-yet-known claim returns the same plain `no_answer`; a default scan never names one. Reconciliation
 and proposals cover only claims the reader may see. Stated limits: admission of an edge uses the times and
 slot of both ends, so a hidden claim's times can decide whether a chain through it collapses, though never
@@ -374,7 +377,8 @@ see a successor that is recorded, in effect and on the same slot.
 
 **Reasons, not just rank.** Every recall carries `matched_signals`, `freshness` (Surface's
 claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surface does; a stale
-claim is `unverifiable`), `review_posture` (`proposed` unless the manifest names a reviewer),
+claim that would otherwise be current is `unverifiable`, while a superseded one stays `superseded` and
+reports `freshness.stale: true`), `review_posture` (`proposed` unless the manifest names a reviewer),
 `supersession_chain` (only edges this reader may see, whose ends were recorded by `known_at`), and
 `reasons`. The sparse plain `no_answer` entry carries none of these by design: it must say nothing. A requested `claim_ids` list keeps its own order; a default scan lists claims that
 intersect the change first, then by id. Order is the only ranking, and the reasons say why each

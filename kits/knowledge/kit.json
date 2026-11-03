@@ -162,7 +162,7 @@
     {
       "id": "knowledge.living-context-runner",
       "path": "context-check/living-context.js",
-      "description": "Living Context adapter for issue #1131: runLivingContext({repoRoot, input, proposalDir}) validates the 1.1 input/result schemas, refuses a missing or unrecognised reader identity before reading any claim, reads selected git-repo Knowledge roots only at the pinned raw commit, evaluates visibility, valid time and knowledge time per reader, derives freshness with Surface claimIntrinsicExpiry, keeps or drops whole results under an explicit token budget, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory. answerLivingContext (context-check/living-context-answer.js) is the separate answer step: it sends only current recalls to a Survey SupportVerifier and abstains otherwise."
+      "description": "Living Context adapter for issue #1131: runLivingContext({repoRoot, input, proposalDir}) validates the 1.1 input/result schemas, refuses a missing or unrecognised reader identity at every root before parsing any claim, reads selected git-repo Knowledge roots only at the pinned raw commit, evaluates visibility and per-viewer supersession with Surface's derived-visibility exports (Surface 6.3.0 or later) plus valid time and knowledge time per reader, derives freshness with Surface claimIntrinsicExpiry, keeps or drops whole results under an explicit token budget, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory. answerLivingContext (context-check/living-context-answer.js) is the separate answer step: it sends only current recalls to a Survey SupportVerifier and abstains otherwise."
     },
     {
       "id": "knowledge.change-observer",
@@ -276,7 +276,7 @@
     {
       "id": "knowledge.living-context-suite",
       "path": "context-check/living-context.test.js",
-      "description": "Living Context contract suite (issue #1131): missing/blank/unknown reader refused before any read or write, hidden/absent/not-yet-known indistinguishable, a superseded claim never current (correction, succession, hidden or untimed successor), valid-time and knowledge-time as-of, Surface freshness boundary, per-result reasons, whole-result budget boundaries, Survey support-verification abstention (thin support, throwing/timing-out/malformed verifier, unreadable/empty/oversized evidence), and proposals-only containment."
+      "description": "Living Context contract suite (issue #1131): missing/blank/unknown reader refused at every root before any claim is parsed, hidden/absent/not-yet-known indistinguishable by id, Surface per-viewer supersession (a successor the reader cannot see leaves the predecessor current with no trace; a visible, recorded, same-slot, in-effect successor never does, including with hidden or future duplicates), edge visibility, valid-time and knowledge-time as-of, Surface freshness boundary, per-result reasons, whole-result budget boundaries, Survey support-verification abstention (thin support, throwing/timing-out/malformed verifier, unreadable/empty/oversized evidence, required verifier), result-validator consistency, and proposals-only containment."
     }
   ],
   "skills": [

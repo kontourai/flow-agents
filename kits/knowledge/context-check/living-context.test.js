@@ -312,6 +312,8 @@ describe("Living Context: as-of on valid time and knowledge time", () => {
     const mk = (id, extra) => ({ id, claim: `Claim ${id}.`, status: "current", authority: { path: "d.md", citation: "c" }, owning_source: { owner: "o", path: "d.md" }, affected_surfaces: ["src/x.js"], visibility: { audiences: ["engineer"] }, recorded_at: "2026-01-01T00:00:00Z", slot: "s", ...extra });
     const edge = (to) => ({ status: "superseded", superseded_by: to, supersession_kind: "correction", supersession_recorded_at: "2026-01-02T00:00:00Z" });
     const run = (claims) => { const { repo, revision } = seededRepo({ readers: ["engineer"], claims }, { docs: { "d.md": "x\n" } }); const result = runLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: claims.map((claim) => claim.id) }), write: false }); remove(repo); return result; };
+    const derived = (claims) => { const { repo, revision } = seededRepo({ readers: ["engineer"], claims }, { docs: { "d.md": "x\n" } }); const { result } = deriveLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: claims.map((claim) => claim.id) }) }); remove(repo); return result; };
+    assert.deepEqual(recallOf(derived([mk("a", edge("b")), mk("b", edge("a"))]), "a").reasons, ["supersession_cycle"], "the cycle itself, before any validator runs");
     const self = run([mk("a", edge("a"))]);
     assert.deepEqual([recallOf(self, "a").status, recallOf(self, "a").reasons], ["unverifiable", ["supersession_cycle"]]);
     const two = run([mk("a", edge("b")), mk("b", edge("a")), mk("c", {})]);
@@ -662,7 +664,7 @@ describe("Living Context: review round 1 regressions (#1572)", () => {
     mixed.claims.push(copy);
     const second = seededRepo(mixed);
     assert.equal(failure(second.repo, second.revision), undefined, "one visible and one hidden copy must not reveal the hidden one");
-    assert.equal(recallOf(run(second.repo, second.revision, { claim_ids: ["clean-control"] }), "clean-control").reason, "no_answer");
+    assert.equal(recallOf(run(second.repo, second.revision, { claim_ids: ["clean-control"] }), "clean-control").status, "current", "the visible copy stands, exactly as if no duplicate existed");
     remove(second.repo);
   });
 
@@ -917,3 +919,90 @@ describe("Living Context: review round 2 regressions (#1572)", () => {
     assert.doesNotThrow(() => assertSurfaceVisibility());
   });
 });
+
+describe("Living Context: review round 3 regressions (#1572)", () => {
+  const run = (repo, revision, overrides = {}) => runLivingContext({ repoRoot: repo, input: input(revision, overrides), write: false });
+  const failure = (repo, revision, overrides = {}) => { try { run(repo, revision, overrides); } catch (cause) { return cause; } return undefined; };
+  const mk = (id, extra) => ({ id, claim: `Claim ${id}.`, status: "current", authority: { path: "d.md", citation: "c" }, owning_source: { owner: "o", path: "d.md" }, affected_surfaces: ["src/x.js"], visibility: { audiences: ["engineer"] }, recorded_at: "2026-01-01T00:00:00Z", slot: "s", ...extra });
+  const edge = (to, extra = {}) => ({ status: "superseded", superseded_by: to, supersession_kind: "correction", supersession_recorded_at: "2026-01-02T00:00:00Z", ...extra });
+  const seed = (manifest) => seededRepo(manifest, { docs: { "d.md": "Claim a.\nClaim b.\n" } });
+
+  test("a hidden or not-yet-known duplicate of a visible successor never turns its predecessor current", async () => {
+    for (const duplicate of [{ visibility: { audiences: ["auditor"] } }, { recorded_at: "2030-01-01T00:00:00Z" }]) {
+      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [mk("a", edge("b")), mk("b", {}), mk("b", duplicate)] });
+      const request = input(revision, { claim_ids: ["a", "b"] });
+      const result = run(repo, revision, { claim_ids: ["a", "b"] });
+      assert.equal(recallOf(result, "a").status, "superseded", JSON.stringify(duplicate));
+      assert.equal(recallOf(result, "b").status, "current");
+      assert.equal(result.verdict, "pass");
+      const answer = await answerLivingContext({ repoRoot: repo, input: request });
+      assert.equal(answer.answers.find((item) => item.claim_id === "a").outcome, "abstained");
+      remove(repo);
+    }
+  });
+
+  test("two entitled copies of one id are an error; a hidden-only collision is structure and changes nothing", () => {
+    const both = seed({ readers: ["engineer"], claims: [mk("b", {}), mk("b", {})] });
+    assert.equal(failure(both.repo, both.revision, { claim_ids: ["b"] }).code, "DUPLICATE_CLAIM_ID");
+    remove(both.repo);
+    const hidden = seed({ readers: ["engineer", "auditor"], claims: [mk("a", edge("h")), mk("h", { ...edge("c"), visibility: { audiences: ["auditor"] }, supersession_visibility: { audiences: ["engineer", "auditor"] } }), mk("h", { visibility: { audiences: ["auditor"] } }), mk("c", {})] });
+    assert.equal(failure(hidden.repo, hidden.revision, { claim_ids: ["a"] }), undefined);
+    remove(hidden.repo);
+  });
+
+  test("an edge the reader may not see explains nothing: no chain link, no reason, no status change", () => {
+    const restricted = { supersession_visibility: { audiences: ["auditor"] } };
+    const at = (successorExtra, claimExtra = {}, asOf) => {
+      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [mk("a", edge("b", { ...restricted, ...claimExtra })), mk("b", successorExtra)] });
+      const result = run(repo, revision, { claim_ids: ["a"], ...(asOf ? { as_of: asOf } : {}) });
+      const baselineRepo = seed({ readers: ["engineer", "auditor"], claims: [mk("a", { status: "current" }), mk("b", successorExtra)] });
+      const baseline = run(baselineRepo.repo, baselineRepo.revision, { claim_ids: ["a"], ...(asOf ? { as_of: asOf } : {}) });
+      remove(repo, baselineRepo.repo);
+      const normalise = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
+      return [normalise(recallOf(result, "a")), normalise(recallOf(baseline, "a")), result.budget];
+    };
+    for (const [label, args] of [
+      ["inactive correction", [{ valid_time: { from: "2026-03-01T00:00:00Z", until: "2026-04-01T00:00:00Z" } }, {}, { now: NOW, valid_at: "2026-02-01T00:00:00Z" }]],
+      ["slot mismatch", [{ slot: "other" }]],
+      ["untimed edge", [{}, { supersession_recorded_at: undefined }]],
+      ["not yet recorded", [{}, {}, { now: NOW, known_at: "2026-01-01T12:00:00Z", valid_at: NOW }]],
+    ]) {
+      const [actual, baseline] = at(...args);
+      assert.equal(actual, baseline, `${label}: identical to a claim with no successor`);
+    }
+  });
+
+  test("every parser error family names the claim, never its array position", () => {
+    for (const [label, mutate] of [["identity", (claim) => { claim.id = "bad id!"; }], ["path", (claim) => { claim.authority.path = "../x"; }], ["instant", (claim) => { claim.recorded_at = "nope"; }], ["shape", (claim) => { claim.junk = 1; }]]) {
+      const messages = [0, 3].map((hidden) => {
+        const hiddenClaims = Array.from({ length: hidden }, (_, index) => mk(`h${index}`, { visibility: { audiences: ["auditor"] } }));
+        const bad = mk("own", {});
+        mutate(bad);
+        const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [...hiddenClaims, bad] });
+        const cause = failure(repo, revision);
+        remove(repo);
+        return cause.message;
+      });
+      assert.equal(messages[0], messages[1], label);
+      assert.ok(!/claims\[/.test(messages[0]), label);
+    }
+  });
+
+  test("the validator binds freshness to the stated now and ties the stale reason to the stale flag", () => {
+    const { repo, revision } = seed({ readers: ["engineer"], claims: [mk("a", { expires_at: "2027-01-01T00:00:00Z" }), mk("b", { expires_at: "2026-02-01T00:00:00Z" })] });
+    const result = run(repo, revision, { claim_ids: ["a", "b"] });
+    const forge = (mutate) => { const copy = clone(result); mutate(copy); copy.budget.used_tokens = copy.recalls.reduce((sum, recall) => sum + estimateTokens(recall), 0); return validateLivingContextResult(copy).join(" "); };
+    assert.equal(validateLivingContextResult(result).length, 0);
+    assert.match(forge((copy) => { copy.recalls[0].freshness = { as_of: "1999-01-01T00:00:00.000Z", expires_at: "2000-01-01T00:00:00.000Z", stale: false }; }), /freshness\.as_of must equal input\.as_of\.now/);
+    assert.match(forge((copy) => { copy.recalls[0].freshness.expires_at = "2027-02-31T00:00:00.000Z"; }), /real calendar instant/);
+    assert.match(forge((copy) => { copy.recalls[1].freshness.stale = false; }), /stale_at_as_of reason must match freshness\.stale/);
+    remove(repo);
+  });
+
+  test("Surface accepts a repeated audience label, so a visibility that repeats one is still visible", () => {
+    const { repo, revision } = seed({ readers: ["engineer"], claims: [mk("a", { visibility: { audiences: ["engineer", "engineer"] } })] });
+    assert.equal(recallOf(run(repo, revision, { claim_ids: ["a"] }), "a").status, "current");
+    remove(repo);
+  });
+});
+
