@@ -25,13 +25,16 @@ export const MAX_VERIFICATIONS = 64;
 export const MAX_VERIFICATION_NODES = 2_000;
 /** Entries in one request list, and in the history a run keeps (decisions, review decisions, review events). */
 export const MAX_RUN_LIST = 20_000;
+/** JSON values in a routing policy (three short lists of names). */
+export const MAX_POLICY_NODES = 20_000;
 /** What one run holds across requests (routing decisions, review decisions, review events, each), and the default cap `maxHistoryEntries` lowers. */
 export const MAX_HISTORY_ENTRIES = 1_000_000;
 /**
- * What a routing decision holds besides its claims and verification records: a baseline per claim (each visibility may list 1,024
- * audiences: about 67,000), the projection fact (member ids, gap codes, the slot), the policy, and a few hundred envelope fields.
- * This is an allowance, not a proof: `routeMemoryChange` copies the decision it produced against the bound before returning it, so
- * a decision that does not fit is refused there, with the reason, instead of being produced and then refused by every reader.
+ * What a routing decision holds besides its claims and verification records, each part bounded on its own: a baseline per claim
+ * (65 x ~1,030 for a visibility that lists 1,024 audiences = ~67,000), the projection fact (at most 1,000 entries in each of three
+ * lists, plus a slot of at most a claim's worth), the policy (`MAX_POLICY_NODES`), and a few hundred envelope fields: ~160,000 in
+ * all, inside the allowance. Every part is bounded where the Kit takes it in, so a decision the Kit produces always fits; the test
+ * `the decision bound covers the sum of its parts` pins that sum, so a bound cannot change without it.
  */
 export const MAX_ENVELOPE_NODES = 200_000;
 /** A routing decision: the claim and its peers, the verification records, and the envelope. */

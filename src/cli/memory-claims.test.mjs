@@ -499,3 +499,18 @@ test("a value nested as deep as a claim may be survives the extraction response 
   assert.deepEqual(over.claims, []);
   assert.match(over.rejected[0].reason, /too deep/);
 });
+
+test("a sitting that yields more claims than one request carries is refused whole, with the way out, not returned as a list nothing downstream accepts", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue, index) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [index], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  let pass = 0;
+  const extract = async () => {
+    const current = pass++;
+    return { proposals: Array.from({ length: 2_700 }, (_, i) => [at("subject", `service ${current}-${i}`, i), at("subjectType", "service", i), at("property", "primary database", i), at("value", `v${current}-${i}`, i), at("posture", "stated", i)]).flat() };
+  };
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 8, extract }), /yielded 21600 claims over 8 passes, more than the 20000 one request carries; distill it in chunks/);
+  pass = 0;
+  const ok = await distillMemoryClaims({ sitting, passes: 7, extract });
+  assert.equal(ok.claims.length, 18_900, "and the largest the limit admits is returned");
+});

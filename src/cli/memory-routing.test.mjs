@@ -8,7 +8,7 @@ import {
   buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
 } from "@kontourai/survey/review-workbench";
 import { memoryClaim, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
-import { MAX_DECISION_NODES, jsonSnapshot } from "@kontourai/flow-agents/memory-json";
+import { MAX_DECISION_DEPTH, MAX_DECISION_NODES, MAX_ENVELOPE_NODES, MAX_PEERS, MAX_POLICY_NODES, MAX_SNAPSHOT_DEPTH, MAX_SNAPSHOT_NODES, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, jsonSnapshot } from "@kontourai/flow-agents/memory-json";
 import { memoryAccumulationQuery } from "@kontourai/flow-agents/memory-accumulation";
 import {
   DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
@@ -918,12 +918,19 @@ test("the largest decision the Kit can produce is one it can read: claims at the
   assert.equal(presentMemoryClaims([claim], { routing: [decision] }).presented.length, 1);
 });
 
-test("a decision too large to be read back is refused when it is produced, with the reason", () => {
+test("a routing policy is bounded on its own, so no part of a decision can crowd out the rest", () => {
   const claim = make({ value: "PostgreSQL 16" });
-  const policy = { multiValued: new Array(1_700_000).fill("not-this-property") };
-  assert.throws(() => routeMemoryChange(change(claim, { accumulation: null }), policy), /too large to be recorded or presented/);
+  const near = { multiValued: new Array(19_900).fill("not-this-property") };
+  assert.doesNotThrow(() => routeMemoryChange(change(claim, { accumulation: null }), near));
+  assert.throws(() => routeMemoryChange(change(claim, { accumulation: null }), { multiValued: new Array(20_100).fill("x") }), /routing policy: too large/);
+  assert.throws(() => routeMemoryChange(change(claim, { accumulation: null }), Object.defineProperty({}, "minPasses", { enumerable: true, get: () => 2 })), /accessor/, "a getter on the policy is refused, not run");
+  assert.throws(() => routeMemoryChange(change(claim, { accumulation: null }), new Proxy({}, {})), /Proxy/);
+  assert.throws(() => routeMemoryChange(change(claim, { accumulation: null }), { minAgreemnt: 1 }), /fields it does not define: minAgreemnt/, "a misspelt field is an error, not silently ignored");
+  assert.throws(() => routeMemoryChange(change(claim, { accumulation: null }), { retained: { callerOwned: true } }), /fields it does not define/);
+  const kept = { consequential: { properties: ["primary database"] } };
+  const decision = routeMemoryChange(change(make({ value: "x", supersedes: [{ claimId: make().id, kind: "succession", reason: "r" }] }), { current: [make()], accumulation: null }), kept);
+  assert.notEqual(decision.policy.consequential, kept.consequential, "the decision holds a copy, not the caller's object");
 });
-
 test("a verification record is bounded: a record padded past its allowance is refused at the door, one at the allowance is not", () => {
   const claim = make({ value: "PostgreSQL 16" });
   const genuine = verification(claim, "supported");
@@ -940,4 +947,17 @@ test("figures derive over a run's whole history, which may be longer than any on
   assert.doesNotThrow(() => deriveMemoryRunMetrics({ runId: "r", decisions: [], reviewDecisions }));
   const reviewEvents = Array.from({ length: 20_001 }, (_, i) => ({ kind: "ReviewSessionEvent", metadata: { name: `e${i}` }, spec: { sessionName: "s", sequence: i, eventType: "item-selected", occurredAt: "2026-11-02T10:00:00.000Z" } }));
   assert.doesNotThrow(() => deriveMemoryRunMetrics({ runId: "r", decisions: [], reviewEvents }));
+});
+
+test("the decision bound covers the sum of its parts: each part is bounded where it is taken in, and the parts add up to less than the bound", () => {
+  const claims = (MAX_PEERS + 1) * MAX_SNAPSHOT_NODES;
+  const verifications = MAX_VERIFICATIONS * MAX_VERIFICATION_NODES;
+  const baselines = (MAX_PEERS + 1) * (1024 + 6);            // one per claim, each visibility listing 1,024 audiences (ref, kind, a list)
+  const fact = 3 * 1000 + 2 * (MAX_PEERS + 1) + MAX_SNAPSHOT_NODES; // three lists of at most 1,000, member ids, a slot of at most a claim's worth
+  const policy = MAX_POLICY_NODES;
+  const fixed = 2_000;                                       // reasons, evaluated, ids, schema, changeId, the input's own fields
+  const total = claims + verifications + baselines + fact + policy + fixed;
+  assert.ok(total <= MAX_DECISION_NODES, `${total} <= ${MAX_DECISION_NODES}`);
+  assert.ok(MAX_DECISION_NODES - total > 10_000, "with room to spare, not by a margin of a few values");
+  assert.deepEqual([MAX_PEERS, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, MAX_POLICY_NODES, MAX_SNAPSHOT_NODES, MAX_ENVELOPE_NODES, MAX_DECISION_DEPTH, MAX_SNAPSHOT_DEPTH], [64, 64, 2_000, 20_000, 20_000, 200_000, 40, 32], "the parts are pinned");
 });

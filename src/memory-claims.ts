@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import { canonicalClaimKey } from "@kontourai/surface";
-import { MAX_DECISION_DEPTH, MAX_EXTRACTION_RESULT_NODES, jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
+import { MAX_DECISION_DEPTH, MAX_EXTRACTION_RESULT_NODES, MAX_RUN_LIST, jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
 // Type-only: proves the schema below is an ordinary Traverse TargetFieldSchema without a runtime dependency.
 import type { TargetFieldSchema } from "@kontourai/traverse";
 
@@ -490,5 +490,9 @@ export async function distillMemoryClaims(input: {
     }
   }
   const claims = [...found.values()].map(entry => entry.claim);
+  // Every pass may find different claims, so a long sitting over many passes can return more than any one request list carries
+  // (routing, recall and the evidence recorders each take at most MAX_RUN_LIST). It is refused here, whole, not cut short: split
+  // the sitting into chunks.
+  if (claims.length > MAX_RUN_LIST) throw new MemoryClaimError("invalid", `this sitting yielded ${claims.length} claims over ${passes} passes, more than the ${MAX_RUN_LIST} one request carries; distill it in chunks`);
   return { claims, agreement: Object.fromEntries([...found.values()].map(entry => [entry.claim.id, { passes, agreeing: entry.passes.size }])), rejected, warnings };
 }

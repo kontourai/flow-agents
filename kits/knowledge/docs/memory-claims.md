@@ -158,9 +158,10 @@ smaller, so an artifact the Kit makes is never one its own readers refuse:
 | What one run holds across requests | 1,000,000 routing decisions, review decisions and review events each; a host may lower it with `maxHistoryEntries` |
 
 `assembleMemoryClaims` rejects, with the reason, a claim that exceeds the claim bounds, so `distillMemoryClaims` never returns one
-that routing or recall would refuse, and `routeMemoryChange` copies the decision it just produced against the decision bound, so a
-decision that would not fit (a very large policy, say) is refused when produced, with the reason, instead of being recorded and
-then refused by every reader. A request that would take a run past its history limit is refused before anything is written (see Flow evidence).
+that routing or recall would refuse, and every other part of a decision is bounded where it is taken in (peers, verification records, the policy at
+20,000 values, projection lists at 1,000 entries, a visibility at 1,024 audiences), so a decision the Kit produces always fits the
+decision bound; a test pins that the parts sum to less than it. `recomputeMemoryRouting` applies the same per-item budgets to what a
+decision embeds, so a hand-built decision with a claim or verification record the Kit could not have produced is not recomputable. A request that would take a run past its history limit is refused before anything is written (see Flow evidence).
 Each bound is per item: there is no aggregate budget for a whole request or a whole batch, and no byte budget for strings. A host
 that accepts untrusted workloads needs those limits itself. The largest decision the Kit can produce copies in well under a second.
 

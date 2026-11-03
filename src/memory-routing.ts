@@ -18,7 +18,7 @@ import {
   type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import { memoryAccumulationFact, memoryAccumulationMembers, readMemoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
-import { MAX_DECISION_DEPTH, MAX_DECISION_NODES, MAX_HISTORY_ENTRIES, MAX_PEERS, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
+import { MAX_DECISION_DEPTH, MAX_DECISION_NODES, MAX_HISTORY_ENTRIES, MAX_PEERS, MAX_POLICY_NODES, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
 import {
   MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryFieldKey, memorySlotKey, readMemoryVisibility,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
@@ -167,11 +167,19 @@ export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
 
 const digestOf = (value: unknown) => `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 
-export function normalizeMemoryRoutingPolicy(policy: Partial<MemoryRoutingPolicy> = {}): MemoryRoutingPolicy {
+const POLICY_KEYS = new Set(["version", "minPasses", "minAgreement", "multiValued", "consequential"]);
+export function normalizeMemoryRoutingPolicy(policyInput: Partial<MemoryRoutingPolicy> = {}): MemoryRoutingPolicy {
+  // Copied once as plain JSON (no getter runs, no caller-owned object is kept), and only the policy's own fields are kept: the
+  // decision schema allows no others, so an unknown key is refused rather than carried into a recorded decision.
+  const policy = (policyInput === undefined ? {} : jsonSnapshot(policyInput, "routing policy", { maxNodes: MAX_POLICY_NODES })) as Partial<MemoryRoutingPolicy>;
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) throw new MemoryClaimError("invalid", "routing policy is malformed");
+  const unknown = Object.keys(policy).filter(key => !POLICY_KEYS.has(key));
+  if (unknown.length) throw new MemoryClaimError("invalid", `routing policy has fields it does not define: ${unknown.join(", ")}`);
+  const consequential = (policy.consequential ?? {}) as Partial<MemoryRoutingPolicy["consequential"]>;
   const merged: MemoryRoutingPolicy = {
     ...DEFAULT_MEMORY_ROUTING_POLICY, ...policy,
     multiValued: [...(policy.multiValued ?? DEFAULT_MEMORY_ROUTING_POLICY.multiValued)],
-    consequential: { properties: [...(policy.consequential?.properties ?? [])], subjectTypes: [...(policy.consequential?.subjectTypes ?? [])] },
+    consequential: { properties: [...(consequential.properties ?? [])], subjectTypes: [...(consequential.subjectTypes ?? [])] },
   };
   const names = [...merged.multiValued, ...merged.consequential.properties, ...merged.consequential.subjectTypes];
   if (merged.version !== MEMORY_ROUTING_VERSION || !Number.isInteger(merged.minPasses) || merged.minPasses < 1
@@ -325,11 +333,6 @@ export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<Me
     changeId: input.type === "claim" ? input.claim.id : input.proposalRef,
     changeType: input.type, ...evaluateMemoryRouting(input, policy), input, policy,
   };
-  // What the Kit produces, it must be able to read back: every reader copies a decision against these bounds, so one that does not
-  // fit (a very large policy, say) is refused here with the reason rather than produced and then refused by recompute, recording and recall.
-  try { jsonSnapshot(decision, "routing decision", DECISION_BOUNDS); } catch (error) {
-    throw new MemoryClaimError("invalid", `the routing decision for this change is too large to be recorded or presented: ${error instanceof Error ? error.message : String(error)}`);
-  }
   return decision;
 }
 
@@ -346,6 +349,12 @@ function assertStoredInputShape(input: MemoryRoutingInput): void {
   }
   if (input.type !== "claim") bad("unknown input type");
   if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
+  // The same item budgets routing applies: a decision is recomputable only if the Kit could have produced it, so a claim that could
+  // not be routed or presented, or a verification record bigger than a record is, is not admitted by a rehashed hand-built decision.
+  try {
+    for (const claim of [input.claim, ...input.current]) jsonSnapshot(claim, "embedded claim");
+    for (const record of input.verifications) jsonSnapshot(record, "embedded verification record", { maxNodes: MAX_VERIFICATION_NODES });
+  } catch (error) { bad(error instanceof Error ? error.message : "an embedded item is over its budget"); }
   if (input.verifications.length > MAX_VERIFICATIONS) bad(`more than ${MAX_VERIFICATIONS} verification records`);
   if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
   let fact: MemoryAccumulationFact | null = null;

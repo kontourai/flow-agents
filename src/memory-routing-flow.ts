@@ -146,7 +146,7 @@ async function assertMetricsGate(where: Location): Promise<void> {
 async function preflight(where: Location, limit: number, plan: WritePlan): Promise<void> {
   await assertMetricsGate(where);
   const superseded = new Set(plan.supersede ?? []);
-  const live = (await readMemoryRoutingEvidence(where.runId, where.cwd)).filter(record => !record.superseded && !superseded.has(record.evidenceId));
+  const live = (await readLiveRoutingRecords(where.runId, where.cwd)).filter(record => !superseded.has(record.evidenceId));
   const held = validateRoutingRecords(where.runId, live);
   for (const decision of plan.addDecisions ?? []) {
     const check = recomputeMemoryRouting(decision);
@@ -154,12 +154,12 @@ async function preflight(where: Location, limit: number, plan: WritePlan): Promi
     held.add(decision.id);
   }
   if (held.size > limit) throw new MemoryClaimError("invalid", `this run would hold ${held.size} routing decisions, over its limit of ${limit}; nothing was recorded`);
+  // Review history counts against the limit on every write, whether or not this request adds to it: a request that records routing
+  // for a run already over its (possibly lowered) limit is as unfit as one that adds the review state that took it there.
   const known = await readReview(where.runId, where.cwd); // validated on read
-  if (plan.review) {
-    const fresh = freshReview(known, plan.review);
-    if (known.decisions.length + fresh.decisions.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review decisions; nothing was recorded`);
-    if (known.events.length + fresh.events.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review events; nothing was recorded`);
-  }
+  const fresh = plan.review ? freshReview(known, plan.review) : { decisions: [], events: [] };
+  if (known.decisions.length + fresh.decisions.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review decisions; nothing was recorded`);
+  if (known.events.length + fresh.events.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review events; nothing was recorded`);
 }
 
 /**
@@ -260,11 +260,12 @@ async function recordMetrics(input: Location & { metrics: MemoryRunMetrics }): P
 
 export interface StoredMemoryEvidence<T> { evidenceId: string; superseded: boolean; value: T }
 
-async function readStored<T>(runId: string, cwd: string | undefined, kind: string): Promise<StoredMemoryEvidence<T>[]> {
+async function readStored<T>(runId: string, cwd: string | undefined, kind: string, liveOnly = false): Promise<StoredMemoryEvidence<T>[]> {
   const run = await loadRun(runId, cwd);
   const out: StoredMemoryEvidence<T>[] = [];
   for (const entry of run.manifest.evidence as FlowEvidenceEntry[]) {
     if (entry.requested_kind !== kind || typeof entry.stored_path !== "string") continue;
+    if (liveOnly && !isLive(entry)) continue; // the audit reader verifies every file; the live paths neither read nor depend on superseded ones
     const bytes = await readFile(path.join(run.dir, entry.stored_path));
     if (sha256(bytes) !== entry.sha256) throw new MemoryClaimError("invalid", `evidence ${entry.id} no longer matches its recorded digest`);
     out.push({ evidenceId: entry.id, superseded: !isLive(entry), value: JSON.parse(bytes.toString("utf8")) as T });
@@ -274,6 +275,8 @@ async function readStored<T>(runId: string, cwd: string | undefined, kind: strin
 
 export const readMemoryRoutingEvidence = (runId: string, cwd?: string) => readStored<MemoryRoutingRecord>(runId, cwd, MEMORY_ROUTING_EVIDENCE_KIND);
 export const readMemoryMetricsEvidence = (runId: string, cwd?: string) => readStored<MemoryRunMetrics>(runId, cwd, MEMORY_METRICS_EVIDENCE_KIND);
+/** The routing records everything derives from: the live ones only, so a damaged superseded file cannot block the way out of a bad run. */
+const readLiveRoutingRecords = (runId: string, cwd?: string) => readStored<MemoryRoutingRecord>(runId, cwd, MEMORY_ROUTING_EVIDENCE_KIND, true);
 
 /** The run's current metrics: the last live entry, so two live entries from a cross-process race still read as one answer. */
 export async function readLatestMemoryMetrics(runId: string, cwd?: string): Promise<StoredMemoryEvidence<MemoryRunMetrics> | undefined> {
@@ -288,8 +291,7 @@ export async function readLatestMemoryMetrics(runId: string, cwd?: string): Prom
  */
 async function storedDecisions(runId: string, cwd?: string): Promise<{ evidenceId: string; decision: MemoryRoutingDecision }[]> {
   const out: { evidenceId: string; decision: MemoryRoutingDecision }[] = [];
-  for (const { evidenceId, superseded, value } of await readMemoryRoutingEvidence(runId, cwd)) {
-    if (superseded) continue;
+  for (const { evidenceId, value } of await readLiveRoutingRecords(runId, cwd)) {
     for (const decision of value.decisions) out.push({ evidenceId, decision });
   }
   return out;
@@ -330,10 +332,14 @@ function validateRoutingRecords(runId: string, records: readonly { value: Memory
 export async function recomputeRecordedMemoryRouting(runId: string, cwd?: string): Promise<{ decisions: number; mismatches: { decisionId: string; mismatches: string[] }[] }> {
   const mismatches: { decisionId: string; mismatches: string[] }[] = [];
   const ids = new Set<string>();
-  for (const { decision } of await storedDecisions(runId, cwd)) {
-    ids.add(decision.id); // every stored payload is checked, repeats included
-    const check = recomputeMemoryRouting(decision);
-    if (!check.ok) mismatches.push({ decisionId: decision.id, mismatches: check.mismatches });
+  for (const { evidenceId, value } of await readLiveRoutingRecords(runId, cwd)) {
+    // The record itself first: a decision can recompute inside a record that belongs to another run or a version we do not know.
+    if (value.schema_version !== MEMORY_ROUTING_VERSION || value.runId !== runId) mismatches.push({ decisionId: `(record ${evidenceId})`, mismatches: ["the record belongs to another run or an unsupported version"] });
+    for (const decision of value.decisions) {
+      ids.add(decision.id); // every stored payload is checked, repeats included
+      const check = recomputeMemoryRouting(decision);
+      if (!check.ok) mismatches.push({ decisionId: decision.id, mismatches: check.mismatches });
+    }
   }
   return { decisions: ids.size, mismatches };
 }
