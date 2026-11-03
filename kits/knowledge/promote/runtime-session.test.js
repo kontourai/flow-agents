@@ -956,6 +956,13 @@ describe("review round 1 regressions (PR #1575)", () => {
     // prose longer than the shift a wrong mask length would cause: it must come through byte for byte
     const prose = "this sentence is ordinary prose and must not be touched. ".repeat(6);
     assert.equal(scrubResidueText(`${"\u{1F600}".repeat(101)} ${prose}mail a@b.example.com`), `<BLOB> ${prose}mail <EMAIL>`);
+    // a key past the "@" but inside a span a quoted value extended keeps its own value
+    const witness = ["Zebra", "Mango", "7319"].join("");
+    for (const q of ['"', "'"]) {
+      const out = scrubResidueText(`curl https://app:token=password=${q}correct@db.example.com/app?api_key${q}=${witness}`);
+      assert.equal(out.includes(witness), false, q);
+      assert.equal(scrubResidueText(out), out, `${q}: idempotent`);
+    }
     // a nested QUOTED value is one string, even when it holds the "@" that opens the host
     const nestedQuoted = scrubResidueText(`https://u:token=password="abc@host/path ${canary}"`);
     assert.equal(nestedQuoted.includes(canary), false);
