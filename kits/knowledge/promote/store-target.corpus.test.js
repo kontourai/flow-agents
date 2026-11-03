@@ -42,7 +42,8 @@ test('identical batch retries reuse receipts and changed content conflicts', asy
   const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(base, 'coordination'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock, allowPurge: true });
   const candidates = [{ title: 'First', body: 'One', category: 'memory.learning' }, { title: 'Second', body: 'Two', category: 'memory.learning' }];
   let calls = 0;
-  const unreliable = { proposeCreate: async (...args) => { const id = await store.proposeCreate(...args); if (++calls === 2) throw new Error('response lost after commit'); return id; } };
+  const attemptedKeys = [];
+  const unreliable = { proposeCreate: async (...args) => { attemptedKeys.push(args[3].requestKey); const id = await store.proposeCreate(...args); if (++calls === 2) throw new Error('response lost after commit'); return id; } };
   const options = { target: 'store', residue, candidates, proposerId: 'distiller', root, rootName: 'memory', store: unreliable, registerRoot: async () => {} };
   let firstId;
   await assert.rejects(runPromote(options), (error) => { firstId = error.completedProposals[0]; assert.equal(error.failedCandidateIndex, 1); return /unconfirmed/.test(error.message); });
@@ -64,7 +65,7 @@ test('identical batch retries reuse receipts and changed content conflicts', asy
   assert.equal((await store.listByType('raw')).length, 0);
   const created = await store.applyCreate(retried.proposals[1], 'independent-reviewer');
   await store.purge([created], { agent: 'independent-reviewer', rationale: 'erase' });
-  await assert.rejects(runPromote({ ...options, store }), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 1 && /retired/.test(error.cause.message) && /^knowledge\.promote:[a-f0-9]{64}$/.test(error.requestKey));
+  await assert.rejects(runPromote({ ...options, store }), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 1 && /retired/.test(error.cause.message) && error.requestKey === attemptedKeys[1] && error.requestKey !== attemptedKeys[0]);
   assert.equal((await store.listByType('raw')).length, 0);
 });
 

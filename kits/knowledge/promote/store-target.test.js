@@ -71,14 +71,16 @@ test('registration failure stops before Corpus; an uncertain proposal failure is
   const second = setup();
   second.opts.candidates = [...candidates, ...candidates];
   let attempts = 0;
-  second.opts.store.proposeCreate = async () => { if (++attempts === 1) return 'first'; throw Object.assign(new Error('lost response'), { code: 'ETIMEDOUT' }); };
+  const attemptedKeys = [];
+  second.opts.store.proposeCreate = async (_candidate, _proposer, _evidence, options) => { attemptedKeys.push(options.requestKey); if (++attempts === 1) return 'first'; throw Object.assign(new Error('lost response'), { code: 'ETIMEDOUT' }); };
   await assert.rejects(runPromote(second.opts), (error) => {
     assert.match(error.message, /unconfirmed/);
     assert.equal(error.code, undefined);
     assert.equal(error.cause.code, 'ETIMEDOUT');
     assert.deepEqual(error.completedProposals, ['first']);
     assert.equal(error.failedCandidateIndex, 1);
-    assert.match(error.requestKey, /^knowledge\.promote:[a-f0-9]{64}$/);
+    assert.equal(error.requestKey, attemptedKeys[1]);
+    assert.notEqual(error.requestKey, attemptedKeys[0]);
     return true;
   });
   assert.equal(attempts, 2);
