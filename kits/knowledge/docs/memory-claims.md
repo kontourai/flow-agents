@@ -124,6 +124,29 @@ Pass the result to Survey's `createEntityProposal`, route the proposal with `rou
 `runMemoryRouting` returns the proposals it sent to review for the host to turn into Survey review items.
 Detecting which subjects to propose is the host's (or a later lane's) candidate generation, not this PR's.
 
+### Who may promote a routed claim
+
+**A routed claim is promoted to reviewed only by a Survey review outcome from a human reviewer** (owner decision, 2026-11-03).
+That covers every routed claim: a contradiction, a consequential supersession, an entity merge or split, a visibility widening, a
+low-agreement claim. An outcome from an `agent` or `rule` reviewer, or from a reviewer whose kind is not attested, may *annotate*
+the item and must not change it: the claim stays `proposed` and routed, whatever the outcome says (accept, correct, or reject: an
+agent cannot withhold a claim either). A claim routing did not flag stays `proposed` until reviewed, and any reviewer's decision
+applies to it. A claim whose routing is not known (no routing record is passed to recall) is **treated as routed**, so unknown fails
+closed. Among the human decisions on an item the latest by instant stands; a later agent decision never displaces an earlier human
+one, and an earlier agent decision never blocks a later human one.
+
+The kind is `reviewerKind: "human" | "agent" | "rule"` on the Survey decision, **asserted by the host that authenticated the reviewer,
+never by the reviewer** (kontourai/survey#359). Survey 8.3.0 does not carry it yet, so `memoryReviewerKind(decision)` is the one
+documented shim: it reads the decision's own `spec.reviewerKind` as data and fails closed. A missing field (a record made before
+survey#359), an unknown value, a value that is not text, an inherited or getter-defined one, or one nested under `actor` reads as
+`unattested`, and `unattested` is not human. Stored review state with a `reviewerKind` that is not one of the three is refused, as
+Survey will refuse it. When Survey releases the field, the shim is the function to repoint; if it lands somewhere other than
+`spec.reviewerKind`, routed claims stay unpromoted until it is repointed, and nothing is promoted wrongly, so survey#359 is not a
+MERGE-AFTER for this change. `memoryDecisionMayPromote(decision, {routed})` is the check a host makes before passing a decision to
+Survey's `entityOutcomeFromDecision` (entity review is Survey's; the Kit does not call it). Each routed claim's review item carries the
+label `memory.reviewer: human-required`, so a workbench can show what the item needs. Recall reports the annotations it ignored
+(`review.annotations`) and metrics count them (`reviewer.annotated`); an item with only annotations is `pending`.
+
 ### Data the Kit records is plain data
 
 Everything the Kit validates and then records or presents is read once and copied as plain JSON, and the copy is what is
@@ -229,14 +252,15 @@ this evidence. It is recorded and recomputable, not gated.
   and `routedByRule`;
 - `reviewer`: `confirmed`, `corrected` (accepted with an edit), `rejected` (rejected,
   or the current value kept), `held` (could not confirm), `pending` (routed, no
-  decision yet), `unmatched` (a decision for something this run did not route), and
+  decision yet, or only annotations), `unmatched` (a decision for something this run did not route), `annotated` (decisions by an
+  agent, a rule or an unattested reviewer on a routed item: they promote nothing and leave it pending), and
   `defectsCaught` = `corrected + rejected`;
 - `reviewSeconds`: selection-to-submission dwell from Survey session events,
   summed over decisions that have both events, with `reviewTimedDecisions` saying how
   many. It is an upper bound on attention and is `null`, never estimated, without events;
 - `reviewSecondsPerCaughtDefect`.
 
-The latest decision for an item stands, by instant (`11:00+02:00` is before `10:00Z`; an exact tie keeps the later
+The latest *human* decision for a routed item stands (see Who may promote a routed claim), by instant (`11:00+02:00` is before `10:00Z`; an exact tie keeps the later
 entry; a decision with an unreadable time never beats one with a time), and a change routed twice in one run counts
 once, with its later decision. Only a `verified` or `assumed` decision confirms; `proposed` (the workbench's
 "could not confirm") and anything Survey does not define is held. Review time is the dwell of the session that
@@ -257,7 +281,8 @@ in front of a reader. Every presented claim carries `posture` and a review label
 (`unreviewed`, `in-review`, `confirmed`, `corrected`), and `text` begins with both:
 `[hypothetical · unreviewed] widget service: sharding technology = Citus`. A claim
 with no posture, a claim whose id no longer matches its content, and a claim review
-rejected are *withheld and reported*, never presented bare. A claim a reviewer corrected
+rejected are *withheld and reported*, never presented bare. Only a human reviewer's decision promotes, corrects or withholds a
+routed claim; an agent's or rule's is reported in `review.annotations` and changes nothing. A claim a human reviewer corrected
 is presented with the reviewer's value (`value`), the extracted one stays in
 `extractedValue`, and a reviewer's decision applies whether or not the claim's routing
 record is passed in.

@@ -78,7 +78,7 @@ _Avoid_: fact (a claim may be hypothetical or retracted), memory record when con
 
 ### Routed Review
 
-The Knowledge Kit's policy for distilled memory: a change no rule flags is recorded as `proposed` (recallable, labelled unreviewed), and a change a rule flags (contradiction, consequential supersession, entity merge/split, low extraction agreement, visibility widening) also becomes a Survey review item. Each routing decision embeds the input and policy it was computed from and is recorded as Flow evidence, so it can be recomputed. Review never blocks recall. See kits/knowledge/docs/memory-claims.md.
+The Knowledge Kit's policy for distilled memory: a change no rule flags is recorded as `proposed` (recallable, labelled unreviewed), and a change a rule flags (contradiction, consequential supersession, entity merge/split, low extraction agreement, visibility widening) also becomes a Survey review item. Each routing decision embeds the input and policy it was computed from and is recorded as Flow evidence, so it can be recomputed. Review never blocks recall. A routed claim is promoted to reviewed only by a Survey outcome from a human reviewer (`reviewerKind: "human"`, attested by the host); an agent or rule outcome annotates and changes nothing. See kits/knowledge/docs/memory-claims.md.
 
 ### Knowledge Promote Sub-Flow
 

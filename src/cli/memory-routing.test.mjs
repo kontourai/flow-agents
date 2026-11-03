@@ -1139,3 +1139,17 @@ test("an entity merge or split is promoted only by a human too: the proposal's r
   assert.equal(memoryDecisionMayPromote(spec("agent")), false, "the helper a host asks before calling Survey's entityOutcomeFromDecision");
   assert.equal(memoryDecisionMayPromote(spec("human")), true);
 });
+
+test("metrics: an item no routed change made is unmatched only if a decision may stand for it, so an agent's decision on an unknown item is an annotation", () => {
+  const unroutedClaim = make({ value: "PostgreSQL 17", property: "other property" });
+  const unrouted = routeMemoryChange(change(unroutedClaim, { accumulation: null }));
+  assert.equal(unrouted.outcome, "proposed");
+  const raw = (itemName, kind, name) => ({ apiVersion: "survey.kontourai.io/v1alpha1", kind: "ReviewDecision", metadata: { name }, spec: { reviewItemName: itemName, candidateId: `${itemName}.proposed`, status: "verified", reviewedAt: "2026-11-02T10:00:00.000Z", ...(kind ? { reviewerKind: kind } : {}) } });
+  const known = memoryReviewItemName(unroutedClaim.id), stranger = "memory-change.not-in-this-run";
+  const at = decisions => deriveMemoryRunMetrics({ runId: "r", decisions: [unrouted], reviewDecisions: decisions }).reviewer;
+  // The run evaluated it and found nothing to flag: any reviewer's decision is about an item this run did not route.
+  for (const kind of ["agent", "rule", "human", undefined]) assert.deepEqual([at([raw(known, kind, `k-${kind}`)]).unmatched, at([raw(known, kind, `k-${kind}`)]).annotated], [1, 0], `known unrouted, ${kind}`);
+  // The run never saw it: not known to be unrouted, so only a human's decision stands for it.
+  assert.deepEqual([at([raw(stranger, "human", "s-human")]).unmatched, at([raw(stranger, "human", "s-human")]).annotated], [1, 0], "unknown, human");
+  for (const kind of ["agent", "rule", undefined]) assert.deepEqual([at([raw(stranger, kind, `s-${kind}`)]).unmatched, at([raw(stranger, kind, `s-${kind}`)]).annotated], [0, 1], `unknown, ${kind}`);
+});
