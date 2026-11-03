@@ -5,7 +5,7 @@ import { memoryClaim, MemoryClaimError } from "@kontourai/flow-agents/memory-cla
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { canonicalJson } from "@kontourai/relay";
-import { recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
+import { buildMemoryReviewItem, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import { distillFixtureSitting, readJson } from "./memory-claims-support.mjs";
 
 const fixture = () => readJson(import.meta.dirname, "fixtures", "memory-claims", "accumulation.json");
@@ -205,4 +205,82 @@ test("with the real Surface projection, every committed fact is reproduced and t
     assert.deepEqual(bundle.claims.map(claim => claim.id).sort(), expected.map(claim => claim.id).sort(), name);
   }
   assert.equal(checked, 9);
+});
+
+// --- review round 6 ---------------------------------------------------------------------------------------------------
+
+test("a rival Surface joined through an admitted identity mapping is part of the slot even though its raw subject differs", async () => {
+  const { c0 } = await claims();
+  const claim = byProperty(c0, "primary database");
+  // Surface joins subjects an admitted identity mapping declares equivalent, so a rival it names can carry another raw subject.
+  const rival = memoryClaim({ ...claim, subject: { type: "company", id: "widget-service-gmbh" }, value: "MySQL 8", source: { ...claim.source, ref: "elsewhere" }, visibility: { kind: "restricted", audiences: ["user:other"] } });
+  const fact = { outcome: "contested", candidateClaimIds: [claim.id, rival.id].sort(), gapCodes: ["contested-value"] };
+  const decision = routeMemoryChange({ type: "claim", claim, current: [rival], agreement: { passes: 2, agreeing: 2 }, accumulation: fact, sourceVisibility: claim.visibility });
+  assert.deepEqual(decision.reasons.map(reason => reason.rule), ["contested-by-accumulation", "visibility-widening"], "contested, and the rival's narrower visibility bounds the claim");
+  assert.deepEqual(decision.input.current.map(other => other.id), [rival.id]);
+  assert.equal(recomputeMemoryRouting(decision).ok, true);
+  assert.equal(buildMemoryReviewItem(decision).spec.candidates.length, 2, "the rival is the item's current candidate");
+  // A claim the projection does NOT name is still dropped when it is not in the slot.
+  const stranger = memoryClaim({ ...claim, subject: { type: "company", id: "someone-else" }, value: "x", source: { ...claim.source, ref: "stranger" } });
+  const quiet = routeMemoryChange({ type: "claim", claim, current: [rival, stranger], agreement: { passes: 2, agreeing: 2 }, accumulation: fact, sourceVisibility: claim.visibility });
+  assert.deepEqual(quiet.input.current.map(other => other.id), [rival.id]);
+});
+
+test("an undefined field and an absent one are the same claim and map to the same Surface claim", async () => {
+  const { c0 } = await claims();
+  const a = c0[0];
+  const withUndefined = memoryClaim({ ...a, source: { ...a.source, role: undefined } });
+  const without = memoryClaim({ ...a, source: Object.fromEntries(Object.entries(a.source).filter(([key]) => key !== "role")) });
+  assert.equal(withUndefined.id, without.id, "the premise: one Kit id");
+  const x = memoryClaimToAccumulationClaim(withUndefined), y = memoryClaimToAccumulationClaim(without);
+  assert.deepEqual(x, y);
+  assert.equal(JSON.stringify(x), JSON.stringify(y));
+  assert.equal(Object.hasOwn(x.metadata.memory.source, "role"), false);
+  const holey = memoryClaim({ ...a, value: { k: undefined, n: 1 } });
+  assert.deepEqual(memoryClaimToAccumulationClaim(holey).value, { n: 1 });
+  assert.throws(() => memoryClaimToAccumulationClaim(memoryClaim({ ...a, value: [undefined] })), MemoryClaimError, "an undefined list entry has no JSON form to map");
+});
+
+test("a slot Surface would refuse is refused here: blank or padded subject ids, claim types and fields", async () => {
+  const { c0 } = await claims();
+  const a = c0[0];
+  for (const [what, over] of [["padded subject id", { subject: { ...a.subject, id: " x " } }], ["padded claim type", { claimType: " knowledge.memory-claim" }], ["blank claim type", { claimType: " " }], ["blank subject type", { subject: { ...a.subject, type: "" } }]]) {
+    const bad = memoryClaim({ ...a, ...over });
+    assert.throws(() => memoryClaimToAccumulationClaim(bad), MemoryClaimError, what);
+    assert.throws(() => memoryAccumulationQuery(bad, "2026-11-02T00:00:00Z"), MemoryClaimError, what);
+  }
+});
+
+test("a very long replacement chain is carried without exhausting the stack", () => {
+  const base = { subject: { type: "service", id: "w" }, claimType: "knowledge.memory-claim", property: "db", speaker: "user", posture: "stated", source: { ref: "s", locator: "chars:0-1", excerpt: "x", observedAt: "2026-10-28T09:00:00.000Z" } };
+  let previous = memoryClaim({ ...base, value: "v0" });
+  const chain = [previous];
+  for (let i = 1; i < 6000; i++) { previous = memoryClaim({ ...base, value: `v${i}`, supersedes: [{ claimId: previous.id, kind: "succession", reason: "r" }] }); chain.push(previous); }
+  assert.equal(memoryAccumulationClaims([previous], chain).length, 6000);
+});
+
+test("a result is read once, as data: a getter that changes its answer is refused, and a real-shaped result with extra fields is read", () => {
+  let reads = 0;
+  const flipping = { candidateClaimIds: ["a"], gapCodes: [] };
+  Object.defineProperty(flipping, "outcome", { enumerable: true, get() { return ++reads <= 3 ? "current" : "contested"; } });
+  assert.throws(() => memoryAccumulationFact(flipping), MemoryClaimError);
+  assert.equal(reads, 0, "never called");
+  const real = { outcome: "contested", reason: undefined, candidateClaimIds: ["b", "a"], gapCodes: ["contested-value"], visibilityByClaimId: new Map(), supersessions: [], inputTrace: [{ any: "thing" }], statusByClaimId: Object.create(null) };
+  assert.deepEqual(memoryAccumulationFact(real), { outcome: "contested", candidateClaimIds: ["a", "b"], gapCodes: ["contested-value"] });
+  const lying = { outcome: "contested", gapCodes: [] };
+  Object.defineProperty(lying, "candidateClaimIds", { enumerable: true, get() { return ["a", "b"]; } });
+  assert.throws(() => memoryAccumulationFact(lying), MemoryClaimError, "an accessor is refused even when it answers well");
+  let length = 0;
+  const shifting = new Proxy(["a", "b"], { get(t, key, r) { if (key === "length") return ++length === 1 ? 2 : 1; return Reflect.get(t, key, r); } });
+  assert.throws(() => memoryAccumulationFact({ outcome: "contested", candidateClaimIds: shifting, gapCodes: [] }), MemoryClaimError, "a list that changes length while read");
+});
+
+test("an instant that leaves the years 0000-9999 once converted to UTC is not an instant", async () => {
+  const { c0 } = await claims();
+  const a = c0[0];
+  const { memoryInstant } = await import("@kontourai/flow-agents/memory-claims");
+  for (const [text, ok] of [["0000-01-01T00:00:00Z", true], ["9999-12-31T23:59:59.999Z", true], ["0000-01-01T00:00:00+02:00", false], ["9999-12-31T23:59:59-02:00", false], ["0000-01-01T02:00:00+02:00", true], ["9999-12-31T21:59:59-02:00", true]]) {
+    assert.equal(memoryInstant(text) !== undefined, ok, text);
+  }
+  assert.throws(() => memoryClaimToAccumulationClaim(memoryClaim({ ...a, validTime: { from: "0000-01-01T00:00:00+02:00" } })), MemoryClaimError);
 });

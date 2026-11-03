@@ -6,7 +6,7 @@ import { Ajv } from "ajv";
 import { validateExtractionTaskSpec, createExtractionTaskSpec } from "@kontourai/traverse";
 import {
   MEMORY_CLAIM_POSTURES, MEMORY_CLAIM_TARGET_SCHEMA, MemoryClaimError,
-  assembleMemoryClaims, assertMemoryClaim, distillMemoryClaims, memoryClaim,
+  assembleMemoryClaims, assertMemoryClaim, distillMemoryClaims, memoryClaim, memoryIntervalsOverlap,
 } from "@kontourai/flow-agents/memory-claims";
 import { SCHEMAS, distillFixtureSitting, loadSittings, matchesFixture, readJson, scriptedProvider, traverseExtract } from "./memory-claims-support.mjs";
 
@@ -363,4 +363,27 @@ test("visibility is Surface's closed form, and anything else is refused rather t
 test("distill refuses an unbounded number of passes", async () => {
   await assert.rejects(distillMemoryClaims({ sitting: loadSittings()[0], passes: 9, extract: async () => ({ proposals: [] }) }), MemoryClaimError);
   await assert.rejects(distillMemoryClaims({ sitting: loadSittings()[0], passes: 0, extract: async () => ({ proposals: [] }) }), MemoryClaimError);
+});
+
+// --- review round 6 ---------------------------------------------------------------------------------------------------
+
+test("valid time is half-open: an interval that ends where another begins does not overlap it, one that begins a millisecond earlier does", () => {
+  const a = { from: "2026-01-01T00:00:00.000Z", until: "2026-06-01T00:00:00.000Z" };
+  const b = { from: "2026-06-01T00:00:00.000Z", until: "2026-12-01T00:00:00.000Z" };
+  assert.equal(memoryIntervalsOverlap(a, b), false);
+  assert.equal(memoryIntervalsOverlap(b, a), false);
+  assert.equal(memoryIntervalsOverlap(a, { ...b, from: "2026-05-31T23:59:59.999Z" }), true);
+  assert.equal(memoryIntervalsOverlap(a, a), true);
+  assert.equal(memoryIntervalsOverlap(a, undefined), true, "no bound is unbounded");
+  assert.equal(memoryIntervalsOverlap({ from: "2026-06-01T00:00:00Z" }, { until: "2026-06-01T00:00:00Z" }), false, "a bound met exactly from either side");
+  assert.throws(() => memoryIntervalsOverlap({ from: "2026-06-01T00:00:00Z", until: "2026-06-01T00:00:00Z" }, undefined), MemoryClaimError, "an empty interval is refused");
+});
+
+test("qualifiers map names to strings, and anything else is refused", async () => {
+  const { earlier } = await fixtureClaims();
+  const claim = earlier.result.claims[0];
+  assert.doesNotThrow(() => assertMemoryClaim(memoryClaim({ ...claim, qualifiers: { env: "prod", region: "eu" } })));
+  for (const bad of [{ env: 1 }, { env: null }, { env: ["prod"] }, { env: { a: 1 } }, "env", ["env"], null]) {
+    assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, qualifiers: bad })), { code: "invalid" }, JSON.stringify(bad));
+  }
 });

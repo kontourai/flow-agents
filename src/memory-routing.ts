@@ -252,7 +252,12 @@ const SOURCE_BASELINE = "source";
 function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   assertMemoryClaim(change.claim);
   const slot = memorySlotKey(change.claim);
-  const current = (change.current ?? []).filter(other => { assertMemoryClaim(other); return other.id !== change.claim.id && memorySlotKey(other) === slot; });
+  // The projection, not the raw subject, says who is in the slot: Surface joins subjects an admitted identity mapping
+  // declares equivalent, so a rival it names can carry a different raw subject. Those rivals are part of the slot here
+  // too, or their visibility would bound nothing and the review item would pair the claim with nobody.
+  const fact = change.accumulation ? memoryAccumulationFact(change.accumulation) : null;
+  const named = new Set(fact?.candidateClaimIds ?? []);
+  const current = (change.current ?? []).filter(other => { assertMemoryClaim(other); return other.id !== change.claim.id && (memorySlotKey(other) === slot || named.has(other.id)); });
   // Reading max + 1 and refusing: a silently truncated slot could hide the conflicting claim.
   if (current.length > MAX_CURRENT_PER_SLOT) throw new MemoryClaimError("invalid", `more than ${MAX_CURRENT_PER_SLOT} current claims in one slot`);
   if (change.agreement != null && !agreementWellFormed(change.agreement)) throw new MemoryClaimError("invalid", "agreement needs integer passes >= 1 and 0 <= agreeing <= passes");
@@ -262,7 +267,7 @@ function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   return {
     type: "claim", claim: canonicalOrder(change.claim), current: ordered, verifications: [...applicable],
     agreement: change.agreement ?? null,
-    accumulation: change.accumulation ? boundFact(memoryAccumulationFact(change.accumulation), change.claim.id, ordered) : null,
+    accumulation: fact ? boundFact(fact, change.claim.id, ordered) : null,
     baselines: [
       { ref: SOURCE_BASELINE, visibility: readMemoryVisibility(change.sourceVisibility) ?? null },
       ...ordered.map(other => ({ ref: other.id, visibility: other.visibility ?? null })),

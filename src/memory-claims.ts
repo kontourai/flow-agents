@@ -178,7 +178,10 @@ export function memoryInstant(value: string | undefined): number | undefined {
   const [year, month, day] = value.slice(0, 10).split("-").map(Number);
   const calendar = new Date(0);
   calendar.setUTCFullYear(year, month - 1, day); // Date.UTC would read years 0-99 as 1900-1999
-  return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 && calendar.getUTCDate() === day ? ms : undefined;
+  if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) return undefined;
+  // A zoned time near the edge of the supported years can convert to a UTC year below 0000 or above 9999; ISO 8601 as Surface
+  // parses it has four-digit years, so such an instant is not one.
+  return /^\d{4}-/.test(new Date(ms).toISOString()) ? ms : undefined;
 }
 
 /** `[from, until)` overlap; an absent bound is unbounded. Throws on a malformed interval so callers fail closed. */
