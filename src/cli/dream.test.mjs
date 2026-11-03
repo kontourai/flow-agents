@@ -1119,3 +1119,23 @@ test("a decision embeds only the peers that matter: agreeing peers that are no n
   assert.deepEqual(mine.decision.input.current, [], "three peers that agree and are no narrower add nothing to the decision");
   assert.equal(mine.decision.outcome, "proposed");
 });
+
+test("a peer the claim would be wider than is embedded and routes it, though it agrees on the value", async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const narrower = { kind: "restricted", audiences: ["user:someone-else"] };
+  const mine = { kind: "restricted", audiences: ["user:owner"] };
+  const peer = memoryClaim({ subject: { type: "service", id: "ledger service", label: "ledger service" }, claimType: "knowledge.memory-claim", property: "rounding mode", value: "banker's rounding", speaker: "user", source: { ref: "sitting:seed", locator: "chars:0-1", excerpt: "e", observedAt: "2026-10-01T00:00:00.000Z" }, posture: "stated", visibility: narrower });
+  const entry = { claim: peer, agreement: { passes: 2, agreeing: 2 }, project: null };
+  const decision = routeMemoryChange({ type: "claim", claim: peer, current: [], agreement: entry.agreement, sourceVisibility: narrower });
+  await store.proposeCreate({ title: "narrow", category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: "seed:1", contentHash: "h", visibilityKey: visibilityKey(narrower) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract());
+  await runDream(host, runOptions(ws, { visibility: mine }));
+  const stored = (await store.listProposals()).map((p) => JSON.parse(p.candidate.body)).find((e) => e.sitting.id.startsWith("codex:") && e.claim.property === "rounding mode");
+  assert.equal(stored.decision.outcome, "routed");
+  assert.deepEqual(stored.decision.reasons.map((r) => r.rule), ["visibility-widening"]);
+  assert.deepEqual(stored.decision.input.current.map((c) => c.id), [peer.id], "the narrower peer is the bound that routes it, so it is embedded");
+});
