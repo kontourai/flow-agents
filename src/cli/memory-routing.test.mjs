@@ -710,3 +710,25 @@ test("the 64-claim bound holds at the door and in a stored decision, and is refu
   assert.equal(check.ok, false);
   assert.match(check.mismatches.join("\n"), /more than 64 current claims/);
 });
+
+test("a routing change is read once, as plain data: a Proxy, a getter or an overridden map anywhere in it is refused, never routed on", () => {
+  const claim = make({ value: "PostgreSQL 16" }), peer = make();
+  const ok = () => change(claim, { current: [peer], accumulation: null });
+  assert.doesNotThrow(() => routeMemoryChange(ok()));
+  const getter = key => Object.defineProperty({ ...ok() }, key, { enumerable: true, get: () => ok()[key] });
+  for (const key of ["claim", "current", "agreement"]) assert.throws(() => routeMemoryChange(getter(key)), /accessor/, `a getter for ${key}`);
+  assert.throws(() => routeMemoryChange(new Proxy(ok(), {})), /Proxy/, "a Proxy change");
+  assert.throws(() => routeMemoryChange({ ...ok(), claim: new Proxy(claim, {}) }), /Proxy/, "a Proxy claim");
+  assert.throws(() => routeMemoryChange({ ...ok(), current: new Proxy([peer], {}) }), /Proxy/, "a Proxy list of current claims");
+  assert.throws(() => routeMemoryChange({ ...ok(), current: [new Proxy(peer, {})] }), /Proxy/, "a Proxy current claim");
+  const mapped = [peer]; mapped.map = () => [];
+  assert.throws(() => routeMemoryChange({ ...ok(), current: mapped }), /extra keys/, "an own map on the current list");
+  assert.throws(() => routeMemoryChange({ ...ok(), verifications: new Proxy([], {}) }), /Proxy/, "a Proxy list of verifications");
+  assert.throws(() => routeMemoryChange({ ...ok(), agreement: new Proxy({ passes: 2, agreeing: 2 }, {}) }), /Proxy/, "a Proxy agreement");
+  assert.throws(() => routeMemoryChange({ type: "entity", proposal: new Proxy(loadEntityProposals().merge, {}) }), /Proxy/, "a Proxy entity proposal");
+  // What was routed is the copy: later changes to the objects handed in cannot change the recorded decision.
+  const live = make({ value: "PostgreSQL 17" });
+  const decision = routeMemoryChange(change(live, { current: [peer], accumulation: null }));
+  assert.equal(decision.input.claim.value, "PostgreSQL 17");
+  assert.notEqual(decision.input.claim, live);
+});

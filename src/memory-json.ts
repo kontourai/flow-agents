@@ -83,7 +83,8 @@ export function ownField(record: unknown, key: string, label: string): unknown {
 export function ownEntries(value: unknown, label: string): unknown[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new MemoryClaimError("invalid", `${label}: expected a list`);
-  if (types.isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new MemoryClaimError("invalid", `${label}: expected a plain list`);
+  if (types.isProxy(value)) throw new MemoryClaimError("invalid", `${label}: a Proxy cannot be read`);
+  if (Object.getPrototypeOf(value) !== Array.prototype) throw new MemoryClaimError("invalid", `${label}: expected a plain list`);
   const length = value.length;
   if (length > MAX_SNAPSHOT_NODES || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== length) throw new MemoryClaimError("invalid", `${label}: a list with extra keys, symbols or holes, or too long, cannot be read`);
   const out: unknown[] = [];

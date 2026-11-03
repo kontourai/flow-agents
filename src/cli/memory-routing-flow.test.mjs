@@ -522,3 +522,15 @@ test("decisions are copied once: a decision that answers differently the second 
   await assert.rejects(recordMemoryRoutingEvidence({ ...where(cwd), decisions: [shifty, decisions[1]] }), /accessor/);
   assert.deepEqual(await readMemoryRoutingDecisions("run-1", cwd), []);
 });
+
+test("each field of a run request is read without running a getter: run, gate, directory and both review lists", async t => {
+  const cwd = await workspace(t);
+  const first = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const review = rejection(first.items[0], 10);
+  const withGetter = (base, key, value) => Object.defineProperty({ ...base }, key, { enumerable: true, get: () => value });
+  for (const key of ["runId", "gate", "cwd"]) await assert.rejects(refreshMemoryRunMetrics(withGetter({ ...where(cwd) }, key, where(cwd)[key])), /accessor/, `a getter for ${key}`);
+  await assert.rejects(refreshMemoryRunMetrics(withGetter({ ...where(cwd), reviewDecisions: review.reviewDecisions }, "reviewEvents", review.reviewEvents)), /accessor/, "a getter for the review events");
+  await assert.rejects(refreshMemoryRunMetrics(withGetter({ ...where(cwd), reviewEvents: review.reviewEvents }, "reviewDecisions", review.reviewDecisions)), /accessor/, "a getter for the review decisions");
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), runId: "  " }), /needs a runId/);
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.reviewer.decisions, 0, "none of them recorded anything");
+});
