@@ -711,7 +711,8 @@ The candidate provenance note encodes the session ID, transcript reference,
 and sitting ID pending the structured provenance contract in
 [Corpus #46](https://github.com/kontourai/corpus/issues/46). This is a proposal request, not an approval or an applied
 record; the Corpus #40 contract owns persistence, review, and exclusion from
-ordinary reads. Extraction, retries, and scheduling are not provided here. Identical calls
+ordinary reads. Reviewers use Corpus `applyCreate` or `rejectCreate`; this
+bridge invokes neither operation. Extraction, retries, and scheduling are not provided here. Identical calls
 can create duplicate proposals until [Corpus #45](https://github.com/kontourai/corpus/issues/45)
 provides a durable idempotency key. The host must reconcile outcomes before
 retrying. The adapter/root binding is a host obligation pending

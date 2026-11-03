@@ -23,9 +23,9 @@ test('Corpus stages an unreviewed proposal without a working-set record', { skip
   assert.equal((await store.listProposals({ state: 'pending' })).length, 1);
   assert.equal((await store.listByType('raw')).length, 0);
   assert.deepEqual(JSON.parse(proposal.candidate.provenance.note), { session_id: residue.provenance.sessionId, transcript_ref: residue.provenance.transcriptRef, sitting_id: residue.sittingId });
-  await assert.rejects(store.apply(proposal.id, 'distiller'), (error) => error.code === 'SELF_APPROVAL');
+  await assert.rejects(store.applyCreate(proposal.id, 'distiller'), (error) => error.code === 'SELF_APPROVAL');
   assert.equal((await store.getProposal(proposal.id)).state, 'pending');
-  const recordId = await store.apply(proposal.id, 'independent-reviewer');
+  const recordId = await store.applyCreate(proposal.id, 'independent-reviewer');
   const record = await store.get(recordId);
   assert.equal(record.body, 'Distilled fixture');
   assert.equal(record.provenance.note, proposal.candidate.provenance.note);
