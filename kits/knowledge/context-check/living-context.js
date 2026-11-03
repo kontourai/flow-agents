@@ -426,6 +426,12 @@ function noAnswer(claimId, revision, roots, reasons) {
   };
 }
 
+/** Half-open [from, until): is valid_at outside the interval the claim asserts? An absent bound is unbounded. */
+function outsideValidTime(claim, ctx) {
+  const validTime = claim.extension.validTime;
+  return Boolean(validTime && ((validTime.from !== undefined && ctx.validAt < validTime.from) || (validTime.until !== undefined && ctx.validAt >= validTime.until)));
+}
+
 function recallFor(claim, input, changedSurfaces, byId, supersession, ctx, revision) {
   const base = () => ({
     claim_id: claim.id,
@@ -456,10 +462,7 @@ function recallFor(claim, input, changedSurfaces, byId, supersession, ctx, revis
   const annotation = edgeAnnotation(claim, supersession, ctx);
   if (annotation.unverifiable) return entry("unverifiable", [annotation.unverifiable]);
   const reasons = annotation.note ? [annotation.note] : [];
-  const validTime = claim.extension.validTime;
-  if (validTime && ((validTime.from !== undefined && ctx.validAt < validTime.from) || (validTime.until !== undefined && ctx.validAt >= validTime.until))) {
-    return { kind: "not_valid" };
-  }
+  if (outsideValidTime(claim, ctx)) return { kind: "not_valid" };
   if (claim.status === "unverifiable") return entry("unverifiable", [...reasons, "declared_unverifiable"]);
   if (freshnessFor(claim, ctx).stale) return entry("unverifiable", [...reasons, "stale_at_as_of"]);
   return entry("current", [...reasons, "current_at_as_of"]);
@@ -525,16 +528,16 @@ export function deriveLivingContext({ repoRoot, input }) {
   // A claim whose recall is unverifiable as of the instants (stale, untimed, outside its valid interval, ...)
   // stays unverifiable in reconciliation; the declared head status must not turn it back into an ordinary affected claim.
   // Contradiction evidence is an observation too: unrecorded, or recorded after known_at, it does not count yet.
-  const view = ({ claim, entry }) => {
+  const view = ({ claim }) => {
     const evidenceKnown = claim.extension.reconciliationRecordedAt !== undefined && claim.extension.reconciliationRecordedAt <= ctx.knownAt;
     const { reconciliation_evidence: evidence, ...rest } = claim;
     const known = evidence && evidenceKnown ? { ...rest, reconciliation_evidence: evidence } : rest;
-    // Only facts about the claim itself turn reconciliation unverifiable. Supersession trouble (a cycle, an ambiguous
-    // id, a missing time) says nothing about whether the change contradicts the claim, so recorded contradiction
-    // evidence and ordinary affected status are reported exactly as they would be without it.
-    const intrinsic = ["knowledge_time_unknown", "declared_unverifiable", "stale_at_as_of", "not_valid_at_as_of"];
-    const ownReasons = [...(entry.reasons ?? []), ...(entry.reason === "no_answer" ? ["not_valid_at_as_of"] : [])];
-    return entry.status === "unverifiable" && known.status !== "unverifiable" && ownReasons.some((reason) => intrinsic.includes(reason)) ? { ...known, status: "unverifiable" } : known;
+    // Only facts about the claim itself turn reconciliation unverifiable: it was never timed, it declares itself
+    // unverifiable, it is stale at now, or it asserts nothing at valid_at. They are judged from the claim, not read
+    // back from the recall's winning reason, because supersession trouble (a cycle, an ambiguous id, a missing edge
+    // time) outranks them in recall and says nothing about whether the change contradicts the claim.
+    const intrinsicallyUnverifiable = claim.extension.recordedAt === undefined || claim.status === "unverifiable" || freshnessFor(claim, ctx).stale || outsideValidTime(claim, ctx);
+    return intrinsicallyUnverifiable && known.status !== "unverifiable" ? { ...known, status: "unverifiable" } : known;
   };
   const reconciliation = reconcilable.map((candidate) => reconciliationFor(view(candidate), changedSurfaces, revision));
   const proposals = reconcilable.map((candidate, index) => proposalFor(view(candidate), reconciliation[index], revision)).filter(Boolean);

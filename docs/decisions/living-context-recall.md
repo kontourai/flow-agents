@@ -32,7 +32,8 @@ exact `1.0` behavior and loading the `1.0` module still needs no Surface or Surv
   kind) is this kit's; what a given reader may see of the admitted edges is Surface's. **A successor the
   reader cannot see leaves the predecessor `current` for that reader with no trace**, and a superseded claim
   is never `current` for a reader who can see a recorded, in-effect, same-slot successor along an edge they may
-  see; an edge the reader may not see leaves both claims current for them, by design. This reverses an
+  see, along an acyclic chain; an edge the reader may not see leaves both claims current for them, by design, and a
+  cycle through hidden claims follows Surface's rule below. This reverses an
   earlier, more conservative local rule (`unverifiable` for a hidden successor), which is no longer needed
   now that Surface defines the per-viewer view.
 - **Limited disclosure, stated.** Asked for by id, hidden, absent, and not-yet-known claims return the same

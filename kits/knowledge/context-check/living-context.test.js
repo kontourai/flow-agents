@@ -1090,9 +1090,20 @@ describe("Living Context: review round 3 regressions (#1572)", () => {
       assert.equal(rationale, baselineRationale);
     }
     assert.equal(reconcile(true, evidence)[1], "contradicted");
-    const intrinsic = seed({ readers: ["engineer"], claims: [mk("s", { ...evidence, expires_at: "2026-02-01T00:00:00Z" })] });
-    assert.equal(run(intrinsic.repo, intrinsic.revision, { claim_ids: ["s"], changed_surfaces: ["src/x.js"] }).reconciliation[0].status, "unverifiable", "a stale claim stays unverifiable: its own validity is what is in doubt");
-    remove(intrinsic.repo);
+    // A claim's own invalidity is judged from the claim, so supersession trouble that outranks it in recall cannot mask it.
+    const invalidities = { stale: { expires_at: "2026-02-01T00:00:00Z" }, "outside its valid time": { valid_time: { from: "2026-01-01T00:00:00Z", until: "2026-02-01T00:00:00Z" } }, untimed: { recorded_at: undefined }, "declared unverifiable": { status: "unverifiable" } };
+    const troubles = { none: () => [mk("h", hidden)], ambiguous: () => [mk("h", hidden), mk("h", { ...hidden, slot: "other" })], "slot mismatch": () => [mk("h", { slot: "other" })], "visible cycle": () => [mk("h", { visibility: { audiences: ["engineer"] }, ...edge("a") })] };
+    for (const [label, extra] of Object.entries(invalidities)) {
+      for (const [trouble, others] of Object.entries(troubles)) {
+        for (const withEvidence of [false, true]) {
+          const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [mk("a", { ...edge("h"), supersession_visibility: "public", ...extra, ...(withEvidence ? evidence : {}) }), ...others()] });
+          const result = run(repo, revision, { claim_ids: ["a"], changed_surfaces: ["src/x.js"] });
+          remove(repo);
+          assert.equal(result.reconciliation[0].status, "unverifiable", `${label} + ${trouble}${withEvidence ? " + contradiction evidence" : ""}`);
+          assert.match(result.proposals[0].rationale, /remains unverifiable/, `${label} + ${trouble}`);
+        }
+      }
+    }
   });
 
   test("an edge with no recording time is not on the chain, so it cannot make a claim ambiguous", () => {

@@ -390,7 +390,9 @@ kontourai/flow-agents#1586 (see the decision record). `status` is the status **a
 predecessor read at a `valid_at` before its succession, or a `known_at` before its successor was recorded,
 is `current` with a reason saying exactly why. A superseded claim is never `current` for a reader who can
 see a successor that is recorded, in effect and on the same slot, along an edge the reader may see
-(`supersession_visibility`): an edge the reader may not see deliberately leaves both claims current for them.
+(`supersession_visibility`) and the chain is acyclic: an edge the reader may not see deliberately leaves both
+claims current for them, and a cycle that exists only through hidden claims is Surface's rule (it does not
+change what the reader sees; see the decision record).
 
 **Reasons, not just rank.** Every recall carries `matched_signals`, `freshness` (Surface's
 claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surface does; a stale
