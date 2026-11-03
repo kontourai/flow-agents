@@ -58,10 +58,16 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     return 2;
   }
   try {
-    const module = await import(pathToFileURL(assertOwnerControlledFile(config.host, "host")).href);
-    if (typeof module.createDreamHost !== "function") throw dreamError("DREAM_CONFIG_INVALID", "the host module must export createDreamHost");
-    // A dry run is read-only all the way down: the host is told, so it opens its store without creating anything.
-    const host = await module.createDreamHost({ config, dryRun: args.dryRun });
+    let host;
+    try {
+      const module = await import(pathToFileURL(assertOwnerControlledFile(config.host, "host")).href);
+      if (typeof module.createDreamHost !== "function") throw dreamError("DREAM_CONFIG_INVALID", "the host module must export createDreamHost");
+      // A dry run is read-only all the way down: the host is told, so it opens its store without creating anything.
+      host = await module.createDreamHost({ config, dryRun: args.dryRun });
+    } catch (error) {
+      if (error?.code === "DREAM_CONFIG_INVALID") throw error;
+      throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);
+    }
     if (!host.extract && !args.dryRun) {
       const runtime = host.runtime ?? (await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
       host.extract = await extractForRuntime(runtime);

@@ -326,9 +326,12 @@ test("a second run while one holds the lock is refused, and a dead owner's lock 
   release();
   assert.equal((await first).status, "success");
 
-  fs.writeFileSync(path.join(ws.dreamDir, "dream.lock"), JSON.stringify({ pid: 2 ** 22 + 1, started_at: NOW_MS, token: "dead" }));
+  const epoch = path.join(ws.dreamDir, "dream.lock", "9");
+  fs.mkdirSync(epoch, { recursive: true });
+  fs.writeFileSync(path.join(epoch, "owner.json"), JSON.stringify({ pid: 2 ** 22 + 1, started_at: NOW_MS, token: "dead" }));
   assert.equal((await runDream(host, runOptions(ws))).status, "noop");
-  assert.equal(fs.existsSync(path.join(ws.dreamDir, "dream.lock")), false, "the lock is released");
+  assert.deepEqual(fs.readdirSync(path.join(ws.dreamDir, "dream.lock")), ["10"], "the dead owner's epoch is gone and this run's is the highest");
+  assert.ok(fs.existsSync(path.join(ws.dreamDir, "dream.lock", "10", "released")), "and it is released");
 });
 
 test("the script covers every sitting in the fixtures", () => {
@@ -470,42 +473,6 @@ test("a failure at the receipt boundary still reports what the store gained", as
   assert.equal(failed.receipts.length, failed.claims.created);
 });
 
-test("lock: no two owners, whatever interleaves creation; a half-written or unreadable lock is held, not stolen", (t) => {
-  const dir = tempDir("dream-lock-");
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const file = path.join(dir, "dream.lock");
-
-  // B arrives while A is between preparing its lock and installing it.
-  const original = fs.linkSync;
-  let b;
-  let bError;
-  let injected = false;
-  fs.linkSync = (...args) => {
-    if (!injected) {
-      injected = true;
-      try { b = acquireDreamLock(file); } catch (error) { bError = error; }
-    }
-    return original(...args);
-  };
-  syncBuiltinESMExports();
-  let aError;
-  try { acquireDreamLock(file); } catch (error) { aError = error; } finally { fs.linkSync = original; syncBuiltinESMExports(); }
-  assert.equal(typeof b, "function", "B took the free lock");
-  assert.equal(aError?.code, "DREAM_LOCKED", "A, losing the race for the file, did not also proceed");
-  b();
-
-  // A lock file nobody can read (empty, as a crashed create would leave) is held while fresh and debris once old.
-  fs.writeFileSync(file, "");
-  assert.throws(() => acquireDreamLock(file), (error) => error.code === "DREAM_LOCKED");
-  const old = new Date(Date.now() - 120_000);
-  fs.utimesSync(file, old, old);
-  acquireDreamLock(file)();
-
-  // A live owner is never evicted for being old.
-  fs.writeFileSync(file, JSON.stringify({ pid: process.pid, started_at: 1, token: "ancient" }));
-  assert.throws(() => acquireDreamLock(file), (error) => error.code === "DREAM_LOCKED");
-});
-
 test("another proposer's plan for the same sitting is not this run's plan: it is ignored, and the sitting is still extracted", async (t) => {
   const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: (c) => (c.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "svc theirs", subjectType: "service", property: "mode", value: "theirs", posture: "stated" }] : []) } });
   t.after(ws.cleanup);
@@ -545,49 +512,6 @@ test("a sitting that yields more than 32 claims proposes 32 and counts the rest"
   assert.equal(report.claims.distilled, 32);
 });
 
-test("lock: a takeover that loses to another takeover gives way, and never removes the winner's live lock", (t) => {
-  const dir = tempDir("dream-lock-takeover-");
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const file = path.join(dir, "dream.lock");
-  fs.writeFileSync(file, JSON.stringify({ pid: 2 ** 22 + 1, started_at: 1, token: "dead-owner" }));
-
-  // A has judged the dead owner stale and is about to take the takeover guard. B completes a whole takeover first.
-  const original = fs.openSync;
-  let b;
-  let inside = false;
-  fs.openSync = (target, ...rest) => {
-    if (!inside && String(target).endsWith(".takeover")) {
-      inside = true;
-      try { b = acquireDreamLock(file); } finally { inside = false; }
-    }
-    return original(target, ...rest);
-  };
-  syncBuiltinESMExports();
-  let aError;
-  try { acquireDreamLock(file); } catch (error) { aError = error; } finally { fs.openSync = original; syncBuiltinESMExports(); }
-  assert.equal(typeof b, "function", "B took over the dead owner's lock");
-  assert.equal(aError?.code, "DREAM_LOCKED", "A saw that the lock had changed hands and gave way");
-  const owner = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.notEqual(owner.token, "dead-owner");
-  assert.equal(owner.pid, process.pid, "B's lock is still in place");
-  assert.throws(() => acquireDreamLock(file), (error) => error.code === "DREAM_LOCKED", "and C cannot get in beside B");
-  b();
-  assert.equal(fs.existsSync(file), false);
-});
-
-test("lock: debris from a crashed takeover or install does not wedge it", (t) => {
-  const dir = tempDir("dream-lock-debris-");
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const file = path.join(dir, "dream.lock");
-  fs.writeFileSync(file, JSON.stringify({ pid: 2 ** 22 + 1, started_at: 1, token: "dead" }));
-  fs.writeFileSync(`${file}.takeover`, JSON.stringify({ pid: 2 ** 22 + 2, started_at: 1 }));
-  fs.writeFileSync(`${file}.99.abc.tmp`, "{");
-  fs.writeFileSync(`${file}.stale.xyz`, "{");
-  const release = acquireDreamLock(file);
-  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).pid, process.pid);
-  release();
-});
-
 test("a delivered extraction whose every item is malformed fails the pass: it is not an empty sitting", async (t) => {
   const { FakeModelRuntime } = await import("@kontourai/relay");
   const { extractForRuntime } = await import("../../kits/knowledge/dream/model.js");
@@ -602,18 +526,20 @@ test("a delivered extraction whose every item is malformed fails the pass: it is
 test("a lock that cannot be removed after the cursor commits does not turn a finished run into a failed one", async (t) => {
   const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
   t.after(ws.cleanup);
-  const original = fs.rmSync;
-  fs.rmSync = (target, ...rest) => {
-    if (String(target).endsWith("dream.lock")) throw Object.assign(new Error("EIO"), { code: "EIO" });
+  const original = fs.writeFileSync;
+  fs.writeFileSync = (target, ...rest) => {
+    if (String(target).endsWith("released")) throw Object.assign(new Error("EIO"), { code: "EIO" });
     return original(target, ...rest);
   };
   syncBuiltinESMExports();
   let report;
-  try { report = await runDream(host, runOptions(ws)); } finally { fs.rmSync = original; syncBuiltinESMExports(); }
+  try { report = await runDream(host, runOptions(ws)); } finally { fs.writeFileSync = original; syncBuiltinESMExports(); }
   assert.equal(report.status, "success");
   assert.equal(report.cursor.committed, true);
   assert.ok(fs.existsSync(ws.cursorFile));
-  fs.rmSync(path.join(ws.dreamDir, "dream.lock"), { force: true });
+  // The epoch was never marked released. It names this process, so it goes stale when the process exits; here the
+  // process is still alive, so the lock correctly stays held.
+  assert.ok(!fs.existsSync(path.join(ws.dreamDir, "dream.lock", "1", "released")));
 });
 
 test("a resumed plan is routed against the claims, policy and visibility in force now, not when it was drafted", async (t) => {
@@ -647,17 +573,91 @@ test("a resumed plan is routed against the claims, policy and visibility in forc
   assert.equal(JSON.parse((await store.listProposals())[0].candidate.body).decision.outcome, "proposed", "the stored plan is untouched");
 });
 
-test("a plan is bounded in bytes as well as claims: oversize claims are left out and counted, not stored", async (t) => {
-  const big = (content) => (content.includes("banker's rounding")
-    ? ["a", "b", "c"].map((name) => ({ quote: "I switched to banker's rounding on the total.", subject: `svc ${name}`, subjectType: "service", property: "blob", value: `${name}${"x".repeat(100 * 1024)}`, posture: "stated" }))
+test("a claim over the size bound is left out and counted; the rest of the sitting still goes through", async (t) => {
+  const mixed = (content) => (content.includes("banker's rounding")
+    ? [
+      { quote: "I switched to banker's rounding on the total.", subject: "svc big", subjectType: "service", property: "blob", value: `big${"x".repeat(100 * 1024)}`, posture: "stated" },
+      { quote: "I switched to banker's rounding on the total.", subject: "svc small", subjectType: "service", property: "mode", value: "small", posture: "stated" },
+    ]
     : []);
-  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: big } });
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: mixed } });
   t.after(ws.cleanup);
   const report = await runDream(host, runOptions(ws));
-  const proposals = await store.listProposals();
-  assert.ok(proposals.length < 3 && proposals.length >= 1);
-  assert.equal(report.claims.truncated, 3 - proposals.length);
-  for (const proposal of proposals) assert.ok(Buffer.byteLength(proposal.candidate.body) <= 512 * 1024);
+  const values = (await store.listProposals()).map((p) => JSON.parse(p.candidate.body).claim.value);
+  assert.deepEqual(values, ["small"]);
+  assert.equal(report.claims.truncated, 1);
+  assert.ok(report.cursor.committed, "an honest oversize claim does not stall the sitting");
+});
+
+test("every envelope fits its bound by construction, in the worst case the bounds allow", async () => {
+  const { encodeEnvelope, fitPlan, MAX_ENVELOPE_BYTES, MAX_CLAIM_BYTES } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const make = (n) => memoryClaim({
+    subject: { type: "service", id: `s${n % 3}`, label: `s${n % 3}` }, claimType: "knowledge.memory-claim", property: "p", value: `v${n}${"x".repeat(MAX_CLAIM_BYTES - 1500)}`,
+    speaker: "user", source: { ref: "sitting:w", locator: `chars:0-${n}`, excerpt: "e", observedAt: "2026-11-02T00:00:00.000Z" }, posture: "stated", visibility: { kind: "public" },
+  });
+  const claims = Array.from({ length: 200 }, (_, n) => make(n)).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const peers = claims.slice(100, 164).filter((c) => c.subject.id === "s0").concat(claims.slice(100, 164)).slice(0, 64);
+  const entries = claims.slice(0, 60).map((claim) => ({ claim, agreement: { passes: 2, agreeing: 2 }, project: null }));
+  const { plan } = fitPlan(entries);
+  assert.ok(plan.length > 0 && plan.length <= 32);
+  let worst = 0;
+  for (const [index, entry] of plan.entries()) {
+    const sameSlot = [...new Map(peers.map((c) => [c.id, c])).values()].filter((c) => c.subject.id === entry.claim.subject.id && c.id !== entry.claim.id).slice(0, 64);
+    const decision = routeMemoryChange({ type: "claim", claim: entry.claim, current: sameSlot, agreement: entry.agreement, sourceVisibility: { kind: "public" } });
+    worst = Math.max(worst, Buffer.byteLength(encodeEnvelope({ plan, index, decision, sitting: { id: "s", contentHash: "h", visibilityKey: "k" } })));
+  }
+  assert.ok(worst <= MAX_ENVELOPE_BYTES, `${worst} > ${MAX_ENVELOPE_BYTES}`);
+});
+
+test("an over-size stored body is refused without being parsed", async () => {
+  const { decodeEnvelope, MAX_ENVELOPE_BYTES } = await import("../../kits/knowledge/dream/envelope.js");
+  const original = JSON.parse;
+  let parsed = 0;
+  JSON.parse = (...args) => { parsed += 1; return original(...args); };
+  try {
+    assert.equal(decodeEnvelope(`{"dream":"1.2","pad":"${"x".repeat(MAX_ENVELOPE_BYTES)}"}`), null);
+  } finally { JSON.parse = original; }
+  assert.equal(parsed, 0);
+});
+
+test("visibility compares as a set: reordering the audiences resumes the plan instead of extracting again", async (t) => {
+  const two = (content) => (content.includes("banker's rounding")
+    ? ["alpha", "beta"].map((name) => ({ quote: "I switched to banker's rounding on the total.", subject: `svc ${name}`, subjectType: "service", property: "mode", value: name, posture: "stated" }))
+    : []);
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
+  t.after(ws.cleanup);
+  store.failProposeCreate(1);
+  await assert.rejects(() => runDream(host, runOptions(ws, { visibility: { kind: "restricted", audiences: ["user:a", "user:b"] } })), (error) => error.cause?.code === "INJECTED");
+  const reworded = await scriptedExtract({ claimsOf: () => [{ quote: "I switched to banker's rounding on the total.", subject: "svc other", subjectType: "service", property: "x", value: "other", posture: "stated" }] });
+  const retry = await runDream({ ...host, extract: reworded }, runOptions(ws, { visibility: { kind: "restricted", audiences: ["user:b", "user:a", "user:b"] } }));
+  assert.equal(retry.sittings.resumed, 1);
+  assert.ok(reworded.calls.every((call) => !call.content.includes("banker's rounding")), "the half-proposed sitting was not extracted again");
+  assert.deepEqual((await store.listProposals()).map((p) => JSON.parse(p.candidate.body).claim.value).sort(), ["alpha", "beta"]);
+});
+
+test("two claims from one sitting that disagree are routed to review against each other", async (t) => {
+  const clash = (content) => (content.includes("banker's rounding")
+    ? ["half up", "half even"].map((value) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value, posture: "stated" }))
+    : []);
+  const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: clash } });
+  t.after(ws.cleanup);
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.claims.routed, 2, "neither saw the other in the store, but they are peers in one plan");
+  assert.equal(report.review_items, 2);
+  assert.equal(host.published.at(-1).reviewItems.length, 2);
+});
+
+test("a resumed plan passes the route stage, so a host gate there can stop it", async (t) => {
+  const two = (content) => (content.includes("banker's rounding")
+    ? ["alpha", "beta"].map((name) => ({ quote: "I switched to banker's rounding on the total.", subject: `svc ${name}`, subjectType: "service", property: "mode", value: name, posture: "stated" }))
+    : []);
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
+  t.after(ws.cleanup);
+  store.failProposeCreate(1);
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws, { onStage: (name) => { if (name === "route") throw new Error("gate closed"); } })), /gate closed/);
+  assert.equal((await store.listProposals()).length, 1, "the gate stopped the run before it proposed the missing claim");
 });
 
 test("changing the visibility starts a new plan: a half-proposed sitting is not resumed under another visibility", async (t) => {
@@ -674,4 +674,109 @@ test("changing the visibility starts a new plan: a half-proposed sitting is not 
   assert.ok(extract.calls.length > before, "claims made under the old visibility are different claims, so the sitting was extracted again");
   const visibilities = (await store.listProposals()).map((p) => JSON.stringify(JSON.parse(p.candidate.body).claim.visibility));
   assert.ok(visibilities.some((v) => v.includes("user:other")));
+});
+
+// ── the lock: epochs, so nothing is ever removed from under a live owner ─────────────────────────────────────
+
+const DEAD = 2 ** 22 + 1;
+function epochDir(lock, n, owner, extra = {}) {
+  const dir = path.join(lock, String(n));
+  fs.mkdirSync(dir, { recursive: true });
+  if (owner) fs.writeFileSync(path.join(dir, "owner.json"), JSON.stringify(owner));
+  if (extra.released) fs.writeFileSync(path.join(dir, "released"), "\n");
+  return dir;
+}
+/** Run `fn` while `hook(target)` runs before every mkdirSync whose target ends with `suffix`, once. */
+function beforeMkdir(suffix, hook, fn) {
+  const original = fs.mkdirSync;
+  let fired = false;
+  fs.mkdirSync = (target, ...rest) => {
+    if (!fired && String(target).endsWith(suffix)) {
+      fired = true;
+      hook();
+    }
+    return original(target, ...rest);
+  };
+  syncBuiltinESMExports();
+  try { return fn(); } finally { fs.mkdirSync = original; syncBuiltinESMExports(); }
+}
+
+test("lock: a live owner holds it, a released or dead one does not, and the epoch only grows", (t) => {
+  const dir = tempDir("dream-lock-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lock = path.join(dir, "dream.lock");
+  const release = acquireDreamLock(lock);
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED");
+  release();
+  const again = acquireDreamLock(lock);
+  assert.deepEqual(fs.readdirSync(lock), ["2"], "released epoch 1 was removed only because epoch 2 now exists");
+  again();
+  assert.deepEqual(fs.readdirSync(lock), ["2"], "the highest epoch stays so a slow caller can never reuse a number");
+
+  // A dead owner, a fresh half-made epoch, and an old one.
+  fs.rmSync(lock, { recursive: true });
+  epochDir(lock, 3, { pid: DEAD, started_at: 1, token: "dead" });
+  acquireDreamLock(lock)();
+  fs.rmSync(lock, { recursive: true });
+  epochDir(lock, 3, null);
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED", "a fresh epoch with no owner yet is being made, not debris");
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(path.join(lock, "3"), old, old);
+  acquireDreamLock(lock)();
+  // A live owner is never evicted for being old.
+  fs.rmSync(lock, { recursive: true });
+  epochDir(lock, 3, { pid: process.pid, started_at: 1, token: "ancient" });
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED");
+});
+
+test("lock: two callers that both found the owner dead cannot both own it", (t) => {
+  const dir = tempDir("dream-lock-race-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lock = path.join(dir, "dream.lock");
+  epochDir(lock, 3, { pid: DEAD, started_at: 1, token: "dead" });
+  // A has read epoch 3 as dead and is about to make epoch 4. B makes it first.
+  let b;
+  let aError;
+  beforeMkdir(`${path.sep}4`, () => { b = acquireDreamLock(lock); }, () => {
+    try { acquireDreamLock(lock); } catch (error) { aError = error; }
+  });
+  assert.equal(typeof b, "function", "B took epoch 4");
+  assert.equal(aError?.code, "DREAM_LOCKED", "A found epoch 4 taken, looked again, and saw a live owner");
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED", "and C cannot get in beside B");
+  b();
+});
+
+test("lock: a caller that was slow enough to be passed by two others backs out and removes nothing of theirs", (t) => {
+  const dir = tempDir("dream-lock-slow-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lock = path.join(dir, "dream.lock");
+  epochDir(lock, 3, { pid: DEAD, started_at: 1, token: "dead" });
+  // A read epoch 3 as dead. Before A makes epoch 4, B takes and releases 4 and C takes 5, which removes epoch 4.
+  let c;
+  let aError;
+  beforeMkdir(`${path.sep}4`, () => {
+    acquireDreamLock(lock)();
+    c = acquireDreamLock(lock);
+    assert.deepEqual(fs.readdirSync(lock), ["5"], "epoch 4 is gone, so A's mkdir will succeed");
+  }, () => {
+    try { acquireDreamLock(lock); } catch (error) { aError = error; }
+  });
+  assert.equal(typeof c, "function");
+  assert.equal(aError?.code, "DREAM_LOCKED", "A made epoch 4, saw epoch 5 above it, and gave way");
+  assert.deepEqual(fs.readdirSync(lock), ["5"], "A removed its own epoch and left C's");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(lock, "5", "owner.json"), "utf8")).pid, process.pid);
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED", "C still holds it");
+  c();
+});
+
+test("lock: debris beside the epochs does not wedge it", (t) => {
+  const dir = tempDir("dream-lock-debris-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lock = path.join(dir, "dream.lock");
+  epochDir(lock, 1, { pid: DEAD, started_at: 1, token: "dead" });
+  fs.writeFileSync(path.join(lock, "stray.tmp"), "{");
+  fs.mkdirSync(path.join(lock, "not-an-epoch"));
+  fs.mkdirSync(path.join(lock, "0"));
+  acquireDreamLock(lock)();
+  assert.ok(fs.existsSync(path.join(lock, "2")));
 });

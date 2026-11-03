@@ -36,7 +36,9 @@ import {
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, isSealed, writeBriefs } from "./brief.js";
-import { fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
+import { memorySlotKey } from "@kontourai/flow-agents/memory-claims";
+
+import { MAX_CLAIM_BYTES, fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
 import { acquireDreamLock } from "./lock.js";
 import { proposeSitting } from "./propose.js";
 import { assertAbsolute, dreamError, projectFromCwd, sha256, writePrivateAtomic } from "./util.js";
@@ -78,7 +80,7 @@ function narrowStore(store) {
  * is the one Corpus made from it: the record's `apply-create` entry names this proposal and the record's body is the
  * proposal's. A settlement that points at some other record, or at none, is not trusted.
  */
-async function briefItems(store, index, proposerId, route) {
+async function briefItems(store, index, proposerId) {
   const items = [];
   const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0 };
   for (const { proposal, envelope } of index.byClaim.values()) {
@@ -108,9 +110,7 @@ async function briefItems(store, index, proposerId, route) {
         continue;
       }
     }
-    // A pending claim's stored decision is from when it was proposed; what other claims exist now may route it.
-    const routing = proposal.state === "pending" ? route(envelope.claim, envelope.agreement) : envelope.decision;
-    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, state: proposal.state, routing });
+    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, state: proposal.state, routing: envelope.decision });
   }
   return { items, excluded };
 }
@@ -201,7 +201,7 @@ export async function runDream(host, options = {}) {
     started_at: now(),
     ingest: null,
     sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
-    claims: { distilled: 0, rejected: 0, truncated: 0, rerouted: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
+    claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, rerouted: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
     review_items: 0,
     unreadable_proposals: 0,
@@ -260,9 +260,28 @@ export async function runDream(host, options = {}) {
     const processed = new Set();
     const vKey = visibilityKey(options.visibility);
     const policy = options.routingPolicy ?? DEFAULT_MEMORY_ROUTING_POLICY;
-    const route = (claim, agreement, withIndex = index) => {
-      const current = [...withIndex.byClaim.values()].filter(({ proposal }) => proposal.state !== "rejected").map(({ envelope }) => envelope.claim);
-      return routeMemoryChange({ type: "claim", claim, current, agreement, sourceVisibility: options.visibility ?? null }, policy);
+    // Peers are looked up by slot: routing validates every peer it is given, so handing it the whole store would make
+    // each decision cost the size of the store. `siblings` are the other claims of the same plan, which are peers too:
+    // two claims from one sitting that disagree are a contest like any other.
+    let slotPeers = new Map();
+    const reslot = () => {
+      slotPeers = new Map();
+      for (const { proposal, envelope } of index.byClaim.values()) {
+        if (proposal.state === "rejected") continue;
+        const key = memorySlotKey(envelope.claim);
+        slotPeers.set(key, [...(slotPeers.get(key) ?? []), envelope.claim]);
+      }
+    };
+    reslot();
+    const MAX_PEERS = 64; // routing refuses a slot with more than this many peers
+    const route = (claim, agreement, siblings = []) => {
+      const slot = memorySlotKey(claim);
+      const peers = [...(slotPeers.get(slot) ?? []), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot)]
+        // A peer over the claim size bound cannot be this run's, and would make the stored decision too large.
+        .filter((peer) => peer.id !== claim.id && Buffer.byteLength(JSON.stringify(peer)) <= MAX_CLAIM_BYTES)
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      if (peers.length > MAX_PEERS) report.claims.peers_capped += 1; // reported, never silent
+      return routeMemoryChange({ type: "claim", claim, current: peers.slice(0, MAX_PEERS), agreement, sourceVisibility: options.visibility ?? null }, policy);
     };
 
     if (dryRun) {
@@ -287,7 +306,6 @@ export async function runDream(host, options = {}) {
         }
         report.claims.rejected += distilled.rejected.length;
 
-        await stage("route");
         const project = projectFromCwd(residue.provenance?.cwd ?? null);
         const ordered = [...distilled.claims].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
         const fitted = fitPlan(ordered.map((claim) => ({ claim, agreement: distilled.agreement[claim.id] ?? null, project })));
@@ -295,9 +313,11 @@ export async function runDream(host, options = {}) {
         report.claims.truncated += fitted.dropped; // reported, never silent
         report.claims.distilled += plan.length;
       }
+      await stage("route");
       // The plan is what was drafted and stays as written. The decisions the run acts on are made now, against the
       // claims, policy and visibility in force now, so a resumed plan may route differently from when it was drafted.
-      const decided = plan.map((entry) => ({ ...entry, decision: route(entry.claim, entry.agreement, index) }));
+      const siblings = plan.map((entry) => entry.claim);
+      const decided = plan.map((entry) => ({ ...entry, decision: route(entry.claim, entry.agreement, siblings) }));
       if (known) {
         report.claims.rerouted += decided.filter((entry) => {
           const before = index.byClaim.get(entry.claim.id)?.envelope.decision;
@@ -327,6 +347,7 @@ export async function runDream(host, options = {}) {
       await stage("receipt");
       // The next sitting routes against, and reconciles with, what this one just proposed.
       index = indexProposals(await store.listProposals(), proposerId);
+      reslot();
     }
 
     for (const decision of decisions) report.claims[decision.outcome === "routed" ? "routed" : "uncontested"] += 1;
@@ -341,7 +362,7 @@ export async function runDream(host, options = {}) {
     // Briefs derive from the store every run, because review changes them without any new telemetry.
     await stage("brief");
     const latest = indexProposals(await store.listProposals(), proposerId);
-    const { items, excluded } = await briefItems(store, latest, proposerId, (claim, agreement) => route(claim, agreement, latest));
+    const { items, excluded } = await briefItems(store, latest, proposerId);
     const written = writeBriefs({
       briefsDir,
       items,

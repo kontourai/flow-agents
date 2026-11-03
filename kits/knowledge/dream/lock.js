@@ -7,21 +7,23 @@
  * Corpus proposals (see run.js); owner liveness is what `@kontourai/monument`
  * will provide once it is published, and this file is the piece to delete then.
  *
- * Installing: the lock file appears whole or not at all. Its owner record is
- * written to a private temp file and hard-linked into place, which fails if the
- * lock exists, so a reader never sees a half-written lock.
+ * Protocol, with nothing ever removed from under a live owner:
  *
- * Staleness: an owner is stale only when its process is gone. Age alone proves
- * nothing (a long run is alive), so a live pid is never evicted. A lock that
- * cannot be read is held until it is old enough to be debris from a crash.
+ *   The lock is a directory `<lock>` holding numbered epoch directories
+ *   `<lock>/<n>`. The owner is whoever created the HIGHEST epoch. To acquire,
+ *   read the highest epoch N: if it is held by a live process, the lock is held.
+ *   If there is none, or it was released, or its process is gone, `mkdir` epoch
+ *   N+1. `mkdir` of one name succeeds for exactly one caller, so two callers can
+ *   never both take the same epoch. A caller that wins then re-reads the
+ *   directory: if a higher epoch exists (it was slow, and others have moved on),
+ *   it was never the owner, backs out and reports the lock held. Only the winner
+ *   removes older epochs, and it never removes the highest, so the epoch number
+ *   only grows and a slow caller can never take an epoch that was already used.
  *
- * Taking over a stale lock is the one step that removes a file another process
- * may be about to replace, so it is serialized: a takeover holds a second
- * exclusive file (`<lock>.takeover`), re-reads the lock while holding it, and
- * removes it only if it is still the exact stale owner judged earlier. With one
- * remover at a time, the lock file is only ever absent because its stale owner
- * was just removed, and installing it is the same exclusive link. A process that
- * loses any of these races gives way and reports the lock held.
+ * An epoch's owner record is written right after its `mkdir`. An epoch with no
+ * readable record is held until it is old enough to be debris from a crash. A
+ * live pid is never evicted for being old: a long run is alive. Release marks the
+ * epoch released; it does not delete it.
  *
  * @module dream/lock
  */
@@ -33,6 +35,7 @@ import * as path from "node:path";
 import { dreamError } from "./util.js";
 
 const UNREADABLE_GRACE_MS = 60_000;
+const MAX_ATTEMPTS = 8;
 
 function pidAlive(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
@@ -44,91 +47,75 @@ function pidAlive(pid) {
   }
 }
 
-function readOwner(file) {
+const readJson = (file) => {
   try {
-    const owner = JSON.parse(fs.readFileSync(file, "utf8"));
-    return owner && typeof owner === "object" ? owner : null;
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    return value && typeof value === "object" ? value : null;
   } catch {
     return null;
   }
-}
+};
 
-function isStale(file, owner, now) {
-  if (owner) return !pidAlive(owner.pid);
+function epochs(lock) {
   try {
-    return now() - fs.statSync(file).mtimeMs > UNREADABLE_GRACE_MS;
-  } catch {
-    return false; // gone already: the next attempt will find it free
+    return fs.readdirSync(lock).filter((name) => /^[1-9][0-9]{0,15}$/.test(name)).map(Number).sort((a, b) => a - b);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
   }
 }
 
-const sameOwner = (a, b) => (a?.token ?? null) === (b?.token ?? null);
-
-/** Hold the takeover guard, or return null if another process has it. */
-function takeGuard(guard, now) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const fd = fs.openSync(guard, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
-      try {
-        fs.writeFileSync(fd, `${JSON.stringify({ pid: process.pid, started_at: now() })}\n`);
-      } finally {
-        fs.closeSync(fd);
-      }
-      return () => fs.rmSync(guard, { force: true });
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      // A guard left by a crashed takeover must not wedge the lock forever.
-      if (!isStale(guard, readOwner(guard), now)) return null;
-      fs.rmSync(guard, { force: true });
-    }
+/** True when the epoch is held by a live owner, or is too fresh to call debris. */
+function epochHeld(lock, epoch, now) {
+  const dir = path.join(lock, String(epoch));
+  if (fs.existsSync(path.join(dir, "released"))) return false;
+  const owner = readJson(path.join(dir, "owner.json"));
+  if (owner) return pidAlive(owner.pid);
+  try {
+    return now() - fs.statSync(dir).mtimeMs <= UNREADABLE_GRACE_MS;
+  } catch {
+    return false;
   }
-  return null;
 }
 
 /**
- * @param {string} file absolute lock path
+ * @param {string} lock absolute path of the lock directory
  * @param {{ now?: () => number }} [options]
  * @returns {() => void} release
  */
-export function acquireDreamLock(file, { now = Date.now } = {}) {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+export function acquireDreamLock(lock, { now = Date.now } = {}) {
+  fs.mkdirSync(lock, { recursive: true, mode: 0o700 });
   const token = randomBytes(12).toString("hex");
-  const temp = `${file}.${process.pid}.${token}.tmp`;
   const held = () => dreamError("DREAM_LOCKED", "another dream run holds the lock");
-  fs.writeFileSync(temp, `${JSON.stringify({ pid: process.pid, started_at: now(), token })}\n`, { flag: "wx", mode: 0o600 });
-  const install = () => {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const seen = epochs(lock);
+    const top = seen.at(-1) ?? 0;
+    if (top > 0 && epochHeld(lock, top, now)) throw held();
+    const mine = top + 1;
+    const dir = path.join(lock, String(mine));
     try {
-      fs.linkSync(temp, file); // atomic, and fails if the lock exists
-      return true;
+      fs.mkdirSync(dir, { mode: 0o700 });
     } catch (error) {
-      if (error?.code === "EEXIST") return false;
+      if (error?.code === "EEXIST") continue; // another caller took this epoch: look again
       throw error;
     }
-  };
-  try {
-    if (install()) return release(file, token);
-
-    const judged = readOwner(file);
-    if (!isStale(file, judged, now)) throw held();
-    const unguard = takeGuard(`${file}.takeover`, now);
-    if (!unguard) throw held();
-    try {
-      // Re-judge while holding the guard: the lock may have changed hands since the first look.
-      const current = readOwner(file);
-      if (!sameOwner(current, judged) || !isStale(file, current, now)) throw held();
-      fs.rmSync(file, { force: true });
-      if (!install()) throw held(); // a fresh acquirer won the vacancy; it is the owner
-      return release(file, token);
-    } finally {
-      unguard();
+    fs.writeFileSync(path.join(dir, "owner.json"), `${JSON.stringify({ pid: process.pid, started_at: now(), token })}\n`, { mode: 0o600 });
+    // Slow callers may have created lower epochs, and others may have moved past us. Owning means being the highest.
+    const after = epochs(lock);
+    if (after.at(-1) !== mine) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      throw held();
     }
-  } finally {
-    fs.rmSync(temp, { force: true });
+    for (const older of after.filter((n) => n < mine)) fs.rmSync(path.join(lock, String(older)), { recursive: true, force: true });
+    return () => {
+      // Mark, never delete: the highest epoch must stay so that numbers cannot be reused.
+      if (readJson(path.join(dir, "owner.json"))?.token !== token) return;
+      try {
+        fs.writeFileSync(path.join(dir, "released"), "\n", { mode: 0o600 });
+      } catch {
+        // An unreleased epoch names this process, so it goes stale the moment the process exits.
+      }
+    };
   }
-}
-
-function release(file, token) {
-  return () => {
-    if (readOwner(file)?.token === token) fs.rmSync(file, { force: true });
-  };
+  throw held();
 }

@@ -65,15 +65,23 @@ the digest of the cursor it was about to commit). Each earlier step is replay-sa
   written with the first proposal, so a run that dies partway leaves the plan in the store.
   The retry reads it back and proposes only what is missing, with no new model call, even if
   the model would now word everything differently. A sitting whose plan is fully in the
-  store is reused the same way. A plan holds at most 32 claims and 192 KiB; the run keeps
-  the first by claim id that fit and counts the rest in `claims.truncated`.
+  store is reused the same way. A claim over 8 KiB is left out. A plan holds at most 32
+  claims and 192 KiB; the run keeps the first by claim id that fit, and counts what it left
+  out in `claims.truncated`. By construction an envelope stays under 1 MiB, and a stored body
+  over that is refused before it is parsed. The envelope format changed while this was under
+  review (now `1.2`); a proposal written by an earlier push of this branch fails with
+  `DREAM_RECEIPT_CORRUPT` naming the format, and rejecting it in the store clears it.
 - **Routing is decided now, not then.** The plan holds no routing decision, because a
   decision depends on what else is in the store and on the policy in force. Each proposal
   carries the decision made when it was proposed; a resumed or reused plan is routed again
   against today's claims, policy and visibility, the run acts on that (review items,
-  `publish`, metrics), and `claims.rerouted` counts the claims whose outcome changed. A plan
-  is keyed by the visibility it was made under, because visibility is part of a claim's
-  identity: changing it starts a new plan and a new extraction.
+  `publish`, metrics), and `claims.rerouted` counts the claims whose outcome changed. The
+  other claims of the same plan are peers too, so two claims from one sitting that disagree
+  are routed to review against each other. A decision is made when a claim is proposed or its
+  plan resumed; a policy change on a later no-op run does not re-publish. A plan is keyed by
+  the visibility it was made under (compared as a set of audiences, as claim identity is),
+  because visibility is part of a claim's identity: changing it starts a new plan and a new
+  extraction.
 - A claim already proposed, in any state, is reused by its claim id. A rejected proposal
   stays rejected and is not proposed again.
 - **Corrupt or forged receipts stop the run.** A proposal by this proposer that does not
@@ -93,16 +101,19 @@ the digest of the cursor it was about to commit). Each earlier step is replay-sa
 - A sitting may propose at most 32 claims. The run keeps the first 32 by claim id and
   counts the rest in `claims.truncated`.
 
-**Why the lock is small.** `dream.lock` is mutual exclusion and nothing more: the file is
-hard-linked into place whole, so no reader sees a half-written lock, and an owner is stale
-only when its process is gone (a live pid is never evicted for being old, so a reused pid
-can delay recovery until that process exits). Taking over a stale lock is serialized by a
-second exclusive file, `dream.lock.takeover`: the taker re-reads the lock while holding it
-and removes it only if it is still the exact owner it judged stale, and a taker that loses
-any race gives way. Failing to remove the lock at the end never fails a finished run. `@kontourai/monument` owns idempotency keys, dedup,
-record-before-effect and owner liveness, and it is `private: true` in the Station
-workspace, so this repository cannot consume it. The cursor, Corpus proposals and the lock
-are the only durable state. Adopting Monument later replaces the lock and the
+**Why the lock is small.** `dream.lock/` is mutual exclusion and nothing more, built so that
+nothing is ever removed from under a live owner. It holds numbered epoch directories, and the
+owner is whoever made the highest. A caller reads the highest epoch; if its process is alive
+the lock is held. Otherwise (none, released, or its process is gone) it makes the next epoch
+with `mkdir`, which succeeds for exactly one caller, and then re-reads: if a higher epoch has
+appeared it was passed by others, removes only its own epoch and reports the lock held. Only
+the winner removes older epochs, and the highest stays after release, so an epoch number is
+never reused. An epoch with no readable owner is held until it is a minute old. A live pid is
+never evicted for being old, so a reused pid can delay recovery until that process exits.
+Failing to mark the epoch released at the end never fails a finished run. `@kontourai/monument`
+owns idempotency keys, dedup, record-before-effect and owner liveness, and it is `private: true`
+in the Station workspace, so this repository cannot consume it. The cursor, Corpus proposals and
+the lock are the only durable state. Adopting Monument later replaces the lock and the
 reconciliation, and makes this repository its first consumer outside Station. See
 [the tracking issue](https://github.com/kontourai/station/issues/4485).
 
@@ -200,8 +211,8 @@ pinned by `src/cli/dream-host.test.mjs`, so changing it breaks a test.
 Details a binding must respect:
 
 - **The host.** Called as a library, the host must supply `extract`; only the CLI builds one from a Datum role. A real run also needs `publish`.
-- **Where failures surface.** A run that fails after it has started throws with `error.report` attached and, from the CLI, prints that report. Failures before it starts (disabled, locked, misconfigured, host module missing or untrusted) carry an error `code` and no report: from the CLI they exit 2, except a held lock, which exits 75.
-- **Reading a `success` report.** The report on disk is written before the cursor is committed and names it (`cursor.commit_intent`, `digest`, `offset`). `cursor.committed` is true in the returned report and, when the follow-up rewrite succeeds, on disk. If the process died between the two, the report says `success` and the cursor did not move. A consumer reconciles by comparing `cursor.digest` with the cursor file; the file is the authority.
+- **Where failures surface.** A run that fails after it has started throws with `error.report` attached and, from the CLI, prints that report. Failures before it starts (disabled, locked, misconfigured, host module missing, untrusted, unloadable, or whose factory throws) carry an error `code` and no report: from the CLI they exit 2, except a held lock, which exits 75.
+- **Reading a `success` report.** The report on disk is written before the cursor is committed and names it (`cursor.commit_intent`, `digest`, `offset`). `cursor.committed` is true in the returned report and, when the follow-up rewrite succeeds, on disk. If the process died between the two, the report says `success` with `commit_intent`, and the cursor may or may not have moved. A consumer reconciles by comparing `cursor.digest` with the cursor file; the file is the authority.
 - **Stable, additive.** Report fields are added, never renamed or removed, within `schema_version` 1.0. The test pins the current key sets, so adding one is a deliberate edit.
 
 ## Turning it on

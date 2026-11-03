@@ -214,12 +214,28 @@ test("CLI: a missing host module is a configuration error (exit 2), not a crash"
   assert.match(err.text(), /no such file/);
 });
 
+test("CLI: a host module that does not load, or whose factory throws, is a configuration error (exit 2)", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const config = writeConfig(ws);
+  const parsed = JSON.parse(fs.readFileSync(config, "utf8"));
+  for (const [name, body] of [["syntax.mjs", "export const = ;"], ["throws.mjs", "export async function createDreamHost() { throw new Error('store unreachable'); }"]]) {
+    const host = path.join(ws.root, name);
+    fs.writeFileSync(host, body, { mode: 0o600 });
+    fs.writeFileSync(config, JSON.stringify({ ...parsed, host }), { mode: 0o600 });
+    const err = sink();
+    assert.equal(await main(["run", "--config", config], { stdout: sink(), stderr: err }), 2, name);
+    assert.match(err.text(), /host module failed to load/);
+  }
+});
+
 test("CLI: exit code 75 when another run holds the lock", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
   const config = writeConfig(ws);
-  fs.mkdirSync(ws.dreamDir, { recursive: true });
-  fs.writeFileSync(path.join(ws.dreamDir, "dream.lock"), JSON.stringify({ pid: process.pid, started_at: Date.now(), token: "live" }));
+  const epoch = path.join(ws.dreamDir, "dream.lock", "1");
+  fs.mkdirSync(epoch, { recursive: true });
+  fs.writeFileSync(path.join(epoch, "owner.json"), JSON.stringify({ pid: process.pid, started_at: Date.now(), token: "live" }));
   assert.equal(await main(["run", "--config", config], { stdout: sink(), stderr: sink() }), 75);
 });
 
@@ -385,7 +401,7 @@ test("the invocation contract a host scheduler binds to is pinned: ids, exports,
   assert.equal(report.schema_version, "1.0");
   assert.equal(report.trigger, "station-scheduler");
   assert.deepEqual(Object.keys(report.sittings).sort(), ["deferred_incomplete", "deferred_over_cap", "distilled", "resumed", "reused", "seen"]);
-  assert.deepEqual(Object.keys(report.claims).sort(), ["created", "distilled", "rejected", "rerouted", "reused", "routed", "truncated", "uncontested"]);
+  assert.deepEqual(Object.keys(report.claims).sort(), ["created", "distilled", "peers_capped", "rejected", "rerouted", "reused", "routed", "truncated", "uncontested"]);
   assert.ok(["success", "noop", "dry-run", "blocked", "failed"].includes(report.status));
   assert.ok(fs.existsSync(path.join(ws.dreamDir, "reports", `${report.run_id}.json`)));
 });

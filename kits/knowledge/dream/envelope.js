@@ -35,18 +35,30 @@ import { canonicalJson } from "@kontourai/relay";
 import { assertMemoryClaim, recomputeMemoryRouting } from "../adapters/memory-claims/index.mjs";
 import { dreamError, truncateUtf8 } from "./util.js";
 
-export const ENVELOPE_VERSION = "1.1";
+export const ENVELOPE_VERSION = "1.2";
 export const MEMORY_CATEGORY = "memory.claim";
 /** The most claims one sitting may propose. Beyond it the run keeps the first by claim id and reports the rest. */
 export const MAX_CLAIMS_PER_SITTING = 32;
 /** The most bytes of plan one sitting carries. Every proposal repeats the plan, so this bounds the store's cost per claim. */
 export const MAX_PLAN_BYTES = 192 * 1024;
-/** What a stored envelope may weigh before it is refused unread: the plan, plus its own claim and decision again. */
-export const MAX_ENVELOPE_BYTES = 512 * 1024;
+/** The most bytes one claim may weigh to be proposed. Larger ones are left out and counted. */
+export const MAX_CLAIM_BYTES = 8 * 1024;
+/**
+ * What a stored envelope may weigh before it is refused unread. By construction an envelope is at most the plan
+ * (<= 192 KiB), its own claim (<= 8 KiB) and its routing decision, which embeds the claim and at most 64 same-slot
+ * peers (<= 8 KiB each, see `MAX_CLAIM_BYTES`): about 0.8 MiB.
+ */
+export const MAX_ENVELOPE_BYTES = 1024 * 1024;
 
 const digestOf = (value) => `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 export const planDigest = (plan) => digestOf(plan);
-export const visibilityKey = (visibility) => digestOf(visibility ?? null);
+/** Visibility compares as a set of audiences, as claim identity does, so the key ignores order and repeats. */
+export const visibilityKey = (visibility) => {
+  if (visibility?.kind === "restricted" && Array.isArray(visibility.audiences)) {
+    return digestOf({ kind: "restricted", audiences: [...new Set(visibility.audiences)].sort() });
+  }
+  return digestOf(visibility ?? null);
+};
 
 /**
  * @typedef {{claim: object, agreement: {passes:number,agreeing:number}|null, project: string|null}} PlanEntry
@@ -68,13 +80,15 @@ export function encodeEnvelope({ plan, index, decision, sitting }) {
 }
 
 /**
- * The longest prefix of `entries` (already ordered) that fits the claim and byte bounds, and how many were left out.
- * Read max + 1 and refuse: the caller reports the rest, so nothing is cut silently.
+ * The entries that fit the bounds, in order, and how many were left out. A claim over `MAX_CLAIM_BYTES` is left out
+ * on its own and the rest are still considered; the plan stops growing at `MAX_CLAIMS_PER_SITTING` or
+ * `MAX_PLAN_BYTES`. The caller reports what was left out, so nothing is cut silently.
  */
 export function fitPlan(entries) {
   const plan = [];
   let bytes = 2;
   for (const entry of entries) {
+    if (Buffer.byteLength(canonicalJson(entry.claim)) > MAX_CLAIM_BYTES) continue;
     const size = Buffer.byteLength(canonicalJson(entry)) + 1;
     if (plan.length >= MAX_CLAIMS_PER_SITTING || bytes + size > MAX_PLAN_BYTES) break;
     plan.push(entry);
@@ -121,6 +135,8 @@ export function decodeEnvelope(body) {
     const own = plan[sitting.index];
     if (!own || canonicalJson(own) !== canonicalJson({ claim: value.claim, agreement: value.agreement, project: value.project })) return null;
     if (!verifyEntry(own) || !verifyDecision(value.decision, value.claim)) return null;
+    // A claim over the bound could not have been written by this module, and would make a decision too large to store.
+    if (plan.some((entry) => Buffer.byteLength(canonicalJson(entry.claim)) > MAX_CLAIM_BYTES)) return null;
     return value;
   } catch {
     return null;
@@ -153,7 +169,14 @@ export function indexProposals(proposals, proposerId) {
     const envelope = decodeEnvelope(proposal.candidate.body);
     if (!envelope) {
       if (proposal.proposer_id === proposerId && proposal.state !== "rejected") {
-        throw dreamError("DREAM_RECEIPT_CORRUPT", `proposal ${proposal.id} is this run's but does not verify; reject it in the store to continue`, { proposalId: proposal.id });
+        let format = "";
+        try {
+          const written = JSON.parse(proposal.candidate.body)?.dream;
+          if (written && written !== ENVELOPE_VERSION) format = ` (written in envelope format ${String(written).slice(0, 16)}; this run reads ${ENVELOPE_VERSION})`;
+        } catch {
+          // not JSON at all
+        }
+        throw dreamError("DREAM_RECEIPT_CORRUPT", `proposal ${proposal.id} is this run's but does not verify${format}; reject it in the store to continue`, { proposalId: proposal.id });
       }
       unreadable += 1;
       continue;
