@@ -14,7 +14,7 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | The model call | The host. `distillMemoryClaims` takes an `extract` function; bind it to Traverse's `extract()` and a provider. |
 | Claim shape, routing policy, run metrics | This Kit. |
 | Support verification, review items, reviewer decisions | Survey. |
-| Which claims are current in a slot, supersession over time | Surface (`kontourai/surface#204`, a design today). The caller passes the current claims. |
+| Which claims are current in a slot, supersession over time | Surface. The design is merged ([Surface knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md)); the projection is not implemented, so the caller passes the current claims. |
 | Entity merge, split and alias review | Survey (`kontourai/survey#243`). The Kit routes an entity change to it by reference. |
 | Visibility lattice | Surface (`kontourai/surface#350`). The Kit compares audiences by set inclusion. |
 | Gates and evidence | Flow. |
@@ -25,26 +25,31 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 
 | Field | Meaning |
 |---|---|
-| `subject` | `{type, id, label}`. `id` is the case-folded label until entity review says otherwise. |
-| `property` | The attribute asserted. A subject and property are a *slot*. |
-| `value` | What is asserted. |
-| `validTime` | Half-open `[from, until)` of when the value held in the world. An absent bound is unbounded; an absent `validTime` asserts no bound. An empty or unparseable interval is rejected, never guessed. |
+| `subject` | `{type, id, label}`, Surface's `(subjectType, subjectId)`. `id` is the lower-cased label until entity review says otherwise. |
+| `claimType`, `property`, `qualifiers` | Surface's `claimType`, `fieldOrBehavior` and canonical qualifiers. With the subject they are the *slot* a claim competes in. The slot key is Surface's own `canonicalClaimKey` with `claimType` added, as the decision specifies. The extractor does not produce qualifiers yet, so slots are coarser than Surface's and conflict more readily. |
+| `value` | What is asserted. Values compare by structural JSON equality, so a different spelling is a different value. |
+| `validTime` | Half-open `[from, until)` of when the value held in the world, per the Surface decision. `until` is exclusive; it is not Surface's inclusive authority-trace `validUntil`, and not `expiresAt` (freshness). An absent bound is unbounded; an absent `validTime` asserts no bound. Instants must be ISO 8601 dates or zoned date-times; an empty or unparseable interval is rejected, never guessed. |
 | `speaker`, `source` | Who asserted it, and where it is grounded: source ref, `chars:<start>-<end>` locator, the verbatim excerpt, the instant of the turn, and its role. The Kit derives `source` from Traverse's verified provenance and the turn the locator falls in; the model does not supply it. |
 | `posture` | How the speaker asserted it: `stated`, `proposed`, `hypothetical` or `retracted`. It is a typed field, not a text prefix. |
 | `supersedes` | Edges to the current claims this one replaces (`succession`) or retracts (`correction`). |
 | `audience` | Principals who may see it. Absent inherits the source's audience: omission never widens. |
 
 `posture` is how the speaker spoke. It is not whether anyone has reviewed the claim;
-that is derived (see [Recall](#recall)). The `id` is the digest of the claim's
-content, recomputed on every read, so an edited claim is refused. Evidence fields
-(excerpt, locator, time, role) are not part of identity: two extraction passes that
-find the same fact find the same claim.
+that is derived (see [Recall](#recall)). `retracted` posture is the speaker withdrawing
+an assertion; it is not Surface's admitted retraction event, which excludes a claim from
+a projection, and the Kit does not treat it as one. The `id` is the digest of the claim's
+content (subject, claimType, property, qualifiers, value, valid time, speaker, posture,
+edges, audience, source ref), recomputed on every read, so an edited claim is refused.
+As the Surface decision requires, the same id means the same content: a value that
+differs only in case is a different claim. Evidence fields (excerpt, locator, time, role)
+are not part of identity. `source.observedAt` is when the turn happened, not the
+receiver-recorded knowledge instant Surface's projection takes as its own input.
 
 ### Extraction
 
 `MEMORY_CLAIM_TARGET_SCHEMA` is the `TargetFieldSchema[]` the Kit gives Traverse:
 `subject`, `subjectType`, `property`, `value`, `speaker`, `posture`, `validFrom`,
-`validUntil`, `replacesPrior`. It deliberately asks for no audience and no
+`validUntil` (exclusive), `replacesPrior`. It deliberately asks for no audience and no
 consequence flag; those belong to the host and the policy, not to a model.
 
 `distillMemoryClaims({sitting, extract, passes})` formats a runtime-session sitting
@@ -52,14 +57,18 @@ consequence flag; those belong to the host and the policy, not to a model.
 extractions (default 2), assembles Traverse's proposals into claims, and returns:
 
 - `claims`, one per distinct claim found by any pass;
-- `agreement[claimId] = {passes, agreeing}`. A pass that failed counts as a pass
-  that did not agree;
+- `agreement[claimId] = {passes, agreeing}`. Passes agree on a finding when they share
+  slot, posture and value up to case and spacing (identity is stricter). A pass that
+  failed counts as a pass that did not agree;
 - `rejected`, each incomplete, postureless, ungrounded or malformed group with its
   reason. Nothing is dropped silently.
 
 An edge is drawn only with all its evidence. A `succession` needs the speaker to say
 the value replaces an earlier one (`replacesPrior`), a stated start time, a
-same-slot *stated* predecessor with a different value, and overlapping valid times.
+same-slot *stated* predecessor **by the same speaker** with a different value, and
+overlapping valid times. Replacing someone else's claim needs an authority decision the
+Kit cannot make (the Surface decision leaves a third party's edge pending), so it stays a
+plain claim and routing sees the conflict.
 A `correction` edge comes from a `retracted` claim and points at current claims
 holding the same value. Without all of that the new claim is a plain claim, and
 routing sees a conflict rather than a quiet replacement.
@@ -74,7 +83,7 @@ also becomes a Survey review item that a person decides. Review never blocks rec
 | Rule | Routes when |
 |---|---|
 | `contradicted-by-verification` | A Survey support-verification record bound to this claim's value says `contradicted`. A record for a different value does not apply. An abstention (timeout, malformed, error) is neither a pass nor a fail and does not route by itself. |
-| `conflicting-current-values` | A new `stated` claim and a current `stated` claim in the same slot hold different values over overlapping valid time, and the new claim carries no edge to it. Recency never resolves a conflict. Properties listed in `policy.multiValued` are exempt. A malformed interval counts as overlap. |
+| `conflicting-current-values` | A new `stated` claim and a current `stated` claim in the same slot hold different values (structural JSON equality) over overlapping valid time, and the new claim carries no edge to it. An edge to a claim that is not current in the slot replaces nothing. Recency never resolves a conflict. Properties listed in `policy.multiValued` are exempt. A malformed interval counts as overlap. |
 | `consequential-supersession` | A claim carries a `supersedes` edge and its property or subject type is in `policy.consequential` (`"*"` matches all). Retractions count. Empty by default, so a host that has not said what is consequential routes none; set it. |
 | `entity-identity-change` | Any entity merge, split or alias proposal. They always go to review; no similarity score promotes an identity. |
 | `low-extraction-agreement` | Fewer than `minPasses` passes were measured, or fewer than `minAgreement` of them produced the claim. Unmeasured is not agreed. |
@@ -83,7 +92,9 @@ also becomes a Survey review item that a person decides. Review never blocks rec
 `hypothetical` and `proposed` claims never conflict and never supersede: they assert
 nothing about the present. They are still subject to agreement and visibility.
 
-Defaults: `minPasses: 2`, `minAgreement: 1`, `multiValued: []`, `consequential` empty.
+Defaults: `minPasses: 2`, `minAgreement: 1`, `multiValued: []`, `consequential` empty. The Surface
+decision requires cardinality and value equality to be explicit versioned inputs: here
+they are `multiValued` and the fixed structural-equality rule of policy version `1.0`.
 
 ### Recomputable
 
@@ -154,12 +165,28 @@ A claim with no routing decision is labelled `unreviewed` with `routing:
 Any recall path added later (the injected brief of `#672`, a store query) must go
 through this function or enforce the same rule.
 
+## Storing proposed claims
+
+Not built here. Per the decision recorded on `kontourai/corpus#40`, a `proposed` claim is
+stored with the store's `proposeCreate` as a pending create proposal; applying it needs a
+reviewer distinct from the proposer, which is where a routed claim's Survey decision
+lands. `proposeCreate` is not on corpus `main` and its lane branch is unpublished, so this
+Kit does not call it or assume its input shape.
+
+One consequence needs deciding before recall is wired: that decision keeps pending
+proposals out of the default working set and ordinary reads, but a `proposed` claim must
+stay recallable (review never blocks recall). A recall path therefore has to read the
+explicit proposals query filtered to `pending` and present the result through
+`presentMemoryClaims`, or the store has to offer a labelled read. The injected-memory
+marker (`kits/knowledge/memory-marker.js`, `#669`) wraps what recall injects; it is not
+consumed here, and `presentMemoryClaims` does not apply it.
+
 ## Not in this slice
 
 - Writing claims to the personal store (`#670`) and the dream pipeline's use of them
   (`#671`). Claims are returned and recorded as evidence; staging into a store is the
   next lane.
-- The Survey entity-review item (`survey#243`) and Surface's current-state projection
-  (`surface#204`). Both are consumed by shape and replaced by the real contract when
-  they land.
+- The Survey entity-review item (`survey#243`; its branch holds no commits yet) and Surface's
+  current-state projection (the design is merged; the projection is not). Both are consumed
+  by shape and replaced by the real contract when they land.
 - A Flow gate that requires this evidence.
