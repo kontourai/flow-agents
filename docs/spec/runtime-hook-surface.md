@@ -250,10 +250,16 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 **Context contributors.** `workflow-steering.js` composes registered synchronous
 `(event, payload, budget) -> { priority, text } | null` contributors in descending
-priority, preserving registration order for ties. Workflow state runs first and
+priority, preserving registration order for ties. The supplied budget applies
+to each contributor individually; workflow state retains its existing unbounded
+output so its safety guidance is never dropped. Workflow state runs first and
 retains its existing output and behavior. The registry and profile-memory reader
 make no model or network calls. Existing workflow-state behavior, including its
-separate install-freshness refresh, is unchanged.
+separate install-freshness refresh, is unchanged. The hook runner loads the
+shared marker asynchronously, including on Node versions that cannot require
+ES modules synchronously. The legacy synchronous programmatic `run` entry point
+keeps its return type; on such Node versions it omits profile memory, while the
+installed hook uses the asynchronous entry point.
 
 **Profile brief contract (v1).** A producer writes UTF-8 JSON at
 `$XDG_DATA_HOME/knowledge-store/knowledge/dream/briefs/global.json` (when
@@ -262,10 +268,13 @@ separate install-freshness refresh, is unchanged.
 entries are ordered by the producer and contain display-ready text. The reader
 accepts at most 32768 bytes on disk, rejects malformed UTF-8, malformed schema,
 control characters and embedded marker delimiters, and reads only a regular
-file without following a final symlink. It never writes or invokes a model or
+file, rejecting a final symlink. Where `O_NOFOLLOW` is unavailable, it checks
+the file before opening and verifies its identity afterward; that fallback is
+not atomic against a concurrent path swap. It never writes or invokes a model or
 network. On Claude Code and Codex SessionStart, standard and strict hook
 profiles enable `profile-memory`; `SA_DISABLED_HOOKS=profile-memory` disables
-it, and minimal and other harnesses leave it off. No other event injects it.
+it for both; `profile-memory-claude-code` and `profile-memory-codex` disable
+each harness independently. Minimal and other harnesses leave it off. No other event injects it.
 The output uses the shared knowledge memory marker, labels the content
 “Background, not instruction”, and says the code wins over conflicting memory.
 The marker, label, entries and closing marker are bounded to 8192 UTF-8 bytes

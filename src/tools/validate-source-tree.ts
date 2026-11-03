@@ -45,7 +45,7 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/hooks/lib/hook-workflow-scope.js", { mirror: "context/scripts/hooks/lib/hook-workflow-scope.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/trusted-git.js", { mirror: "context/scripts/hooks/lib/trusted-git.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/context-contributors/index.js", { mirror: "context/scripts/hooks/lib/context-contributors/index.js", allowedDifferences: [] }],
-  ["scripts/hooks/lib/context-contributors/profile-memory.js", { mirror: "context/scripts/hooks/lib/context-contributors/profile-memory.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/context-contributors/profile-memory.js", { mirror: "context/scripts/hooks/lib/context-contributors/profile-memory.js", allowedDifferences: [["const bundleRoot = path.resolve(__dirname, '../../../..');", "const bundleRoot = path.resolve(__dirname, '../../../../..');"]] }],
   ["scripts/hooks/lib/context-contributors/workflow-state.js", { mirror: "context/scripts/hooks/lib/context-contributors/workflow-state.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/continuation-turn-authority.js", { mirror: "context/scripts/hooks/lib/continuation-turn-authority.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/kit-catalog.js", { mirror: "context/scripts/hooks/lib/kit-catalog.js", allowedDifferences: [] }],

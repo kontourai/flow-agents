@@ -43,7 +43,7 @@ const { canonicalFlowState } = require('./stop-goal-fit');
 const { withFlowRecoveryFenceRead } = require('./lib/flow-recovery-fence');
 const { createContributorRegistry } = require('./lib/context-contributors');
 const { workflowStateContributor } = require('./lib/context-contributors/workflow-state');
-const { profileMemoryContributor } = require('./lib/context-contributors/profile-memory');
+const { profileMemoryContributor, profileMemoryEnabled, loadMemoryMarker } = require('./lib/context-contributors/profile-memory');
 
 // #1172: the `STEERING` phase-transition table (tool-planner/tool-worker/tool-code-reviewer/
 // tool-security-reviewer/tool-verifier -> "⚡ EXECUTION COMPLETE — Next: review …") lived here
@@ -820,7 +820,7 @@ function supersessionSteering(root, current) {
 }
 
 
-function run(rawInput) {
+function runSync(rawInput, marker) {
   try {
     const payload = JSON.parse(rawInput);
     const compose = createContributorRegistry([
@@ -828,11 +828,22 @@ function run(rawInput) {
         withFlowRecoveryFenceRead, canonicalGuidance, stateSteering, stateNeedsAmbientSteering,
         stateBlockChanged, kitWorkflowSteering, supersessionSteering, resumeSteering,
         contextMapSteering, skillDriftSteering, installFreshnessSteering }, rawInput),
-      profileMemoryContributor,
+      (event, payload, budget) => profileMemoryContributor(event, payload, budget, marker),
     ]);
     return rawInput + compose(payload.hook_event_name || '', payload, 8192);
   } catch { return rawInput; }
 }
+
+// Keep the synchronous programmatic entry point while loading ESM markers
+// asynchronously for the actual hook, including Node 22.0 through 22.11.
+async function runAsync(rawInput) {
+  try {
+    const input = JSON.parse(rawInput);
+    const marker = profileMemoryEnabled(input.hook_event_name || '') ? await loadMemoryMarker() : null;
+    return runSync(rawInput, marker);
+  } catch { return rawInput; }
+}
+function run(rawInput) { return runSync(rawInput); }
 
 if (require.main === module) {
   let data = '';
@@ -840,13 +851,14 @@ if (require.main === module) {
   process.stdin.on('data', chunk => {
     data += chunk;
   });
-  process.stdin.on('end', () => {
-    process.stdout.write(String(run(data)));
+  process.stdin.on('end', async () => {
+    process.stdout.write(String(await runAsync(data)));
   });
 }
 
 module.exports = {
   run,
+  runAsync,
   stateSteering,
   critiqueSteering,
   contextMapSteering,

@@ -1,14 +1,17 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { test } = require('node:test');
+const { test, before } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '../../..');
-const { run } = require(path.join(root, 'scripts/hooks/workflow-steering.js'));
+const { run, runAsync } = require(path.join(root, 'scripts/hooks/workflow-steering.js'));
 const { writePerActorCurrent } = require(path.join(root, 'scripts/hooks/lib/current-pointer.js'));
-const { profileMemoryContributor, MAX_CONTEXT_BYTES } = require(path.join(root, 'scripts/hooks/lib/context-contributors/profile-memory.js'));
+const { profileMemoryContributor: profileMemoryRead, loadMemoryMarker, MAX_CONTEXT_BYTES } = require(path.join(root, 'scripts/hooks/lib/context-contributors/profile-memory.js'));
+let markers;
+before(async () => { markers = await loadMemoryMarker(); assert.ok(markers); });
+function profileMemoryContributor(event, payload, budget) { return profileMemoryRead(event, payload, budget, markers); }
 const golden = require('./workflow-golden.json');
 
 function setup(t) {
@@ -25,7 +28,7 @@ test('AC7 pre-extraction golden outputs for three events with and without workfl
  for (const active of [false, true]) {
   const cwd = path.join(temp, active ? 'active' : 'none'); fs.mkdirSync(path.join(cwd, 'docs'), { recursive: true }); fs.writeFileSync(path.join(cwd, 'AGENTS.md'), '# Fixture\n'); fs.writeFileSync(path.join(cwd, 'docs/context-map.md'), '# Map\n');
   if (active) { const base = path.join(cwd, '.kontourai/flow-agents'); const dir = path.join(base,'matrix'); fs.mkdirSync(dir,{recursive:true}); fs.writeFileSync(path.join(dir,'state.json'),JSON.stringify({schema_version:'1.0',task_slug:'matrix',status:'in_progress',phase:'execution',next_action:{status:'ready',summary:'Continue matrix work.'}})); writePerActorCurrent(base,'matrix-actor',{active_slug:'matrix'}); }
-  for (const event of ['SessionStart','UserPromptSubmit','PostToolUse']) { const raw=JSON.stringify({hook_event_name:event,cwd}); const out=run(raw); assert.equal(out.slice(raw.length).split(temp).join('<TEMP>'), golden[`${active}:${event}`], `${active}:${event}`); }
+  for (const event of ['SessionStart','UserPromptSubmit','PostToolUse']) { const raw=JSON.stringify({hook_event_name:event,cwd}); const out=run(raw,{}); assert.equal(typeof out,'string'); assert.equal(out.slice(raw.length).split(temp).join('<TEMP>'), golden[`${active}:${event}`], `${active}:${event}`); }
  }
 });
 
@@ -65,14 +68,14 @@ test('registry and memory contributor perform no network or child process calls'
  assert.equal(result,'BAC'); assert.deepEqual(seen,[['SessionStart',{x:1},123]]);
 });
 
-test('marker resolves when the bundle root itself is named context', t => {
+test('marker resolves when the bundle root itself is named context', async t => {
  const { temp } = setup(t); const bundle=path.join(temp,'context');
  for (const file of ['scripts/package.json','scripts/hooks/lib/hook-flags.js','scripts/hooks/lib/context-contributors/profile-memory.js','kits/knowledge/memory-marker.js']) {
   const dest=path.join(bundle,file); fs.mkdirSync(path.dirname(dest),{recursive:true}); fs.copyFileSync(path.join(root,file),dest);
  }
  let profile;
  assert.doesNotThrow(() => { profile=require(path.join(bundle,'scripts/hooks/lib/context-contributors/profile-memory.js')); }, 'marker must resolve inside the bundle');
- assert.match(profile.profileMemoryContributor('SessionStart',{},8192).text,/violet kestrel/);
+ const marker=await profile.loadMemoryMarker(); assert.match(profile.profileMemoryContributor('SessionStart',{},8192,marker).text,/violet kestrel/);
 });
 
 test('invalid, oversized, symlinked and non-fitting briefs contribute nothing', t => {
@@ -93,4 +96,39 @@ test('a FIFO brief fails open without waiting for a writer', { skip: process.pla
  const code=`const assert=require('node:assert/strict'); const p=require(${JSON.stringify(modulePath)}); assert.equal(p.profileMemoryContributor('SessionStart',{},8192),null);`;
  const probe=spawnSync(process.execPath,['-e',code],{env:process.env,encoding:'utf8',timeout:5000});
  assert.equal(probe.error?.code,undefined,'profile reader must not block on FIFO'); assert.equal(probe.status,0,probe.stderr);
+});
+
+test('marker framing, control rejection, real priority and per-harness rollback', async t => {
+ const { brief }=setup(t); const { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE }=markers;
+ assert.equal(MAX_CONTEXT_BYTES,8192);
+ const value=profileMemoryContributor('SessionStart',{},8192); assert.ok(value.text.includes(INJECTED_MEMORY_OPEN)); assert.ok(value.text.includes(INJECTED_MEMORY_CLOSE));
+ for (const bad of ['hello\u202eother', `before ${INJECTED_MEMORY_OPEN} after`]) { fs.writeFileSync(brief,JSON.stringify({version:1,entries:[bad]})); assert.equal(profileMemoryContributor('SessionStart',{},8192),null); }
+ fs.writeFileSync(brief,Buffer.concat([Buffer.from('{"version":1,"entries":["'),Buffer.from([0xff]),Buffer.from('"]}') ])); assert.equal(profileMemoryContributor('SessionStart',{},8192),null,'invalid UTF-8 inside otherwise valid JSON');
+ fs.copyFileSync(path.join(__dirname,'global.json'),brief); process.env.SA_DISABLED_HOOKS='profile-memory-codex'; process.env.FLOW_AGENTS_HOOK_RUNTIME='codex'; assert.equal(profileMemoryContributor('SessionStart',{},8192),null); process.env.FLOW_AGENTS_HOOK_RUNTIME='claude-code'; assert.ok(profileMemoryContributor('SessionStart',{},8192));
+ const raw=JSON.stringify({hook_event_name:'SessionStart',cwd:tempDir(t)}); const out=await runAsync(raw); assert.ok(out.indexOf('CONTEXT MAP:') < out.indexOf(INJECTED_MEMORY_OPEN)); assert.ok(out.includes('CONTEXT MAP:') && out.includes(INJECTED_MEMORY_OPEN));
+});
+
+function tempDir(t) { const cwd=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'flow672-order-'));fs.mkdirSync(path.join(cwd,'docs'));fs.writeFileSync(path.join(cwd,'AGENTS.md'),'# Fixture\n');fs.writeFileSync(path.join(cwd,'docs/context-map.md'),'# Map\n');t.after(()=>fs.rmSync(cwd,{recursive:true,force:true}));return cwd; }
+
+test('adapters support ESM markers without require(esm)', t => {
+ const { temp }=setup(t); const preload=path.join(temp,'block-require-esm.cjs');
+ fs.writeFileSync(preload,`const M=require('module'), old=M._load; M._load=function(id,...args){if(String(id).endsWith('memory-marker.js')){const e=new Error('simulated old Node require ESM');e.code='ERR_REQUIRE_ESM';throw e;}return old.call(this,id,...args)};`);
+ const cwd=tempDir(t); const input=JSON.stringify({hook_event_name:'SessionStart',cwd});
+ for(const adapter of ['codex','claude']) { const args=adapter==='codex'?['workflow-steering','workflow-steering.js','default']:['SessionStart','workflow-steering','workflow-steering.js','default'];const p=spawnSync(process.execPath,['--require',preload,path.join(root,'scripts/hooks',`${adapter}-hook-adapter.js`),...args],{input,encoding:'utf8',env:process.env});assert.equal(p.status,0,p.stderr); const output=JSON.parse(p.stdout); assert.ok(output.hookSpecificOutput, 'workflow output survives marker loading');const context=output.hookSpecificOutput.additionalContext;assert.match(context,/CONTEXT MAP:/);assert.match(context,/violet kestrel/); }
+});
+
+test('missing marker preserves workflow and never loads a parent marker', t => {
+ const {temp}=setup(t);const cwd=tempDir(t);const input=JSON.stringify({hook_event_name:'SessionStart',cwd});
+ const parent=path.join(temp,'outside'); const install=path.join(parent,'context'); fs.mkdirSync(path.join(install,'scripts'),{recursive:true});fs.cpSync(path.join(root,'scripts/hooks'),path.join(install,'scripts/hooks'),{recursive:true});fs.cpSync(path.join(root,'scripts/lib'),path.join(install,'scripts/lib'),{recursive:true});fs.copyFileSync(path.join(root,'scripts/package.json'),path.join(install,'scripts/package.json')); const rogue=path.join(parent,'kits/knowledge/memory-marker.js');fs.mkdirSync(path.dirname(rogue),{recursive:true});fs.writeFileSync(rogue,`require('fs').writeFileSync(${JSON.stringify(path.join(parent,'witness'))},'bad');exports.INJECTED_MEMORY_OPEN='X';exports.INJECTED_MEMORY_CLOSE='Y';`);
+ for (const disabled of ['', 'profile-memory']) { const p=spawnSync(process.execPath,[path.join(install,'scripts/hooks/workflow-steering.js')],{input,encoding:'utf8',env:{...process.env,SA_DISABLED_HOOKS:disabled}});assert.equal(p.status,0,p.stderr);assert.match(p.stdout,/CONTEXT MAP:/);assert.doesNotMatch(p.stdout,/violet kestrel/);assert.equal(fs.existsSync(path.join(parent,'witness')),false); }
+});
+
+test('profile module load and read make no network or process calls', t => {
+ const {temp}=setup(t);const probe=path.join(temp,'network-probe.cjs'); const file=path.join(root,'scripts/hooks/lib/context-contributors/profile-memory.js');
+ fs.writeFileSync(probe,`(async()=>{let attempts=0;for(const [o,k] of [[require('net'),'connect'],[require('net').Socket.prototype,'connect'],[require('http'),'request'],[require('https'),'request'],[require('dns'),'lookup'],[require('child_process'),'spawn'],[globalThis,'fetch']])o[k]=()=>{attempts++;throw Error('network/process')}; const m=require(${JSON.stringify(file)});const marker=await m.loadMemoryMarker();const result=m.profileMemoryContributor('SessionStart',{},8192,marker);require('assert').match(result.text,/violet kestrel/);require('assert').equal(attempts,0)})().catch(e=>{console.error(e);process.exitCode=1});`);
+ const p=spawnSync(process.execPath,[probe],{encoding:'utf8',env:process.env});assert.equal(p.status,0,p.stderr);
+});
+
+test('context mirror imports its package marker without parent search', async t => {
+ setup(t); const mirror=require(path.join(root,'context/scripts/hooks/lib/context-contributors/profile-memory.js'));const marker=await mirror.loadMemoryMarker();assert.ok(marker);assert.match(mirror.profileMemoryContributor('SessionStart',{},8192,marker).text,/violet kestrel/);
 });
