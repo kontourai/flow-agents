@@ -168,6 +168,18 @@ required. The visibility order is Surface's and entity proposals are Survey's co
 the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
 evidence and the metrics.
 
+## Runtime-session residue
+
+The Knowledge kit's `runtime-session` residue source (#669) reads Claude Code and
+Codex transcripts through the `@kontourai/ferry` importers into canonical
+`@kontourai/thread` messages, which are the two runtime dependencies it adds. The
+kit does not parse transcripts itself; the few facts Thread does not yet carry
+are small shims that name their upstream issue. The host supplies the telemetry
+file and the authorized transcript roots, ingest writes nothing, and it returns a
+candidate cursor that the transaction owner commits only after its own work
+succeeds. See the [Knowledge kit documentation](../kits/knowledge/docs/README.md#residue-sources-runtime-session-ingest)
+for the cursor rule, drift handling and scrub guarantees.
+
 ## Delegation authority and bounded rounds
 
 The package exports separate `delegation-group-rounds` and
