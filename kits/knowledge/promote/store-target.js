@@ -74,7 +74,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
       const conflict = code === 'REQUEST_KEY_CONFLICT';
       const refused = code === 'MISSING_EVIDENCE';
       const message = conflict ? 'Corpus request key conflict; reconcile the batch' : refused ? 'Corpus refused the candidate; reconcile the batch before retrying' : 'Corpus proposal outcome is unconfirmed; retry only the identical batch';
-      throw Object.assign(new Error(message, { cause }), { ...(conflict || refused ? { code } : {}), completedProposals: proposals, failedCandidateIndex: index });
+      throw Object.assign(new Error(message, { cause }), { ...(conflict || refused ? { code } : {}), completedProposals: proposals, failedCandidateIndex: index, requestKey });
     }
   }
   return { root: rootName, posture: 'proposed', review_state: 'not_observed', proposals };

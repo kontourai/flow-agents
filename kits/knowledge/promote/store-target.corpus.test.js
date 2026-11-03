@@ -64,7 +64,7 @@ test('identical batch retries reuse receipts and changed content conflicts', asy
   assert.equal((await store.listByType('raw')).length, 0);
   const created = await store.applyCreate(retried.proposals[1], 'independent-reviewer');
   await store.purge([created], { agent: 'independent-reviewer', rationale: 'erase' });
-  await assert.rejects(runPromote({ ...options, store }), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 1);
+  await assert.rejects(runPromote({ ...options, store }), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 1 && /retired/.test(error.cause.message) && /^knowledge\.promote:[a-f0-9]{64}$/.test(error.requestKey));
   assert.equal((await store.listByType('raw')).length, 0);
 });
 
