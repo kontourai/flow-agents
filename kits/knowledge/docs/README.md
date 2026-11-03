@@ -844,3 +844,12 @@ recomputable, and the per-run metrics. Uncontested claims are recorded as `propo
 recallable and labelled unreviewed; `presentMemoryClaims` never shows a claim without
 its posture. It is exposed through the declared `knowledge.memory-claims` adapter and
 the `memory-claims`, `memory-routing` and `memory-routing-flow` package exports.
+
+## Dream run
+
+[The dream run](dream.md) turns accumulated Claude Code and Codex sessions into
+proposed memory claims and re-renders the budgeted profile briefs. A host scheduler or an
+opt-in `SessionEnd`/`PreCompact` hook starts it. It is disabled until an operator
+enables it, it consumes the residue, claim, routing and proposal contracts above rather
+than defining its own, it only proposes, and it commits its cursor last. It is exposed
+through the declared `knowledge.dream-runner` adapter and the `knowledge.dream` flow.
