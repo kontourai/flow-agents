@@ -903,10 +903,12 @@ describe("review round 1 regressions (PR #1575)", () => {
     fs.rmSync(probe);
     if (!insensitive) return t.skip("case-sensitive filesystem");
     const { box, file } = single("claude-code", ndjson([claudeRec("CASE_ALIAS")]));
-    appendTelemetry(box, event("claude-code", path.join(path.dirname(file), "CASE.JSONL")));
-    const result = run(box);
+    // The host spells its authorized root with different case than the telemetry path does.
+    const aliasRoot = path.join(path.dirname(box.roots[0]), path.basename(box.roots[0]).toUpperCase());
+    const result = run(box, { transcriptRoots: [aliasRoot, box.roots[1]] });
     assert.equal(result.report.skipped.some((s) => s.reason === "TRANSCRIPT_OUTSIDE_ROOTS"), false);
     assert.match(JSON.stringify(result.residues), /CASE_ALIAS/);
+    assert.ok(file);
   });
 
   test("F10: a Codex rollout with a session_meta and no conversation is skipped, not blocked", () => {
