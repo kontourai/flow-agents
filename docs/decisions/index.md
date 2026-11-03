@@ -29,6 +29,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [knowledge-store-provider](./knowledge-store-provider.md) | current | Knowledge store provider |
 | [kontour-resource-contract](./kontour-resource-contract.md) | needs-decision | Kontour Resource Contract |
 | [mcp-posture](./mcp-posture.md) | needs-decision | MCP posture |
+| [memory-claim-routing](./memory-claim-routing.md) | current | Memory claim routing |
 | [model-routing](./model-routing.md) | current | Model routing |
 | [portable-host-integration](./portable-host-integration.md) | current | Portable host integration boundary |
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
