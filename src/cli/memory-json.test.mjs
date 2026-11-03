@@ -82,3 +82,18 @@ test("a Proxy is copied through its descriptors once, to a stable snapshot", () 
   const proxy = new Proxy(target, { get(t, k) { reads++; return reads > 1 ? "changed" : t[k]; } });
   assert.deepEqual(jsonSnapshot(proxy, "t"), { a: 1 }, "descriptors, not property gets, are what is read");
 });
+
+test("a list whose length changes while it is read is refused, not recorded as the shorter list", () => {
+  let reads = 0;
+  const target = [{ a: 1 }];
+  const proxy = new Proxy(target, { get(t, key, receiver) { if (key === "length") return ++reads === 1 ? 1 : 0; return Reflect.get(t, key, receiver); } });
+  assert.throws(() => jsonSnapshotList(proxy, "t"), MemoryClaimError, "length 1, then 0");
+  let reads2 = 0;
+  const growing = new Proxy([{ a: 1 }], { get(t, key, receiver) { if (key === "length") return ++reads2 === 1 ? 1 : 2; return Reflect.get(t, key, receiver); } });
+  assert.throws(() => jsonSnapshotList(growing, "t"), MemoryClaimError, "length 1, then 2");
+});
+
+test("null is not an empty list: only an absent list is", () => {
+  assert.deepEqual(jsonSnapshotList(undefined, "t"), []);
+  assert.throws(() => jsonSnapshotList(null, "t"), /expected a list/);
+});

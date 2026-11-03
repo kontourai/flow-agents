@@ -30,9 +30,11 @@ export function jsonSnapshot(value: unknown, label: string): unknown {
     try {
       if (Array.isArray(item)) {
         if (Object.getPrototypeOf(item) !== Array.prototype) return bad("an array subclass cannot be recorded");
-        if (Object.getOwnPropertySymbols(item).length || Object.keys(item).length !== item.length) return bad("a list with extra keys, symbols or holes cannot be recorded");
+        // The length is read once and checked again at the end: a list whose length changes while it is being read (a Proxy,
+        // say) would otherwise be recorded as a shorter list with no sign that anything was dropped.
         const length = item.length;
         if (length > MAX_SNAPSHOT_NODES) return bad("too large to record");
+        if (Object.getOwnPropertySymbols(item).length || Object.keys(item).length !== length) return bad("a list with extra keys, symbols or holes cannot be recorded");
         const out: unknown[] = [];
         for (let index = 0; index < length; index++) {
           const descriptor = Object.getOwnPropertyDescriptor(item, index);
@@ -40,6 +42,7 @@ export function jsonSnapshot(value: unknown, label: string): unknown {
           if (descriptor.value === undefined) return bad("an undefined list entry cannot be recorded");
           out.push(walk(descriptor.value, depth + 1, ancestors));
         }
+        if (item.length !== length || out.length !== length) return bad("a list changed while it was being read");
         return out;
       }
       const prototype = Object.getPrototypeOf(item);

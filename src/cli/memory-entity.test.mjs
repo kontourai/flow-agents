@@ -119,3 +119,29 @@ test("the emitter refuses what Survey would: no evidence, no checksum, one subje
   await bad(await request({ candidates: [{ operation: "merge", subjects: SUBJECTS, claims: [], confidenceComponents: {} }] }));
   await bad(await request({ candidates: [{ operation: "merge", subjects: SUBJECTS, claims: [{ claim: owner, stance: "supports" }, { claim: owner, stance: "context" }], confidenceComponents: {} }] }));
 });
+
+// --- review round 6 ---------------------------------------------------------------------------------------------------
+
+test("the emitter needs each evidence field Survey needs, and refuses blank ones", async () => {
+  const { owner } = await claims();
+  const ok = await request();
+  const withClaim = claim => ({ ...ok, candidates: [{ ...ok.candidates[0], claims: [{ claim, stance: "supports" }] }] });
+  for (const [what, claim] of [
+    ["a blank claim id", { ...owner, id: "  " }], ["a blank source ref", { ...owner, source: { ...owner.source, ref: " " } }],
+    ["a blank locator", { ...owner, source: { ...owner.source, locator: "\n" } }], ["a blank excerpt", { ...owner, source: { ...owner.source, excerpt: " " } }],
+    ["a missing observedAt", { ...owner, source: { ...owner.source, observedAt: undefined } }],
+  ]) assert.throws(() => memoryEntityProposalInput(withClaim(claim)), MemoryClaimError, what);
+});
+
+test("a claim's own value is not part of the proposal, so whatever it holds cannot make the emitter refuse a request Survey would accept", async () => {
+  const { owner } = await claims();
+  const ok = await request();
+  const hostileValues = [JSON.parse('{"__proto__":{"x":1}}'), { deep: deepValue(40) }, -0, [undefined], { a: NaN }, Object.create(null)];
+  for (const value of hostileValues) {
+    const claim = { ...owner, value };
+    const input = memoryEntityProposalInput({ ...ok, candidates: [{ ...ok.candidates[0], claims: [{ claim, stance: "supports" }] }] });
+    assert.equal(input.alternatives[0].evidence[0].id, owner.id);
+    assert.equal(JSON.stringify(input).includes("__proto__"), false, "and the value never reaches the proposal");
+  }
+});
+function deepValue(n) { let v = 1; for (let i = 0; i < n; i++) v = { a: v }; return v; }

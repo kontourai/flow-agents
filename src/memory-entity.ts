@@ -13,6 +13,8 @@ import { jsonSnapshot } from "./memory-json.js";
 
 const isOperation = (value: unknown): boolean => typeof value === "string" && (["merge", "split", "alias", "same-as", "related-to"].includes(value) || /^domain:\S+$/.test(value));
 
+const asList = (value: unknown): any[] => (Array.isArray(value) ? value : []);
+
 /** Survey's `EntityOperation`. */
 export type MemoryEntityOperation = "merge" | "split" | "alias" | "same-as" | "related-to" | `domain:${string}`;
 
@@ -64,9 +66,20 @@ export function memoryEntityProposalInput(request: {
   candidates: readonly MemoryEntityCandidate[];
   checksums: Readonly<Record<string, string>>;
 }): MemoryEntityProposalInput {
-  // Survey's createEntityProposal needs lossless JSON (no NaN, undefined, accessors or cycles); take it once, here, so the
-  // Kit validates exactly what it hands over.
-  const input = jsonSnapshot(request, "entity proposal input") as typeof request;
+  // Survey's createEntityProposal needs lossless JSON (no NaN, undefined, accessors or cycles). Take, once, only the fields
+  // that go into the proposal: a claim's own value is not among them, so a value Survey would never see cannot make the
+  // emitter refuse a request Survey would accept. Everything below validates this copy, which is what is handed over.
+  const input = jsonSnapshot({
+    revision: request?.revision, proposer: request?.proposer, policy: request?.policy,
+    candidates: asList(request?.candidates).map(candidate => ({
+      operation: candidate?.operation, subjects: candidate?.subjects, confidenceComponents: candidate?.confidenceComponents,
+      claims: asList(candidate?.claims).map(entry => ({ stance: entry?.stance, id: entry?.claim?.id, ref: entry?.claim?.source?.ref, observedAt: entry?.claim?.source?.observedAt, locator: entry?.claim?.source?.locator, excerpt: entry?.claim?.source?.excerpt })),
+    })),
+    checksums: request?.checksums,
+  }, "entity proposal input") as unknown as {
+    revision: string; proposer: MemoryEntityProposalInput["proposer"]; policy: MemoryEntityProposalInput["policy"]; checksums: Record<string, string>;
+    candidates: { operation: MemoryEntityOperation; subjects: [{ type: string; id: string }, { type: string; id: string }]; confidenceComponents: Record<string, number>; claims: { stance: MemoryEntityEvidence["stance"]; id: string; ref: string; observedAt: string; locator: string; excerpt: string }[] }[];
+  };
   // Survey makes the same demands; refuse here so the Kit never hands it (or records) what it would reject.
   for (const [label, value] of [["revision", input.revision], ["proposer id", input.proposer?.id], ["policy id", input.policy?.id], ["policy revision", input.policy?.revision]] as const) {
     if (typeof value !== "string" || !value.trim()) throw new MemoryClaimError("invalid", `an entity proposal needs a ${label}`);
@@ -88,14 +101,18 @@ export function memoryEntityProposalInput(request: {
       for (const [key, score] of Object.entries(candidate.confidenceComponents ?? {})) {
         if (!key.trim() || typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) throw new MemoryClaimError("invalid", `confidence component ${key} must be a number from 0 to 1`);
       }
-      const evidence = candidate.claims.map(({ claim, stance }) => {
-        if (!["supports", "contradicts", "context"].includes(stance)) throw new MemoryClaimError("invalid", "an evidence stance is supports, contradicts or context");
-        if (!Number.isFinite(Date.parse(claim.source.observedAt))) throw new MemoryClaimError("invalid", "evidence needs an observedAt that is a date-time");
-        const checksum = input.checksums[claim.source.ref];
-        if (typeof checksum !== "string" || !checksum.trim()) throw new MemoryClaimError("invalid", `no checksum for source ${claim.source.ref}`);
+      const evidence = candidate.claims.map(entry => {
+        if (!["supports", "contradicts", "context"].includes(entry.stance)) throw new MemoryClaimError("invalid", "an evidence stance is supports, contradicts or context");
+        // Survey requires each of these on every piece of evidence.
+        for (const [what, text] of [["claim id", entry.id], ["source ref", entry.ref], ["locator", entry.locator], ["excerpt", entry.excerpt]] as const) {
+          if (typeof text !== "string" || !text.trim()) throw new MemoryClaimError("invalid", `evidence needs a ${what}`);
+        }
+        if (typeof entry.observedAt !== "string" || !Number.isFinite(Date.parse(entry.observedAt))) throw new MemoryClaimError("invalid", "evidence needs an observedAt that is a date-time");
+        const checksum = input.checksums?.[entry.ref];
+        if (typeof checksum !== "string" || !checksum.trim()) throw new MemoryClaimError("invalid", `no checksum for source ${entry.ref}`);
         return {
-          id: claim.id, sourceRef: claim.source.ref, sourceId: claim.source.ref, checksum,
-          observedAt: claim.source.observedAt, locatorScheme: "text-span" as const, locator: claim.source.locator, excerpt: claim.source.excerpt, stance,
+          id: entry.id, sourceRef: entry.ref, sourceId: entry.ref, checksum,
+          observedAt: entry.observedAt, locatorScheme: "text-span" as const, locator: entry.locator, excerpt: entry.excerpt, stance: entry.stance,
         };
       });
       if (new Set(evidence.map(item => item.id)).size !== evidence.length) throw new MemoryClaimError("invalid", "a claim grounds an entity candidate once");

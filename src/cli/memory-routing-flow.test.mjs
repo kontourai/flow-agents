@@ -461,3 +461,31 @@ test("the list itself is read by index: a custom .map, holes and -0 cannot chang
   await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [copy, , copy] }), /review input/);
   await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: "not a list" }), /expected a list/);
 });
+
+// --- review round 6 ---------------------------------------------------------------------------------------------------
+
+test("a review list whose length changes while it is read cannot silently drop a supplied decision", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const { reviewDecisions } = rejection(run.items[0], 5);
+  let reads = 0;
+  const shrinking = new Proxy([...reviewDecisions], { get(target, key, receiver) { if (key === "length") return ++reads === 1 ? target.length : 0; return Reflect.get(target, key, receiver); } });
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: shrinking }), /review input/);
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: CHANGES(), reviewDecisions: shrinking }), /review input/);
+  assert.equal((await reviewEvidence(cwd)).length, 0);
+});
+
+test("null is not an empty review list, and review events are snapshotted like decisions", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const { reviewEvents } = rejection(run.items[0], 5);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: null }), /expected a list/);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: null }), /expected a list/);
+  const event = JSON.parse(JSON.stringify(reviewEvents[0]));
+  let reads = 0;
+  Object.defineProperty(event, "spec", { enumerable: true, get() { reads++; return reads <= 2 ? reviewEvents[0].spec : null; } });
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: [event] }), /accessor/);
+  const hostile = JSON.parse(`{"kind":"ReviewSessionEvent","__proto__":{"spec":{}}}`);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: [hostile] }), /__proto__/);
+  assert.equal((await reviewEvidence(cwd)).length, 0);
+});
