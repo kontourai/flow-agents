@@ -30,6 +30,12 @@ test("the Kit emits Survey's EntityProposalInput from real claims: exact spans, 
   }]);
 });
 
+test("each claim's stance toward the proposal is carried to Survey as given", async () => {
+  const { owner, budget } = await claims();
+  const input = memoryEntityProposalInput(await request({ candidates: [{ operation: "alias", subjects: SUBJECTS, claims: [{ claim: owner, stance: "contradicts" }, { claim: budget, stance: "context" }], confidenceComponents: {} }] }));
+  assert.deepEqual(input.alternatives[0].evidence.map(item => [item.id, item.stance]), [[owner.id, "contradicts"], [budget.id, "context"]]);
+});
+
 test("the committed proposals are what the Kit's emitter produces, made by Survey's createEntityProposal", async () => {
   const { owner, budget } = await claims();
   const fixtures = loadEntityProposals();

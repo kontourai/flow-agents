@@ -305,6 +305,22 @@ test("assertMemoryClaim fails closed: edited content, missing posture, unknown f
   assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, validTime: { from: "soon" } })), MemoryClaimError);
 });
 
+test("visibility is Surface's closed form, and anything else is refused rather than read as open", async () => {
+  const { earlier } = await fixtureClaims();
+  const claim = earlier.result.claims[0];
+  assert.deepEqual(claim.visibility, { kind: "restricted", audiences: ["user:fixture"] }, "distill stamps the sitting's visibility");
+  for (const ok of [{ kind: "public" }, { kind: "restricted", audiences: [] }, { kind: "restricted", audiences: ["a", "b"] }]) {
+    assert.doesNotThrow(() => assertMemoryClaim(memoryClaim({ ...claim, visibility: ok })), JSON.stringify(ok));
+  }
+  for (const bad of ["public", "private", { audiences: ["a"] }, { kind: "everyone" }, { kind: "public", audiences: ["a"] }, { kind: "restricted" }, { kind: "restricted", audiences: "a" }, { kind: "restricted", audiences: [""] }, { kind: "restricted", audiences: [1] }, { kind: "restricted", audiences: ["a"], extra: 1 }, { kind: "restricted", audiences: Array.from({ length: 1025 }, (_, i) => `a${i}`) }, null, []]) {
+    assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, visibility: bad })), { code: "invalid" }, JSON.stringify(bad)?.slice(0, 60));
+  }
+  const { visibility: _v, ...bare } = asDocument(claim);
+  assert.doesNotThrow(() => assertMemoryClaim(memoryClaim(bare)), "no visibility is legal: it reads as sealed");
+  await assert.rejects(distillMemoryClaims({ sitting: loadSittings()[0], passes: 1, visibility: "public", extract: traverseExtract(scriptedProvider([[{ quote: "The widget service uses PostgreSQL 15 as its primary database.", subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated" }]])) }), { code: "invalid" });
+  await assert.rejects(distillMemoryClaims({ sitting: { sittingId: "s", turns: [] }, visibility: { kind: "restricted" }, extract: async () => ({ proposals: [] }) }), { code: "invalid" }, "refused even when there is nothing to extract");
+});
+
 test("distill refuses an unbounded number of passes", async () => {
   await assert.rejects(distillMemoryClaims({ sitting: loadSittings()[0], passes: 9, extract: async () => ({ proposals: [] }) }), MemoryClaimError);
   await assert.rejects(distillMemoryClaims({ sitting: loadSittings()[0], passes: 0, extract: async () => ({ proposals: [] }) }), MemoryClaimError);

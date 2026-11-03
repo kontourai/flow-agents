@@ -267,6 +267,7 @@ export function assembleMemoryClaims(result: ExtractionResultLike, context: Asse
 }
 
 const failVisibility = (): never => { throw new MemoryClaimError("invalid", "visibility must be public or restricted to named audiences"); };
+const failIfUnreadable = (visibility: unknown): void => { if (readMemoryVisibility(visibility) === undefined) failVisibility(); };
 
 function assemble(fields: Record<string, ExtractionProposalLike>, context: AssembleContext): MemoryClaim {
   const text = (name: string) => {
@@ -394,6 +395,7 @@ export async function distillMemoryClaims(input: {
 }): Promise<DistillResult> {
   const passes = input.passes ?? DEFAULT_DISTILL_PASSES;
   if (!Number.isInteger(passes) || passes < 1 || passes > 8) throw new MemoryClaimError("invalid", "passes must be an integer from 1 to 8");
+  if (input.visibility !== undefined) failIfUnreadable(input.visibility); // host configuration: refuse once, up front
   if (input.sitting.turns.length === 0) return { claims: [], agreement: {}, rejected: [], warnings: [] };
   const { content, spans } = formatSittingForExtraction(input.sitting.turns);
   const locate = (locator: string) => {
