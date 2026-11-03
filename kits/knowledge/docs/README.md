@@ -293,6 +293,96 @@ Run the deterministic fixture suite:
 node --test kits/knowledge/context-check/context-check.test.js
 ```
 
+### Living Context recall contract (Context Check 1.1)
+
+**`knowledge.living-context`** extends the Context Check recall without changing `1.0`: the
+`1.0` flow, schemas and `runContextCheck` are byte-compatible, and `runContextCheck` refuses a
+`1.1` input rather than running it under `1.0` rules. The `1.1` entry points live in
+`context-check/living-context.js` (recall and reconciliation) and
+`context-check/living-context-answer.js` (the answer step); loading `index.js` still needs no
+Surface or Survey package. Schemas:
+[`living-context-input`](../schemas/knowledge/living-context-input.schema.json) and
+[`living-context-result`](../schemas/knowledge/living-context-result.schema.json).
+
+```js
+import { runLivingContext } from "./context-check/living-context.js";
+import { answerLivingContext } from "./context-check/living-context-answer.js";
+
+const input = {
+  schema_version: "1.1",
+  workspace: "platform", repository: "example/repository",
+  revision: "0123456789abcdef0123456789abcdef01234567",
+  target_audience: "maintainer",
+  reader: "maintainer",                              // required; authenticated by the host
+  as_of: { now: "2026-06-01T00:00:00Z" },            // required; valid_at / known_at default to now
+  budget: { max_tokens: 4000 },                      // required; no default budget
+  changed_surfaces: ["src/context-adapter.js"],
+  knowledge_roots: [{ id: "repository-decisions", provider: "git-repo", manifest_path: "knowledge/claims.json" }]
+};
+const recall = runLivingContext({ repoRoot, input, proposalDir });   // evidence only
+const answer = await answerLivingContext({ repoRoot, input });       // separate, abstaining step
+```
+
+**Identity is required and fails closed.** A missing or blank `reader` is `READER_IDENTITY_REQUIRED`;
+a reader that every selected root does not list under its manifest `readers` is
+`UNKNOWN_READER_IDENTITY`. Both are refused before any claim is read and before any file is written.
+Context Check does not authenticate: the host supplies an identity it has authenticated, and Context
+Check only refuses one it does not recognise. A claim is visible only to the readers in its
+`visibility` list; a claim with no `visibility` is visible to no one. Hidden, absent, and
+not-yet-known claims return the same plain `no_answer`, so a reader cannot learn that a claim
+exists. Reconciliation and proposals cover only claims the reader may see.
+
+**As-of on two time axes**, with the semantics of Surface's knowledge-accumulation decision
+(kontourai/surface#204): `known_at` is knowledge time, filtered on the manifest's
+`recorded_at` (the receiver-recorded instant, never a claim's own authored time), and `valid_at`
+is valid time, a half-open `[from, until)` interval from `valid_time` (an absent bound is
+unbounded and asserts nothing about perpetual truth). A supersession edge counts only once its
+successor is recorded at or before `known_at`; a `succession` takes effect at the successor's
+`valid_time.from`, while a `correction` (the default) supersedes the claim throughout. A missing
+or untimed input makes the answer `unverifiable`, never guessed. No wall clock is read: `now` is
+explicit and also the instant freshness is judged at. `status` is the status **as of the stated
+instants** and the result echoes them, so a predecessor read at a `valid_at` before its
+succession, or a `known_at` before its successor was recorded, is `current` with a reason saying
+exactly why. A superseded claim is never `current` at a successor that is known and in effect, and
+a successor the reader cannot see makes it `unverifiable` rather than `current`, without naming it.
+
+**Reasons, not just rank.** Every recall carries `matched_signals`, `freshness` (Surface's
+claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surface does; a stale
+claim is `unverifiable`), `review_posture` (`proposed` unless the manifest names a reviewer),
+`supersession_chain` (only edges this reader may see and that were known at `known_at`), and
+`reasons`. A requested `claim_ids` list keeps its own order; a default scan lists claims that
+intersect the change first, then by id. Order is the only ranking, and the reasons say why each
+result is there.
+
+**Budget.** `budget.max_tokens` is explicit. Each result's cost is `ceil(utf8 bytes / 4)` of its
+JSON (the estimator is named in the result), no-answer entries included. Results are kept or
+dropped whole in that order and never truncated; a result that does not fit is dropped and the
+next one is still tried. Every drop is listed by id with its estimated cost, and a drop makes the
+verdict `not_verified`. Reconciliation and proposals are not budgeted, so a dropped recall never
+hides an affected claim.
+
+**Abstention is a separate step.** Recall returns evidence and never an answer.
+`answerLivingContext` re-derives recall and sends only a `current` recall, with its authority
+document read at the pinned revision, to an independent `@kontourai/survey` `SupportVerifier`;
+the default verifier is deterministic (the claim statement must appear in its authority text) and
+production callers inject a model or human verifier. Only `supported` answers; `contradicted` is
+reported; `not-addressed`, an abstaining, throwing, or timed-out verifier, an unreadable, empty or
+oversized (`MAX_EVIDENCE_BYTES`) authority document, and budget drops all abstain, and any
+abstention makes the set `not_verified`. Each verdict is kept as Survey's immutable
+`CandidateVerification`.
+
+**Change observation.** `observeRepositoryChange({ repoRoot, base, head })` turns two raw commits
+into the `diff.paths` input. It is a thin shim: Lookout observes registered web, API and
+structured-file sources and has no Git-revision source yet. It refuses an empty or oversized
+change (`maxPaths`, default 500) rather than truncating.
+
+Freshness is Surface's, not a second derivation; Ephemeris is the time actor that wakes a Flow
+run when a claim expires and owns no derivation, so it is not a dependency of this check.
+
+```bash
+node --test kits/knowledge/context-check/living-context.test.js
+```
+
 ---
 
 ## Decision Lifecycle — Retiring Records (S7)

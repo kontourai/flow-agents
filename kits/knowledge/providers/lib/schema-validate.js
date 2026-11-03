@@ -4,7 +4,7 @@
  * Supports exactly the draft-07 subset used by the Knowledge Kit graph schemas
  * (schemas/knowledge/*.schema.json): type, required, properties,
  * additionalProperties:false, enum, const, items, minLength, minItems, pattern,
- * uniqueItems, anyOf, oneOf, integer, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
+ * uniqueItems, anyOf, oneOf, integer, minimum/maximum, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
  * — it exists so health reports and conformance tests can assert schema validity
  * without pulling an external dependency (the same zero-dep discipline as the
  * promote sub-flow's decision-delta validator in promote/lib.js).
@@ -91,6 +91,11 @@ function validateNode(value, schema, root, pathStr, errors) {
     if (typeof schema.pattern === "string" && !(new RegExp(schema.pattern).test(value))) {
       errors.push(`${pathStr}: string does not match pattern ${JSON.stringify(schema.pattern)}`);
     }
+  }
+
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) errors.push(`${pathStr}: number below minimum ${schema.minimum}`);
+    if (typeof schema.maximum === "number" && value > schema.maximum) errors.push(`${pathStr}: number above maximum ${schema.maximum}`);
   }
 
   if (Array.isArray(value)) {
