@@ -25,7 +25,7 @@ test('store target registers the host root and passes distilled content and all 
   assert.deepEqual(calls[0], ['register', 'memory', '/authorized/memory']);
   assert.equal(calls.length, 2);
   const [, candidate, proposer, evidence, options] = calls[1];
-  assert.deepEqual(candidate, { type: 'raw', ...candidates[0], provenance: { agent: 'distiller', session_id: residue.provenance.sessionId, note: JSON.stringify({ session_id: residue.provenance.sessionId, transcript_ref: residue.provenance.transcriptRef, sitting_id: residue.sittingId }) } });
+  assert.deepEqual(candidate, { type: 'raw', ...candidates[0], provenance: { agent: 'distiller', session_id: residue.provenance.sessionId, note: JSON.stringify({ session_id: residue.provenance.sessionId, transcript_ref: residue.provenance.transcriptRef, sitting_id: residue.sittingId, content_hash: residue.contentHash }) } });
   assert.equal(proposer, 'distiller');
   assert.equal(evidence.agent, 'distiller');
   assert.match(options.requestKey, /^knowledge\.promote:[a-f0-9]{64}$/);
@@ -71,9 +71,11 @@ test('registration failure stops before Corpus; an uncertain proposal failure is
   const second = setup();
   second.opts.candidates = [...candidates, ...candidates];
   let attempts = 0;
-  second.opts.store.proposeCreate = async () => { if (++attempts === 1) return 'first'; throw new Error('lost response'); };
+  second.opts.store.proposeCreate = async () => { if (++attempts === 1) return 'first'; throw Object.assign(new Error('lost response'), { code: 'ETIMEDOUT' }); };
   await assert.rejects(runPromote(second.opts), (error) => {
     assert.match(error.message, /unconfirmed/);
+    assert.equal(error.code, undefined);
+    assert.equal(error.cause.code, 'ETIMEDOUT');
     assert.deepEqual(error.completedProposals, ['first']);
     assert.equal(error.failedCandidateIndex, 1);
     return true;
@@ -165,7 +167,7 @@ test('runtime producer output passes the merged residue contract and reaches the
   const sitting = ingested.residues[0];
   const { calls, opts } = setup();
   await runPromote({ ...opts, residue: sitting });
-  assert.deepEqual(JSON.parse(calls[1][1].provenance.note), { session_id: sitting.provenance.sessionId, transcript_ref: sitting.provenance.transcriptRef, sitting_id: sitting.sittingId });
+  assert.deepEqual(JSON.parse(calls[1][1].provenance.note), { session_id: sitting.provenance.sessionId, transcript_ref: sitting.provenance.transcriptRef, sitting_id: sitting.sittingId, content_hash: sitting.contentHash });
 });
 
 
@@ -177,6 +179,12 @@ test('request keys separate sittings and positions but exclude candidate content
   calls.length = 0;
   await runPromote({ ...opts, candidates: [{ ...candidates[0], body: 'Changed' }] });
   assert.equal(calls[1][4].requestKey, initial[0], 'changed content must conflict at the same key');
+  calls.length = 0;
+  await runPromote({ ...opts, proposerId: 'another-proposer' });
+  assert.equal(calls[1][4].requestKey, initial[0], 'changed proposer must use the same key');
+  calls.length = 0;
+  await runPromote({ ...opts, residue: { ...residue, provenance: { ...residue.provenance, transcriptRef: 'other.jsonl' } } });
+  assert.equal(calls[1][4].requestKey, initial[0], 'changed transcript must use the same key');
   calls.length = 0;
   const anotherSitting = { ...residue, sittingId: residue.sittingId.replace(/:0$/, ':1') };
   await runPromote({ ...opts, residue: anotherSitting });

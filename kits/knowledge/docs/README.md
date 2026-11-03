@@ -850,7 +850,7 @@ is part of the stored request, so changing it at the same sitting and position
 also conflicts rather than creating another proposal. A changed sitting must
 be reconciled by the host; this bridge does not replace earlier proposals.
 The candidate provenance note encodes the session ID, transcript reference,
-and sitting ID pending the structured provenance contract in
+sitting ID and content hash pending the structured provenance contract in
 [Corpus #46](https://github.com/kontourai/corpus/issues/46). This is a proposal request, not an approval or an applied
 record; the Corpus #40 contract owns persistence, review, and exclusion from
 ordinary reads. Reviewers use Corpus `applyCreate` or `rejectCreate`; this
@@ -861,20 +861,19 @@ not remove or reconcile previously staged proposals. The adapter/root binding is
 [Corpus #47](https://github.com/kontourai/corpus/issues/47); the registry
 protocol remains subject to [#753](https://github.com/kontourai/flow-agents/issues/753). An
 error from `proposeCreate` carries already returned proposal IDs and the
-failed candidate index. A request-key conflict is surfaced as such; other
-failures have an indeterminate outcome and require an identical retry or
-reconciliation. Corpus `MISSING_EVIDENCE` is a definite refusal for the failed
-candidate and is surfaced separately. Returned `posture: "proposed"` names
-the submitted intent; `review_state: "not_observed"` means it is not evidence
+failed candidate index. A request-key conflict and Corpus `MISSING_EVIDENCE`
+are surfaced as definite refusals for the failed candidate. Other failures have an indeterminate outcome
+and require an identical retry or reconciliation. A refusal at an already-used
+position does not establish whether that key was previously occupied.
+Returned `posture: "proposed"` names the submitted intent; `review_state: "not_observed"` means it is not evidence
 of the current proposal state. Query Corpus before treating a replayed receipt
-as pending, applied or rejected. `write: false` returns `preview` without registering or writing; an empty
-candidate list returns `noop`.
+as pending, applied or rejected. `write: false` returns `preview` without
+registering or writing; an empty candidate list returns `noop`.
 The create-proposal API and its package release are upstream dependencies.
 
-Until the Corpus package is published, the packed-branch integration test is
-opt-in: install the packed `@kontourai/corpus-store` in a scratch directory and
-set `CORPUS_STORE_ENTRY` to its absolute `dist/index.js` before running
-`node --test kits/knowledge/promote/store-target.corpus.test.js`. Without that
-variable the test reports skipped; it does not claim Corpus interoperability.
-Set `KNOWLEDGE_HOST_ROOT` to a checkout of the host as well to exercise
-its registry and MCP server in an isolated temporary XDG home.
+The Corpus integration tests use the exact published `@kontourai/corpus-store`
+version declared by this package. Set `KNOWLEDGE_HOST_ROOT` to a checkout of
+the host to also exercise its registry and MCP server in an isolated temporary
+XDG home; that host-dependent test is skipped when the path is unavailable.
+Candidate fields are limited to `title`, `body`, and `category`; `write` must
+be a boolean.

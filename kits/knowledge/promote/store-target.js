@@ -23,7 +23,7 @@ function required(value, label) {
  * Stage already-distilled candidates from a #669 runtime sitting. Extraction is
  * the caller's responsibility; a transcript is never treated as a proposal.
  *
- * @param {{residue: {source: string, complete: boolean, sittingId: string, provenance: {harness: string, sessionId: string, transcriptRef: string}}, candidates: {title: string, body: string, category: string}[], proposerId: string,
+ * @param {{residue: {source: string, complete: boolean, sittingId: string, contentHash: string, provenance: {harness: string, sessionId: string, transcriptRef: string}}, candidates: {title: string, body: string, category: string}[], proposerId: string,
  *   store: CreateProposalStore, registerRoot: (name: string, root: string) => unknown, root: string,
  *   rootName: string, write?: boolean}} options
  */
@@ -44,7 +44,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   if (typeof write !== 'boolean') throw new Error('store target requires boolean write');
   if (!store || typeof store.proposeCreate !== 'function') throw new Error('store target requires a Corpus create-proposal store');
   if (typeof registerRoot !== 'function') throw new Error('store target requires host root registration');
-  const provenance = { session_id: sessionId, transcript_ref: transcriptRef, sitting_id: sittingId };
+  const provenance = { session_id: sessionId, transcript_ref: transcriptRef, sitting_id: sittingId, content_hash: residue.contentHash };
   /** @type {import('@kontourai/corpus-store').CreateInput[]} */
   const prepared = candidates.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some((key) => !['title', 'body', 'category'].includes(key))) {
@@ -73,7 +73,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
       const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined;
       const conflict = code === 'REQUEST_KEY_CONFLICT';
       const refused = code === 'MISSING_EVIDENCE';
-      const message = conflict ? 'Corpus request key conflict; reconcile the batch' : refused ? 'Corpus refused the candidate; correct it before retrying' : 'Corpus proposal outcome is unconfirmed; retry only the identical batch';
+      const message = conflict ? 'Corpus request key conflict; reconcile the batch' : refused ? 'Corpus refused the candidate; reconcile the batch before retrying' : 'Corpus proposal outcome is unconfirmed; retry only the identical batch';
       throw Object.assign(new Error(message, { cause }), { ...(conflict || refused ? { code } : {}), completedProposals: proposals, failedCandidateIndex: index });
     }
   }
