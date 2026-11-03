@@ -334,7 +334,9 @@ function collectAssignments(text, edits, urlRanges) {
       // one is a single string and keeps its whole span. The span only ever grows: shrinking it
       // would send the outer scan back over identifiers the inner scan already visited.
       const nestedQuoted = text[nested.start] === '"' || text[nested.start] === "'";
-      const candidate = nestedQuoted ? nested.end : Math.min(nested.end, limit);
+      // The cap only constrains keys that sit INSIDE the password. A key past its "@" but still inside a
+      // span that a quoted value extended (`?api_key"=VALUE`) is an ordinary key with an ordinary value.
+      const candidate = nestedQuoted || key.index >= limit ? nested.end : Math.min(nested.end, limit);
       if (candidate > end) end = candidate;
     }
     // A separator when the next character is not a value terminator, so the placeholder can
