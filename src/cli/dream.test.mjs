@@ -659,3 +659,19 @@ test("a plan is bounded in bytes as well as claims: oversize claims are left out
   assert.equal(report.claims.truncated, 3 - proposals.length);
   for (const proposal of proposals) assert.ok(Buffer.byteLength(proposal.candidate.body) <= 512 * 1024);
 });
+
+test("changing the visibility starts a new plan: a half-proposed sitting is not resumed under another visibility", async (t) => {
+  const two = (content) => (content.includes("banker's rounding")
+    ? ["alpha", "beta"].map((name) => ({ quote: "I switched to banker's rounding on the total.", subject: `svc ${name}`, subjectType: "service", property: "mode", value: name, posture: "stated" }))
+    : []);
+  const { ws, store, extract, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
+  t.after(ws.cleanup);
+  store.failProposeCreate(1);
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  const before = extract.calls.length;
+  const wider = { kind: "restricted", audiences: ["user:owner", "user:other"] };
+  await runDream(host, runOptions(ws, { visibility: wider }));
+  assert.ok(extract.calls.length > before, "claims made under the old visibility are different claims, so the sitting was extracted again");
+  const visibilities = (await store.listProposals()).map((p) => JSON.stringify(JSON.parse(p.candidate.body).claim.visibility));
+  assert.ok(visibilities.some((v) => v.includes("user:other")));
+});
