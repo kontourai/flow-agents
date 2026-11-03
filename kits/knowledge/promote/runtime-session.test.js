@@ -937,6 +937,12 @@ describe("review round 1 regressions (PR #1575)", () => {
       ["https://u:token='ok'x@db.example.com/path", "https://u:<SECRET>@db.example.com/path"],
       ["mail jane@example.com about https://x:pw1234@host.io/a?b=c", "mail <EMAIL> about https://x:<SECRET>@host.io/a?b=c"],
       ["user@host.example.com and https://a:b12345@c.example.org", "<EMAIL> and https://a:<SECRET>@c.example.org"],
+      // a key AFTER the "@" is in the host/path/query, not the password: still found
+      ["https://u:pw@h/x?token=xZebraCanary7319", "https://u:<SECRET>@h/x?token=<SECRET>"],
+      // an empty value in a password leaves the "@" alone
+      ["https://u:token=@localhost/path", "https://u:<SECRET>@localhost/path"],
+      // a quoted value is one string even when its closing quote comes after the "@"
+      ['https://app:password="correct@Horse7319"@db.example.com/app', "https://app:<SECRET>@db.example.com/app"],
     ]) {
       assert.equal(scrubResidueText(input), expected, input);
       assert.equal(scrubResidueText(expected), expected, `${input}: idempotent`);
@@ -966,6 +972,9 @@ describe("review round 1 regressions (PR #1575)", () => {
       "stray quotes": "'password:\"'.repeat(30000)",
       "repeated key=": '"token=".repeat(60000)',
       "many keys in one quoted span": '`password="${"token=a ".repeat(40000)}"`',
+      "url + quoted key chain": '\'https://u:token="p@h/x \'.repeat(60000) + \'end"\'',
+      "url + unquoted key chain": "'https://u:token=p@h/x '.repeat(60000)",
+      "dense urls": "'https://u:p@h/ '.repeat(60000)",
       "trailing digits": '`${"1".repeat(2000000)}x`',
       "one huge identifier": '`${"a-".repeat(1000000)}token=${"S".repeat(10)}`',
       "camelCase identifier": '"camelCaseIdentifierSegment".repeat(40000)',

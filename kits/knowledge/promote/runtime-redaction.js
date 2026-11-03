@@ -316,18 +316,23 @@ function collectAssignments(text, edits, urlRanges) {
     if (!isSecretName(match[0])) continue;
     const value = assignmentValue(text, match.index + match[0].length, run);
     if (value === null) continue;
-    let end = value.end;
-    inner.lastIndex = text[value.start] === '"' || text[value.start] === "'" ? value.start + 1 : value.start;
+    // An UNQUOTED value that starts inside a URL password stops at the password: the host and path
+    // after its "@" are not the value. A quoted value is one string, so it keeps its whole span
+    // even when its closing quote comes after the "@". The limit is applied before the inner scan,
+    // so no identifier is visited twice.
+    const quoted = text[value.start] === '"' || text[value.start] === "'";
+    const url = quoted ? null : urlPasswordAt(urlRanges, match.index);
+    const limit = url === null ? Infinity : url.end;
+    if (limit <= value.start) continue;
+    let end = Math.min(value.end, limit);
+    inner.lastIndex = quoted ? value.start + 1 : value.start;
     for (let key = inner.exec(text); key !== null && key.index < end; key = inner.exec(text)) {
       if (!isSecretName(key[0])) continue;
       const nested = assignmentValue(text, key.index + key[0].length, run);
-      if (nested !== null && nested.end > end) end = nested.end;
+      if (nested !== null && nested.end > end) end = Math.min(nested.end, limit);
     }
     // A separator when the next character is not a value terminator, so the placeholder can
     // never fuse with what follows it (which a second pass would read as one longer value).
-    // A key inside a URL password stops at the password: its host and path are not the value.
-    const url = urlPasswordAt(urlRanges, match.index);
-    if (url !== null && end > url.end) end = Math.max(url.end, value.start + 1);
     const glued = end < text.length && !VALUE_END.test(text[end]);
     edit(edits, value.start, end, glued ? `${PLACEHOLDER} ` : PLACEHOLDER);
     IDENTIFIER.lastIndex = end;
