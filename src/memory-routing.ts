@@ -17,7 +17,7 @@ import {
   type CandidateVerification, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import {
-  MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryIntervalsOverlap, memorySlotKey, memoryValuesEqual, readMemoryVisibility,
+  MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryIntervalsOverlap, memorySlotKey, memoryValuesEqual, readMemoryVisibility, readAudienceList,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
 } from "./memory-claims.js";
 
@@ -66,8 +66,8 @@ export interface MemoryEntityRoutingInput {
   proposalRef: string;
   /** Every operation the proposal's alternatives carry (`merge`, `split`, `alias`, `same-as`, `related-to`, `domain:*`). */
   operations: string[];
-  /** `type:id` of every subject the proposal names. */
-  subjects: string[];
+  /** Every subject the proposal names, as Survey's `SubjectRef`, sorted. Not flattened: a type or id may hold any character. */
+  subjects: { subjectType: string; subjectId: string }[];
 }
 /**
  * The part of Survey's `EntityProposal` (kontourai/survey#243, `createEntityProposal`) this Kit reads. Structural so
@@ -110,11 +110,25 @@ const SEALED: MemoryVisibility = { kind: "restricted", audiences: [] };
  * states the order. It is checked against Surface's own meet vectors, and against the real function as soon as the
  * installed Surface has one. Undeclared or unreadable is sealed, as in Surface: omission never widens.
  */
-export function memoryVisibilityWithin(inner: MemoryVisibility | null | undefined, outer: MemoryVisibility | null | undefined): boolean {
-  const a = readMemoryVisibility(inner) ?? SEALED, b = readMemoryVisibility(outer) ?? SEALED;
+export function memoryVisibilityWithin(inner: unknown, outer: unknown): boolean {
+  const a = surfaceReading(inner), b = surfaceReading(outer);
   if (b.kind === "public") return true;
   if (a.kind === "public") return false;
   return a.audiences.every(audience => b.audiences.includes(audience));
+}
+
+/**
+ * How Surface's `meetVisibility` reads one argument (it is total): `public` is public whatever else the object carries,
+ * `restricted` with a readable audience list is that set, and everything else (null, undefined, a string, a malformed
+ * list) is sealed. Not the strict claim reading: the order must agree with Surface on any input, including bad ones.
+ */
+function surfaceReading(value: unknown): MemoryVisibility {
+  if (value === null || typeof value !== "object") return SEALED;
+  const { kind, audiences } = value as { kind?: unknown; audiences?: unknown };
+  if (kind === "public") return { kind: "public" };
+  if (kind !== "restricted") return SEALED;
+  const named = readAudienceList(audiences);
+  return named === undefined ? SEALED : { kind: "restricted", audiences: [...new Set(named)].sort() };
 }
 const listed = (names: string[], name: string) => names.some(entry => entry === "*" || foldMemoryText(entry) === foldMemoryText(name));
 /** Same-slot stated claims the new claim is not explicitly replacing. */
@@ -237,17 +251,17 @@ const nonBlank = (value: unknown): value is string => typeof value === "string" 
 function entityInput(change: MemoryEntityChange): MemoryEntityRoutingInput {
   const { proposal } = change, alternatives = proposal?.spec?.alternatives;
   if (typeof proposal?.id !== "string" || !proposal.id.trim() || !Array.isArray(alternatives) || alternatives.length === 0) throw new MemoryClaimError("invalid", "an entity change needs a Survey entity proposal with alternatives");
-  const operations = new Set<string>(), subjects = new Set<string>();
+  const operations = new Set<string>(), subjects = new Map<string, { subjectType: string; subjectId: string }>();
   for (const alternative of alternatives) {
     if (!isEntityOperation(alternative?.operation)) throw new MemoryClaimError("invalid", "an entity alternative needs one of Survey's operations");
     operations.add(alternative.operation);
     for (const subject of alternative.subjects ?? []) {
       if (!nonBlank(subject?.subjectType) || !nonBlank(subject?.subjectId)) throw new MemoryClaimError("invalid", "an entity subject needs a subjectType and subjectId");
-      subjects.add(`${subject.subjectType}:${subject.subjectId}`);
+      subjects.set(JSON.stringify([subject.subjectType, subject.subjectId]), { subjectType: subject.subjectType, subjectId: subject.subjectId });
     }
   }
   if (subjects.size === 0) throw new MemoryClaimError("invalid", "an entity proposal names no subjects");
-  return { type: "entity", proposalRef: proposal.id, operations: [...operations].sort(), subjects: [...subjects].sort() };
+  return { type: "entity", proposalRef: proposal.id, operations: [...operations].sort(), subjects: [...subjects].sort(([x], [y]) => x < y ? -1 : x > y ? 1 : 0).map(([, subject]) => subject) };
 }
 
 export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision {
@@ -267,7 +281,7 @@ const stringList = (value: unknown): value is string[] => Array.isArray(value) &
 function assertStoredInputShape(input: MemoryRoutingInput): void {
   const bad = (what: string): never => { throw new MemoryClaimError("invalid", `stored routing input: ${what}`); };
   if (input.type === "entity") {
-    if (typeof input.proposalRef !== "string" || !input.proposalRef || !stringList(input.operations) || input.operations.length === 0 || !input.operations.every(isEntityOperation) || !stringList(input.subjects) || input.subjects.length === 0 || !input.subjects.every(subject => /^[^:]+:.+$/.test(subject))) bad("entity input is malformed");
+    if (typeof input.proposalRef !== "string" || !input.proposalRef || !stringList(input.operations) || input.operations.length === 0 || !input.operations.every(isEntityOperation) || !Array.isArray(input.subjects) || input.subjects.length === 0 || !input.subjects.every(subject => subject && typeof subject === "object" && nonBlank(subject.subjectType) && nonBlank(subject.subjectId) && Object.keys(subject).length === 2)) bad("entity input is malformed");
     return;
   }
   if (input.type !== "claim") bad("unknown input type");

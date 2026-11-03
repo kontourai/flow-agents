@@ -30,6 +30,29 @@ test("the Kit emits Survey's EntityProposalInput from real claims: exact spans, 
   }]);
 });
 
+test("the emitter hands Survey exactly the revision, proposer and policy it was given", async () => {
+  const input = memoryEntityProposalInput(await request({ revision: "rev-7", proposer: { id: "proposer-9", model: "m-1", rule: "r-2" }, policy: { id: "pol-3", revision: "pol-rev-4" } }));
+  assert.equal(input.revision, "rev-7");
+  assert.deepEqual(input.proposer, { id: "proposer-9", model: "m-1", rule: "r-2" });
+  assert.deepEqual(input.policy, { id: "pol-3", revision: "pol-rev-4" });
+});
+
+test("the emitter refuses what Survey's createEntityProposal would: blank identity fields, scores outside 0..1, bad times, unknown operations", async () => {
+  const { owner } = await claims();
+  const await_request = await request();
+  const ok = [{ claim: owner, stance: "supports" }];
+  const cand = over => ({ operation: "merge", subjects: SUBJECTS, claims: ok, confidenceComponents: { name: 0.5 }, ...over });
+  const cases = {
+    "blank revision": { revision: " " }, "no proposer id": { proposer: { id: "" } }, "blank policy id": { policy: { id: " ", revision: "1" } }, "blank policy revision": { policy: { id: "p", revision: "" } },
+    "a score of 2": { candidates: [cand({ confidenceComponents: { name: 2 } })] }, "a negative score": { candidates: [cand({ confidenceComponents: { name: -0.1 } })] },
+    "a NaN score": { candidates: [cand({ confidenceComponents: { name: NaN } })] }, "a blank score name": { candidates: [cand({ confidenceComponents: { " ": 0.5 } })] },
+    "an unknown operation": { candidates: [cand({ operation: "erase" })] }, "a bad stance": { candidates: [cand({ claims: [{ claim: owner, stance: "maybe" }] })] },
+    "an evidence time that is not a date-time": { candidates: [cand({ claims: [{ claim: { ...owner, source: { ...owner.source, observedAt: "later" } }, stance: "supports" }] })] },
+  };
+  for (const [name, over] of Object.entries(cases)) assert.throws(() => memoryEntityProposalInput({ ...(await_request ?? {}), ...over }), /entity|needs|score|stance|evidence|confidence|operation/, name);
+  for (const operation of ["merge", "split", "alias", "same-as", "related-to", "domain:billing"]) assert.doesNotThrow(() => memoryEntityProposalInput({ ...(await_request ?? {}), candidates: [cand({ operation })] }), operation);
+});
+
 test("each claim's stance toward the proposal is carried to Survey as given", async () => {
   const { owner, budget } = await claims();
   const input = memoryEntityProposalInput(await request({ candidates: [{ operation: "alias", subjects: SUBJECTS, claims: [{ claim: owner, stance: "contradicts" }, { claim: budget, stance: "context" }], confidenceComponents: {} }] }));

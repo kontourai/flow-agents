@@ -5,7 +5,7 @@ import { buildCandidateVerification } from "@kontourai/survey";
 import {
   buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
 } from "@kontourai/survey/review-workbench";
-import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
+import { memoryClaim, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
 import {
   DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
   memoryReviewItemName, presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
@@ -254,7 +254,9 @@ test("an entity change takes Survey's EntityProposal by structure and refuses an
   const decision = routeMemoryChange({ type: "entity", proposal: multi });
   assert.equal(decision.changeId, multi.id, "Survey's content-addressed proposal id, which is also its review item name");
   assert.deepEqual(decision.input.operations, ["merge", "same-as"]);
-  assert.deepEqual(decision.input.subjects, ["person:m. chen", "person:maya c.", "person:maya chen"]);
+  assert.deepEqual(decision.input.subjects, [
+    { subjectType: "person", subjectId: "m. chen" }, { subjectType: "person", subjectId: "maya c." }, { subjectType: "person", subjectId: "maya chen" },
+  ], "Survey SubjectRefs, sorted, not flattened to strings");
   assert.deepEqual(routeMemoryChange({ type: "entity", proposal: merge }).input.operations, ["merge"]);
   for (const operation of ["same-as", "related-to", "domain:billing"]) {
     assert.deepEqual(routeMemoryChange({ type: "entity", proposal: { id: merge.id, spec: { alternatives: [{ operation, subjects: merge.spec.alternatives[0].subjects }] } } }).input.operations, [operation]);
@@ -667,4 +669,83 @@ test("a decision Survey defines as deciding counts; one it does not define is he
     const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: withStatus(status) });
     assert.deepEqual([metrics.reviewer.confirmed, metrics.reviewer.held], [0, 1], String(status));
   }
+});
+
+// --- review round 4: Surface's reader, exactly -------------------------------------------------------------------------
+
+test("a subject whose type or id holds a colon or a newline survives routing and recomputation unchanged", () => {
+  const proposal = loadEntityProposals().merge;
+  for (const subjects of [[{ subjectType: ":", subjectId: "x" }, { subjectType: "person", subjectId: "a:b" }], [{ subjectType: "person", subjectId: "\nx" }, { subjectType: "per\nson", subjectId: "y" }]]) {
+    const odd = { ...proposal, spec: { ...proposal.spec, alternatives: [{ ...proposal.spec.alternatives[0], subjects }] } };
+    const decision = routeMemoryChange({ type: "entity", proposal: odd });
+    assert.deepEqual(decision.input.subjects.map(s => [s.subjectType, s.subjectId]).sort(), subjects.map(s => [s.subjectType, s.subjectId]).sort());
+    assert.deepEqual(recomputeMemoryRouting(decision), { ok: true, mismatches: [] });
+    assert.deepEqual(recomputeMemoryRouting(JSON.parse(JSON.stringify(decision))), { ok: true, mismatches: [] }, "and again after a round trip through JSON");
+  }
+  const twoOfOne = { ...proposal, spec: { ...proposal.spec, alternatives: [{ ...proposal.spec.alternatives[0], subjects: [{ subjectType: "a:b", subjectId: "c" }, { subjectType: "a", subjectId: "b:c" }] }] } };
+  assert.equal(routeMemoryChange({ type: "entity", proposal: twoOfOne }).input.subjects.length, 2, "('a:b','c') and ('a','b:c') are different subjects");
+});
+
+test("the visibility order reads audience lists the way Surface does: by own index, never by iterator or inheritance", () => {
+  const sealed = only();
+  const sparse = new Array(2); sparse[0] = "staff";                     // a hole at index 1
+  const proto = Object.getOwnPropertyDescriptor(Array.prototype, "1");
+  try {
+    Array.prototype[1] = "staff";                                       // the hole would INHERIT "staff" if read by iteration
+    const inherited = { kind: "restricted", audiences: sparse };
+    assert.equal(memoryVisibilityWithin(only("staff"), inherited), false, "a list with a hole is unreadable, so sealed, so nothing non-sealed fits inside it");
+    assert.equal(memoryVisibilityWithin(inherited, only("staff")), true, "and a sealed claim fits anywhere");
+    assert.equal(memoryVisibilityWithin(inherited, sealed), true);
+    // The strict claim reading agrees: a claim cannot carry it.
+    assert.equal(readMemoryVisibility(inherited), undefined);
+  } finally {
+    if (proto) Object.defineProperty(Array.prototype, "1", proto); else delete Array.prototype[1];
+  }
+  const iterated = [ "staff" ]; iterated[Symbol.iterator] = function* () { yield "nobody"; };
+  assert.equal(memoryVisibilityWithin(only("staff"), { kind: "restricted", audiences: iterated }), true, "read by index, the list is [staff]; the iterator is ignored");
+  assert.equal(memoryVisibilityWithin(only("nobody"), { kind: "restricted", audiences: iterated }), false);
+  for (const [size, readable] of [[1024, true], [1025, false]]) {
+    const many = Array.from({ length: size }, (_, i) => `a${i}`);
+    assert.equal(readMemoryVisibility({ kind: "restricted", audiences: many }) !== undefined, readable, `${size} audiences`);
+    assert.equal(memoryVisibilityWithin(only("a0"), { kind: "restricted", audiences: many }), readable, `${size} audiences as a bound`);
+  }
+});
+
+test("a source whose audience list Surface reads as sealed cannot be mistaken for a restricted one by the Kit", () => {
+  const sparse = new Array(2); sparse[0] = "staff";
+  const proto = Object.getOwnPropertyDescriptor(Array.prototype, "1");
+  try {
+    Array.prototype[1] = "staff";
+    const decision = routeMemoryChange(change(make({ visibility: only("staff") }), { sourceVisibility: { kind: "restricted", audiences: sparse } }));
+    assert.deepEqual(rulesOf(decision), ["visibility-widening"], "a staff-visible claim from a sealed source widens");
+    assert.deepEqual(decision.input.baselines[0], { ref: "source", visibility: null }, "the unreadable source is recorded as undeclared (sealed)");
+    assert.deepEqual(recomputeMemoryRouting(JSON.parse(JSON.stringify(decision))), { ok: true, mismatches: [] });
+  } finally {
+    if (proto) Object.defineProperty(Array.prototype, "1", proto); else delete Array.prototype[1];
+  }
+});
+
+test("an unreadable review timestamp never beats a readable one, and a held resolution is never a confirmation", () => {
+  const { decision, made } = twoDecisions(["accept-proposed", "2026-11-02T10:00:00Z"], ["reject-proposed", "2026-11-02T11:00:00Z"]);
+  const garbled = { ...plain(made[1]), spec: { ...plain(made[1]).spec, reviewedAt: "nonsense" } };
+  for (const order of [[made[0], garbled], [garbled, made[0]]]) {
+    const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: order });
+    assert.deepEqual([metrics.reviewer.confirmed, metrics.reviewer.rejected], [1, 0], "the readable decision stands");
+  }
+  const held = { ...plain(made[0]), spec: { ...plain(made[0]).spec, status: "verified", resolution: "could_not_confirm", resolutionReason: "no access" } };
+  assert.deepEqual([deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [held] }).reviewer.confirmed, deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [held] }).reviewer.held], [0, 1]);
+  const resolved = { ...held, spec: { ...held.spec, resolution: "held" } };
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [resolved] }).reviewer.held, 1);
+});
+
+test("the Kit's visibility order agrees with Surface's meetVisibility on every pair of a grid of good and bad values", async () => {
+  const { GRID } = await import("./memory-visibility-grid.mjs");
+  const vectors = readJson(import.meta.dirname, "fixtures", "memory-claims", "visibility-grid.vectors.json");
+  assert.deepEqual(vectors.names, GRID.map(([name]) => name), "the grid and the committed matrix are the same grid");
+  assert.ok(GRID.length >= 30);
+  const disagreements = [];
+  GRID.forEach(([nameA, a], i) => GRID.forEach(([nameB, b], j) => {
+    if (memoryVisibilityWithin(a(), b()) !== vectors.matrix[i][j]) disagreements.push(`${nameA} within ${nameB}: Surface says ${vectors.matrix[i][j]}`);
+  }));
+  assert.deepEqual(disagreements, []);
 });

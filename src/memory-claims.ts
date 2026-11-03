@@ -76,15 +76,39 @@ export interface MemoryClaim {
  */
 export type MemoryVisibility = { kind: "public" } | { kind: "restricted"; audiences: string[] };
 
-/** Reads a visibility from untrusted data. Anything that is not exactly one of the two forms is undefined. */
+/** Longest audience list read. Over it the list is unreadable, not cut short (Surface's `MAX_AUDIENCES`). */
+export const MAX_MEMORY_AUDIENCES = 1024;
+
+/**
+ * Surface's `readAudienceList`: an array of at most `MAX_MEMORY_AUDIENCES`, every index an OWN non-empty string. Read by
+ * index, never by iterator, so a hole that would inherit a value (`Array.prototype[1]`) or an overridden iterator cannot
+ * change the answer; one unreadable entry makes the whole list unreadable.
+ */
+export function readAudienceList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_MEMORY_AUDIENCES) return undefined;
+  const audiences: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    if (!Object.hasOwn(value, index)) return undefined;
+    const audience: unknown = value[index];
+    if (typeof audience !== "string" || audience.length === 0) return undefined;
+    audiences.push(audience);
+  }
+  return audiences;
+}
+
+/**
+ * Reads a visibility from untrusted data for a CLAIM: exactly one of the two forms and nothing else, or undefined. This is
+ * stricter than Surface's total reader (which ignores extra keys) because a claim that carries something else is malformed,
+ * not merely narrow; `memoryVisibilityWithin` uses the lenient reading when it only needs an order.
+ */
 export function readMemoryVisibility(value: unknown): MemoryVisibility | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const { kind, audiences, ...rest } = value as Record<string, unknown>;
   if (Object.keys(rest).length) return undefined;
   if (kind === "public") return audiences === undefined ? { kind: "public" } : undefined;
-  if (kind !== "restricted" || !Array.isArray(audiences) || audiences.length > 1024) return undefined;
-  if (!audiences.every(audience => typeof audience === "string" && audience !== "")) return undefined;
-  return { kind: "restricted", audiences: [...new Set(audiences as string[])].sort() };
+  if (kind !== "restricted") return undefined;
+  const named = readAudienceList(audiences);
+  return named === undefined ? undefined : { kind: "restricted", audiences: [...new Set(named)].sort() };
 }
 
 export class MemoryClaimError extends Error {

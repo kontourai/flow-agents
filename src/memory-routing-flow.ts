@@ -101,9 +101,10 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
 export async function recordMemoryRoutingEvidence(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
   return (await serialized(input, async () => {
     const recorded = await recordRouting(input);
-    // Metrics are derived from what is recorded, so recording more decisions refreshes them in the same unit; a
-    // caller of this lower-level writer cannot leave them describing fewer decisions than the run holds.
-    if (recorded.created) await refreshMetrics(input);
+    // Metrics are derived from what is recorded, so recording refreshes them in the same unit. It does so even when the
+    // routing batch was already there: a retry after a failure between the two writes must repair the metrics, not
+    // report success over stale ones. Identical metrics are not recorded again.
+    await refreshMetrics(input);
     return recorded;
   })).entry;
 }
@@ -218,9 +219,11 @@ export async function runMemoryRouting(input: Location & {
   reviewEvents?: readonly ReviewSessionEvent[];
 }): Promise<MemoryRoutingRun> {
   const decisions = routeMemoryChanges(input.changes, input.policy);
+  // Review input is validated before the first write: a bad one must not leave routing recorded behind a refusal.
+  const review = prepareReview(input);
   const { routing, metrics } = await serialized(input, async () => {
     const recorded = await recordRouting({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
-    return { routing: recorded.entry, metrics: await refreshMetrics(input) };
+    return { routing: recorded.entry, metrics: await refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }) };
   });
   const items: ReviewItem[] = [], entityProposals: SurveyEntityProposalLike[] = [], published: string[] = [];
   for (const [index, decision] of decisions.entries()) {
@@ -233,23 +236,74 @@ export async function runMemoryRouting(input: Location & {
   return { decisions, items, entityProposals, published, routing, metrics };
 }
 
+/** Review state taken once as strict plain data and validated: this snapshot, not the caller's object, is what is recorded. */
+export interface PreparedReview { decisions: ReviewDecision[]; events: ReviewSessionEvent[] }
+type ReviewInput = { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] };
+
+/**
+ * Snapshots and validates Survey review input before anything is written. The snapshot is plain JSON data: a getter,
+ * a non-finite number, a class instance or a cycle is refused, so what was validated is exactly what is attached and a
+ * value that changes between reads cannot pass validation and then poison the evidence.
+ */
+function prepareReview(input: ReviewInput): PreparedReview {
+  const decisions = (input.reviewDecisions ?? []).map(item => jsonSnapshot(item) as ReviewDecision);
+  const events = (input.reviewEvents ?? []).map(item => jsonSnapshot(item) as ReviewSessionEvent);
+  decisions.forEach(assertReviewDecision);
+  events.forEach(assertReviewEvent);
+  return { decisions, events };
+}
+
 /** Records review state not yet recorded. A decision or event already in the run's evidence is not recorded twice. */
-async function recordReview(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<void> {
+async function recordReview(input: Location & { review: PreparedReview }): Promise<void> {
   const known = await readReview(input.runId, input.cwd);
   const seen = new Set([...known.decisions, ...known.events].map(item => canonicalJson(item)));
-  // Everything is validated before anything is attached: evidence that later breaks every refresh cannot be removed.
-  for (const decision of input.reviewDecisions ?? []) assertReviewDecision(decision);
-  for (const event of input.reviewEvents ?? []) assertReviewEvent(event);
-  const fresh = <T extends object>(items: readonly T[] | undefined): T[] => (items ?? []).filter(item => {
+  const fresh = <T extends object>(items: readonly T[]): T[] => items.filter(item => {
     const key = canonicalJson(item);
     if (seen.has(key)) return false;
     seen.add(key); // a repeat inside this batch is a repeat too
     return true;
   });
-  const decisions = fresh(input.reviewDecisions), events = fresh(input.reviewEvents);
+  const decisions = fresh(input.review.decisions), events = fresh(input.review.events);
   if (decisions.length === 0 && events.length === 0) return;
   const record: MemoryReviewRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions, events };
   await attachJson(input, MEMORY_REVIEW_EVIDENCE_KIND, record);
+}
+
+const MAX_SNAPSHOT_NODES = 20_000, MAX_SNAPSHOT_DEPTH = 32;
+/** A strict deep copy of plain JSON data. Refuses accessors, non-finite numbers, non-plain objects, symbols and cycles. */
+function jsonSnapshot(value: unknown): unknown {
+  let nodes = 0;
+  const walk = (item: unknown, depth: number, ancestors: Set<object>): unknown => {
+    if (++nodes > MAX_SNAPSHOT_NODES || depth > MAX_SNAPSHOT_DEPTH) return bad("too large or too deep to record");
+    if (item === null || typeof item === "string" || typeof item === "boolean") return item;
+    if (typeof item === "number") return Number.isFinite(item) ? item : bad("a number that is not finite cannot be recorded as JSON");
+    if (typeof item !== "object") return bad(`a ${typeof item} cannot be recorded as JSON`);
+    if (ancestors.has(item)) return bad("a cycle cannot be recorded");
+    ancestors.add(item);
+    try {
+      if (Array.isArray(item)) {
+        if (Object.getPrototypeOf(item) !== Array.prototype) return bad("an array subclass cannot be recorded");
+        return Array.from({ length: item.length }, (_, index) => {
+          const descriptor = Object.getOwnPropertyDescriptor(item, index);
+          if (!descriptor || !("value" in descriptor)) return bad("a hole or accessor in a list cannot be recorded");
+          return walk(descriptor.value, depth + 1, ancestors);
+        });
+      }
+      const prototype = Object.getPrototypeOf(item);
+      if (prototype !== Object.prototype && prototype !== null) return bad("only plain objects can be recorded");
+      if (Object.getOwnPropertySymbols(item).length) return bad("a symbol key cannot be recorded");
+      const copy: Record<string, unknown> = {};
+      for (const key of Object.keys(item)) {
+        const descriptor = Object.getOwnPropertyDescriptor(item, key)!;
+        if (!("value" in descriptor)) return bad(`${key} is an accessor, which cannot be recorded`);
+        if (descriptor.value !== undefined) copy[key] = walk(descriptor.value, depth + 1, ancestors);
+      }
+      return copy;
+    } finally {
+      ancestors.delete(item);
+    }
+  };
+  return walk(value, 0, new Set());
 }
 
 const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -282,8 +336,8 @@ async function readReview(runId: string, cwd?: string): Promise<{ decisions: Rev
 }
 export const readMemoryReviewRecords = (runId: string, cwd?: string) => readReview(runId, cwd);
 
-async function refreshMetrics(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<FlowEvidenceEntry> {
-  await recordReview(input);
+async function refreshMetrics(input: Location & { review?: PreparedReview }): Promise<FlowEvidenceEntry> {
+  if (input.review) await recordReview({ runId: input.runId, gate: input.gate, cwd: input.cwd, review: input.review });
   const decisions = await readMemoryRoutingDecisions(input.runId, input.cwd);
   const review = await readReview(input.runId, input.cwd);
   const metrics = deriveMemoryRunMetrics({ runId: input.runId, decisions, reviewDecisions: review.decisions, reviewEvents: review.events });
@@ -296,6 +350,7 @@ async function refreshMetrics(input: Location & { reviewDecisions?: readonly Rev
  * describing fewer decisions than are recorded. Call it as reviewers decide, passing what is new (or everything: what
  * is already recorded is not recorded twice).
  */
-export function refreshMemoryRunMetrics(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<FlowEvidenceEntry> {
-  return serialized(input, () => refreshMetrics(input));
+export async function refreshMemoryRunMetrics(input: Location & ReviewInput): Promise<FlowEvidenceEntry> {
+  const review = prepareReview(input); // before anything is written, and before waiting for the run
+  return serialized(input, () => refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }));
 }

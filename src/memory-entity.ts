@@ -10,6 +10,8 @@
  */
 import { MemoryClaimError, type MemoryClaim } from "./memory-claims.js";
 
+const isOperation = (value: unknown): boolean => typeof value === "string" && (["merge", "split", "alias", "same-as", "related-to"].includes(value) || /^domain:\S+$/.test(value));
+
 /** Survey's `EntityOperation`. */
 export type MemoryEntityOperation = "merge" | "split" | "alias" | "same-as" | "related-to" | `domain:${string}`;
 
@@ -61,6 +63,10 @@ export function memoryEntityProposalInput(input: {
   candidates: readonly MemoryEntityCandidate[];
   checksums: Readonly<Record<string, string>>;
 }): MemoryEntityProposalInput {
+  // Survey makes the same demands; refuse here so the Kit never hands it (or records) what it would reject.
+  for (const [label, value] of [["revision", input.revision], ["proposer id", input.proposer?.id], ["policy id", input.policy?.id], ["policy revision", input.policy?.revision]] as const) {
+    if (typeof value !== "string" || !value.trim()) throw new MemoryClaimError("invalid", `an entity proposal needs a ${label}`);
+  }
   if (input.candidates.length === 0) throw new MemoryClaimError("invalid", "an entity proposal needs at least one candidate");
   return {
     revision: input.revision,
@@ -70,7 +76,13 @@ export function memoryEntityProposalInput(input: {
       const [a, b] = candidate.subjects;
       if (a.type === b.type && a.id === b.id) throw new MemoryClaimError("invalid", "an entity candidate needs two different subjects");
       if (candidate.claims.length === 0) throw new MemoryClaimError("invalid", "an entity candidate needs the claims that ground it");
+      if (!isOperation(candidate.operation)) throw new MemoryClaimError("invalid", "an entity candidate needs one of Survey's operations");
+      for (const [key, score] of Object.entries(candidate.confidenceComponents ?? {})) {
+        if (!key.trim() || typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) throw new MemoryClaimError("invalid", `confidence component ${key} must be a number from 0 to 1`);
+      }
       const evidence = candidate.claims.map(({ claim, stance }) => {
+        if (!["supports", "contradicts", "context"].includes(stance)) throw new MemoryClaimError("invalid", "an evidence stance is supports, contradicts or context");
+        if (!Number.isFinite(Date.parse(claim.source.observedAt))) throw new MemoryClaimError("invalid", "evidence needs an observedAt that is a date-time");
         const checksum = input.checksums[claim.source.ref];
         if (!checksum) throw new MemoryClaimError("invalid", `no checksum for source ${claim.source.ref}`);
         return {
