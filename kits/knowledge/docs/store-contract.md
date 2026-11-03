@@ -1945,7 +1945,7 @@ violate that requirement).
 ## Addendum M: Privileged purge (issue #1570)
 
 The owner approved an explicit erasure exception on 2026-11-02. The operation is
-owned by [Corpus Store](https://github.com/kontourai/corpus/blob/e63bbd091fe45b75295795e5f9835d7c552d77c4/packages/store/README.md#owner-decisions).
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/3ab96002c76078ad3116dd56972a1e08e52a49d7/packages/store/README.md#owner-decisions).
 Both bundled adapter entry points can explicitly select a host-supplied Corpus
 module. In that mode the returned store delegates **all** operations to the
 corresponding Corpus adapter; the kit does not implement a second cascade.
@@ -1959,8 +1959,16 @@ identity guard to every cooperating writer. The standalone lock is not
 interoperable with Station's lock. Corpus mode is explicit because a legacy
 writer does not participate in Corpus transactions; a boolean declaration is
 not proof that other processes have stopped. Do not mix modes on a live root.
+As an additional fail-closed guard, the legacy vault adapter refuses to open a
+root containing Corpus's `path-index.json`; the legacy default adapter refuses
+to mutate tombstones or introduce new `source` support for them. These checks
+do not stop older processes that were already running.
 Compatibility changes and the vault migration are described by Corpus's store
 contract; Corpus mode is not a byte-for-byte replacement for all legacy inputs.
+For example, it refuses a compiled record without a `source` link to an existing
+raw record, a
+whitespace-only body, and the reserved id `__proto__`, which the legacy kit
+accepts. Hosts must qualify their stored records and callers before switching.
 
 ```js
 import * as corpus from '@kontourai/corpus-store';
@@ -2032,8 +2040,13 @@ adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
 state `deleted` and a null claim value. It excludes evidence on the tombstone
 and does not quote a tombstoned linking record as evidence for a live target. Missing
 purge audit evidence fails the projection; no erasure actor or rationale is
-invented. This includes a compact vault tombstone whose purge rationale was
-omitted: its Surface projection fails closed rather than fabricating a rationale.
+invented. A shortened vault tombstone keeps a bounded, non-blank rationale; a
+malformed tombstone with an empty or whitespace-only rationale fails closed.
+The bounded-rationale resolution is tracked in corpus#57 and must be verified
+again against the merged, published package.
+If a minimal tombstone's oversized type is replaced with `[omitted]`, the
+default provider and Surface projection still include the deletion fact via the
+purged-category history. An explicit record-type filter can exclude it.
 Survivor content remains the producer's responsibility. To exercise
 the packed Corpus-backed adapters through this projection before publication,
 install the scratch-built tarball outside the repository and run:
@@ -2054,5 +2067,7 @@ from that bundle and may conservatively reduce a survivor's derived status to
 `unknown`; request all relevant inputs for a complete trace. The purge
 result and retained `support-purged` entries also identify survivors for producer
 review, including content that might reproduce erased material.
-The kit pins `@kontourai/surface` 6.3.0, which interprets the deleted retention
-fact. This does not prove that other hosts have refreshed their own projections.
+The Knowledge projection pins `@kontourai/surface` 6.3.0 under the
+`@kontourai/surface-knowledge` npm alias, which interprets deleted retention.
+Existing shared trust gates retain their separately pinned Surface 5 behavior;
+this does not prove that other hosts have refreshed their projections.

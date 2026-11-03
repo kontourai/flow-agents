@@ -10,7 +10,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -41,6 +41,13 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
         },
       } });
       await assert.rejects(() => unprivileged.purge(["id"], { agent: "owner", rationale: "request" }), { code: "READ_ONLY" });
+      await assert.rejects(() => unprivileged.create({ type: "compiled", title: "No source", body: "body", category: "test",
+        provenance: { agent: "test" } }), { code: "MISSING_EVIDENCE" });
+      await assert.rejects(() => unprivileged.create({ type: "raw", title: "Blank", body: "   ", category: "test",
+        provenance: { agent: "test" } }), { code: "MISSING_EVIDENCE" });
+      await assert.rejects(() => unprivileged.create({ id: "__proto__", type: "raw", title: "Reserved", body: "body", category: "test",
+        provenance: { agent: "test" } }), profile === "vault" ? /Invalid store path in path index/ : { code: "MISSING_EVIDENCE" });
+      assert.deepEqual(await unprivileged.listByType("raw", { includeHistory: true }), []);
       const truthy = new KitAdapter({ storeRoot: join(root, "truthy"), corpusStore: {
         module: corpus, legacyProcessesStopped: true, services: {
           coordinationDirectory: join(root, "coordination"), lock: corpus.standaloneFileMutationLock,
@@ -149,6 +156,35 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
       assert.equal((await store.get(id)).status, "purged");
       assert.equal((await store.get(dependent)).status, "purged");
       await assert.rejects(() => store.update(id, { body: "reintroduced" }, { agent: "test" }), { code: "PURGED" });
+      if (profile === "default") {
+        // A later legacy open must not resurrect a tombstone or attach new
+        // support to it, even though mixing live writers remains forbidden.
+        const legacy = new KitAdapter({ storeRoot: join(root, "store") });
+        const protectedPaths = ["graph-index.json", "alias-index.json", "cache-version.json", `records/${id}.md`]
+          .map((name) => join(root, "store", name));
+        const bytes = () => protectedPaths.map((file) => existsSync(file) ? readFileSync(file) : null);
+        const beforeAttempts = bytes();
+        const attempts = [
+          () => legacy.update(id, { body: "reintroduced" }, { agent: "test" }),
+          () => legacy.link(id, [{ target_id: other, kind: "related" }], { agent: "test" }),
+          () => legacy.link(survivor, [{ target_id: id, kind: "source" }], { agent: "test" }),
+          () => legacy.update(survivor, { links: [{ target_id: id, kind: "source" }] }, { agent: "test" }),
+          () => legacy.create({ type: "raw", title: "new", body: "new", category: "private",
+            provenance: { agent: "test", source_ids: [id] } }),
+          () => legacy.create({ id, type: "raw", title: "new", body: "new", category: "private",
+            provenance: { agent: "test" } }),
+          () => legacy.propose(id, survivor, { agent: "test", proposal: "change" }),
+          () => legacy.apply(id, survivor, { agent: "test", new_body: "new", rationale: "change" }),
+          () => legacy.reject(id, survivor, { agent: "test", reason: "no" }),
+          () => legacy.supersede(survivor, [id], { agent: "test", rationale: "change" }),
+          () => legacy.retire(id, "retired", { agent: "test", rationale: "change" }),
+        ];
+        for (const attempt of attempts) await assert.rejects(attempt, { code: "PURGED" });
+        assert.deepEqual(bytes(), beforeAttempts, "refused legacy mutations must not write records or indexes");
+        assert.equal((await store.get(id)).body, "");
+      } else {
+        assert.throws(() => new KitAdapter({ storeRoot: join(root, "store") }), { code: "READ_ONLY" });
+      }
       assert.equal(await store.get("purge-secret-alias"), null);
       const reads = [
         await store.get(id), await store.get(dependent), await store.get(survivor),

@@ -338,8 +338,9 @@ describe("MarkdownVaultProvider: version-keyed read memoization (wave 2 / findin
       const provider = new MarkdownVaultProvider({ store: noVersionStore, storeRoot: dir, agent: "t" });
       await provider.readGraph();
       const callsAfterFirst = listByTypeCalls;
+      assert.equal(callsAfterFirst, 5, "one graph read uses a single record set");
       await provider.readGraph();
-      assert.ok(listByTypeCalls > callsAfterFirst, "no getCacheVersion() means every read refetches");
+      assert.equal(listByTypeCalls, callsAfterFirst + 5, "no getCacheVersion() means every graph read refetches");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -378,7 +379,7 @@ test("purged graph records round-trip as Surface deleted claims without content 
   });
   assert.ok(!JSON.stringify(bundle).includes("must-not-escape"));
   assert.ok(bundle.evidence.every((e) => e.claimId !== claim.id && !e.sourceRef.includes(erased.id)));
-  const { validateTrustBundle } = await import("@kontourai/surface");
+  const { validateTrustBundle } = await import("@kontourai/surface-knowledge");
   validateTrustBundle(bundle);
 });
 
@@ -477,3 +478,39 @@ for (const versioned of [false, true]) {
     assert.equal((await provider.readNodes())[0].body, "new content");
   });
 }
+
+test("default projection retains a bounded tombstone whose record type was omitted", async () => {
+  const at = "2026-11-02T12:00:00.000Z";
+  const tombstone = { id: "bounded", type: "[omitted]", title: "[purged]", body: "", category: "purged",
+    status: "purged", created_at: at, updated_at: at, provenance: { agent: "creator" },
+    mutation_log: [{ op: "purged", at, agent: "owner", rationale: "request", evidence: { compact: true, omitted_type_bytes: 1024 } }] };
+  const store = {
+    async listByType() { return []; },
+    async listByCategory(category) { return category === "purged" ? [tombstone] : []; },
+    async getLinks() { return { forward: [], reverse: [] }; },
+  };
+  const provider = new MarkdownVaultProvider({ store });
+  const bundle = await buildKnowledgeTrustBundle({ store: provider });
+  const claim = bundle.claims.find((item) => item.subjectId === "bounded");
+  assert.ok(claim, "default projection must not silently drop a bounded tombstone");
+  assert.equal(claim.value, null);
+  assert.equal(claim.metadata.surfaceRetention.state, "deleted");
+  const filtered = await buildKnowledgeTrustBundle({ store: provider, recordTypes: ["raw"] });
+  assert.equal(filtered.claims.some((item) => item.subjectId === "bounded"), false);
+});
+
+test("Knowledge erasure uses Surface 6 without changing the shared gate's v3 status function", async () => {
+  const gate = await import("@kontourai/surface");
+  const knowledge = await import("@kontourai/surface-knowledge");
+  assert.equal(gate.statusFunctionVersion, "3");
+  assert.equal(knowledge.statusFunctionVersion, "4");
+  const claim = { id: "c", claimType: "test", status: "verified" };
+  const evidence = [{ id: "e", claimId: "c", evidenceType: "test_output", method: "validation", passing: true, observedAt: "2026-01-01T00:00:00Z" }];
+  const policies = [{ id: "p", claimType: "test", requiredEvidence: ["test_output"], requiredMethods: ["validation"], validityRule: { kind: "manual" } }];
+  const events = [
+    { id: "d", claimId: "c", status: "disputed", createdAt: "2026-01-01T00:00:00.0001Z" },
+    { id: "v", claimId: "c", status: "verified", createdAt: "2026-01-01T00:00:00.0002Z" },
+  ];
+  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events }).status, "disputed");
+  assert.equal(knowledge.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
+});

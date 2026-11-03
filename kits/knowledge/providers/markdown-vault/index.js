@@ -107,6 +107,20 @@ export class MarkdownVaultProvider {
       for (const r of recs) out.push(r);
     }
 
+    // A bounded Corpus vault tombstone can omit an oversized record type. It
+    // will not appear in any of the typed listings, so include purged-category
+    // history as well without duplicating ordinary tombstones.
+    if (typeof this.store.listByCategory === "function") {
+      const seen = new Set(out.map((record) => record.id));
+      const stones = await this.store.listByCategory("purged", { includeRetired: true, includeHistory: true });
+      for (const record of stones) {
+        if (record.status === "purged" && !seen.has(record.id)) {
+          out.push(record);
+          seen.add(record.id);
+        }
+      }
+    }
+
     // No version support on the injected store -> never cache (always
     // refetch), so a store with no `getCacheVersion()` stays correct without
     // opting in to memoization.
@@ -116,6 +130,10 @@ export class MarkdownVaultProvider {
 
   async readNodes(options = {}) {
     const records = await this._allRecords();
+    return this._nodesFromRecords(records, options);
+  }
+
+  _nodesFromRecords(records, options = {}) {
     const nodes = records.map((r) => {
       const attributes = { record_type: r.type };
       if (r.provenance) attributes.record_provenance = r.provenance;
@@ -150,6 +168,10 @@ export class MarkdownVaultProvider {
 
   async readEdges() {
     const records = await this._allRecords();
+    return this._edgesFromRecords(records);
+  }
+
+  async _edgesFromRecords(records) {
     const edges = [];
     for (const r of records) {
       const links = await this.store.getLinks(r.id);
@@ -181,8 +203,10 @@ export class MarkdownVaultProvider {
   }
 
   async readGraph() {
-    const [nodes, edges] = await Promise.all([this.readNodes(), this.readEdges()]);
-    return { nodes, edges };
+    // Share one record set within this call, without sharing an unversioned
+    // in-flight fetch with a later caller across a mutation.
+    const records = await this._allRecords();
+    return { nodes: this._nodesFromRecords(records), edges: await this._edgesFromRecords(records) };
   }
 
   /**

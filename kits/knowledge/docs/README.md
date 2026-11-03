@@ -20,10 +20,10 @@ The installed Kit manifest declares `knowledge.store-providers` at
 loaded without Surface or Neo4j packages. The providers remain readers and
 proposal producers; importing them does not approve or apply a change.
 
-`buildKnowledgeTrustBundle` loads `@kontourai/surface` only when explicitly
-called. A consuming Node project that uses that projection must supply a
-compatible Surface package (the Flow Agents package manifest records the version
-used by this distribution). If it is unavailable, the projection rejects; it
+`buildKnowledgeTrustBundle` loads the `@kontourai/surface-knowledge` npm alias
+of `@kontourai/surface` 6.3.0 only when explicitly called. A consuming Node
+project that uses that projection must supply that alias (the Flow Agents
+package manifest pins it). If it is unavailable, the projection rejects; it
 does not produce a placeholder bundle or block unrelated vault reads. Neo4j
 likewise needs its driver and service only when that provider is selected.
 

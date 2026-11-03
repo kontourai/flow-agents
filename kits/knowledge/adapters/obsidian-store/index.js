@@ -42,7 +42,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import { openCorpusStore, purgeUnavailable } from "../shared/corpus-store.js";
+import { openCorpusStore, purgeUnavailable, assertLegacyNotPurged, assertLegacySupportIsLive } from "../shared/corpus-store.js";
 
 import {
   missingEvidenceError,
@@ -95,6 +95,11 @@ export class ObsidianKnowledgeStore {
     if (!storeRoot) throw new Error("storeRoot is required");
     const selected = openCorpusStore(corpusStore, { storeRoot, sourcesDir, dimensions }, "KitObsidianStoreAdapter");
     if (selected) return selected;
+    if (fs.existsSync(path.join(path.resolve(storeRoot), "path-index.json"))) {
+      const error = new Error("A Corpus vault must be opened with its coordinated Corpus adapter");
+      error.code = "READ_ONLY";
+      throw error;
+    }
     this._sourcesDir = sourcesDir;
     // Named dimensions for category segments AFTER the first (domain) segment,
     // written into frontmatter as derived fields so vault views can filter on
@@ -548,7 +553,10 @@ export class ObsidianKnowledgeStore {
     if (!input.provenance?.agent)
       throw missingEvidenceError("create: missing required provenance field: provenance.agent");
 
+    assertLegacySupportIsLive(input, (id) => this._readRecord(id));
+
     const id = input.id || randomUUID();
+    assertLegacyNotPurged(this._readRecord(id));
     if (Object.hasOwn(this._loadPathIndex().by_id, id))
       throw missingEvidenceError(`create: record ID already exists: ${id}`);
     const now = this._now();
@@ -613,6 +621,8 @@ export class ObsidianKnowledgeStore {
     const pathIndex = this._loadPathIndex();
     const record = this._readRecord(id, pathIndex);
     if (!record) throw notFoundError(id);
+    assertLegacyNotPurged(record);
+    assertLegacySupportIsLive(fields, (targetId) => this._readRecord(targetId, pathIndex));
 
     const mutableKeys = ["title", "body", "category", "tags", "links", "aliases", "expires_at", "ttl_seconds"];
     const supplied = mutableKeys.filter((k) => fields[k] !== undefined);
@@ -694,9 +704,12 @@ export class ObsidianKnowledgeStore {
     const pathIndex = this._loadPathIndex();
     const source = this._readRecord(sourceId, pathIndex);
     if (!source) throw notFoundError(sourceId);
+    assertLegacyNotPurged(source);
 
     for (const l of links) {
-      if (!this._readRecord(l.target_id, pathIndex)) throw notFoundError(l.target_id);
+      const target = this._readRecord(l.target_id, pathIndex);
+      if (!target) throw notFoundError(l.target_id);
+      if (l.kind === "source") assertLegacyNotPurged(target);
     }
 
     const now = this._now();
@@ -750,9 +763,11 @@ export class ObsidianKnowledgeStore {
     const pathIndex = this._loadPathIndex();
     const concept = this._readRecord(conceptId, pathIndex);
     if (!concept) throw notFoundError(conceptId);
+    assertLegacyNotPurged(concept);
 
     const proposer = this._readRecord(proposerId, pathIndex);
     if (!proposer) throw notFoundError(proposerId);
+    assertLegacyNotPurged(proposer);
 
     const now = this._now();
 
@@ -816,9 +831,11 @@ export class ObsidianKnowledgeStore {
     const pathIndex = this._loadPathIndex();
     const concept = this._readRecord(conceptId, pathIndex);
     if (!concept) throw notFoundError(conceptId);
+    assertLegacyNotPurged(concept);
 
     const proposer = this._readRecord(proposerId, pathIndex);
     if (!proposer) throw notFoundError(proposerId);
+    assertLegacyNotPurged(proposer);
 
     const proposerLinks = proposer.links || [];
     const hasProposesLink = proposerLinks.some(
@@ -859,9 +876,11 @@ export class ObsidianKnowledgeStore {
     const pathIndex = this._loadPathIndex();
     const concept = this._readRecord(conceptId, pathIndex);
     if (!concept) throw notFoundError(conceptId);
+    assertLegacyNotPurged(concept);
 
     const proposer = this._readRecord(proposerId, pathIndex);
     if (!proposer) throw notFoundError(proposerId);
+    assertLegacyNotPurged(proposer);
 
     const proposerLinks = proposer.links || [];
     const hasProposesLink = proposerLinks.some(
@@ -903,10 +922,12 @@ export class ObsidianKnowledgeStore {
     const pathIndex = this._loadPathIndex();
     const newRecord = this._readRecord(newId, pathIndex);
     if (!newRecord) throw notFoundError(newId);
+    assertLegacyNotPurged(newRecord);
 
     for (const sid of supersededIds) {
       const rec = this._readRecord(sid, pathIndex);
       if (!rec) throw notFoundError(sid);
+      assertLegacyNotPurged(rec);
     }
 
     const now = this._now();
@@ -1000,6 +1021,7 @@ export class ObsidianKnowledgeStore {
     const pathIndex = this._loadPathIndex();
     const record = this._readRecord(id, pathIndex);
     if (!record) throw notFoundError(id);
+    assertLegacyNotPurged(record);
 
     const currentStatus = record.status || "active";
     const allowed = VALID_STATUS_TRANSITIONS[currentStatus];

@@ -81,11 +81,11 @@ function deletedRetention(mutationLog) {
  * @param {string[]} [options.recordTypes] - Filter by record types
  * @param {boolean} [options.includeRetired=false] - Include retired records
  * @param {Object} [options.agent] - Agent identity for provenance
- * @returns {Promise<import("@kontourai/surface").TrustBundle>}
+ * @returns {Promise<import("@kontourai/surface-knowledge").TrustBundle>}
  */
 export async function buildKnowledgeTrustBundle(options = {}) {
   // Vault and health consumers do not require the optional Surface projection.
-  const { TrustBundleBuilder } = await import("@kontourai/surface");
+  const { TrustBundleBuilder } = await import("@kontourai/surface-knowledge");
   const {
     storeRoot,
     store,
@@ -115,7 +115,8 @@ export async function buildKnowledgeTrustBundle(options = {}) {
   }
   if (recordTypes.length) {
     const typeSet = new Set(recordTypes);
-    filteredNodes = filteredNodes.filter((n) => typeSet.has(n.attributes.record_type));
+    filteredNodes = filteredNodes.filter((n) => typeSet.has(n.attributes.record_type) ||
+      (options.recordTypes === undefined && n.attributes.status === "purged" && n.attributes.record_type === "[omitted]"));
   }
   if (!includeRetired) {
     filteredNodes = filteredNodes.filter((n) => n.attributes.status !== "retired");

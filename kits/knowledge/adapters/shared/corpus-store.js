@@ -25,3 +25,20 @@ export function purgeUnavailable() {
   error.code = "READ_ONLY";
   return error;
 }
+
+/** Legacy writers must not modify a Corpus tombstone if a host reopens a root. */
+export function assertLegacyNotPurged(record) {
+  if (record?.status !== "purged") return;
+  const error = new Error("A purged record cannot be mutated");
+  error.code = "PURGED";
+  throw error;
+}
+
+/** Prevent legacy creates/updates from adding new support to a tombstone. */
+export function assertLegacySupportIsLive(input, readRecord) {
+  const ids = [
+    ...(Array.isArray(input?.provenance?.source_ids) ? input.provenance.source_ids : []),
+    ...(Array.isArray(input?.links) ? input.links.filter((link) => link?.kind === "source").map((link) => link.target_id) : []),
+  ];
+  for (const id of ids) if (typeof id === "string") assertLegacyNotPurged(readRecord(id));
+}

@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/knowledge-purge-gate.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
-CORPUS_REV=e63bbd091fe45b75295795e5f9835d7c552d77c4
+CORPUS_REV=3ab96002c76078ad3116dd56972a1e08e52a49d7
 
 git clone --quiet --no-checkout https://github.com/kontourai/corpus.git "$WORK_DIR/corpus"
 git -C "$WORK_DIR/corpus" checkout --quiet --detach "$CORPUS_REV"
@@ -16,7 +16,7 @@ mkdir "$WORK_DIR/pack" "$WORK_DIR/consumer"
 printf '{"private":true,"type":"module"}\n' > "$WORK_DIR/consumer/package.json"
 (cd "$WORK_DIR/consumer" && npm install --ignore-scripts --no-save "$WORK_DIR/pack/kontourai-corpus-store-0.1.0-next.0.tgz")
 CORPUS_STORE_ENTRY="$WORK_DIR/consumer/node_modules/@kontourai/corpus-store/dist/index.js"
-SURFACE_ENTRY="$ROOT_DIR/node_modules/@kontourai/surface/dist/src/index.js"
+SURFACE_ENTRY="$ROOT_DIR/node_modules/@kontourai/surface-knowledge/dist/src/index.js"
 export CORPUS_STORE_ENTRY SURFACE_ENTRY
 TEST_FILE="$ROOT_DIR/kits/knowledge/providers/surface-adapter/packed-purge.test.mjs"
 node --test "$TEST_FILE"
