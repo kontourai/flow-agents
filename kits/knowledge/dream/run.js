@@ -403,6 +403,10 @@ export async function runDream(host, options = {}) {
     // written below; what they hold back as contested is decided here, once, and both the brief and the review queue
     // use that verdict: a contested claim belongs in the review queue, not the brief.
     const latest = indexProposals(await store.listProposals(), proposerId);
+    // Routing in the backfill below must look at the same snapshot the brief judged, or a claim another writer adds
+    // between the two reads would be named by the verdict and missing from the peers.
+    index = latest;
+    reslot();
     const { items, excluded } = await briefItems(store, latest, proposerId);
     const { views, byView } = effectiveItems(items, reviewDecisions);
     const contestedNow = classifyCurrent(views, policy).contested.map((view) => byView.get(view));

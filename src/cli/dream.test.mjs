@@ -1148,3 +1148,37 @@ test("a contest the brief verified reaches the review queue though routing saw a
     assert.equal(out.published.at(-1).reviewItems.length, 2);
   }
 });
+
+test("the review backfill and the brief judge one snapshot: a rival another writer adds between the two reads does not break the run", async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const first = hostFor(ws, noApplyStore(store), await scriptedExtract());
+  await runDream(first, runOptions(ws));
+  const [mine] = await store.listProposals();
+  const claim = JSON.parse(mine.candidate.body).claim;
+  const { id: _id, schema_version: _v, ...fields } = claim;
+  const rival = memoryClaim({ ...fields, value: "a rival another writer added", source: { ...fields.source, locator: "chars:0-1", excerpt: "x" } });
+  const entry = { claim: rival, agreement: { passes: 2, agreeing: 2 }, project: null };
+  const decision = routeMemoryChange({ type: "claim", claim: rival, current: [], agreement: entry.agreement, sourceVisibility: claim.visibility });
+  let calls = 0; // across every read of the property, not per read
+  const racing = new Proxy(store, {
+    get(target, prop) {
+      if (prop !== "listProposals") { const value = target[prop]; return typeof value === "function" ? value.bind(target) : value; }
+      return async (...args) => {
+        calls += 1;
+        // A no-op run reads the proposals twice: once to index them, once to build the brief. The rival lands between.
+        if (calls === 2) await target.proposeCreate({ title: "rival", category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: "elsewhere:1", contentHash: "h", visibilityKey: visibilityKey(claim.visibility) } }) }, "another-writer", { agent: "x", proposal: "x" });
+        return target.listProposals(...args);
+      };
+    },
+  });
+  const host = hostFor(ws, noApplyStore(racing), await scriptedExtract());
+  host.published.length = 0;
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.status, "noop");
+  assert.equal(report.claims.contested_routed >= 1, true, "the claim the rival contests reached the review queue on the run that found it");
+  assert.equal(host.published.at(-1).reviewItems.length >= 1, true);
+});
