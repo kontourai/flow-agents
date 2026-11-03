@@ -30,15 +30,18 @@ const verification = (claim, result, value = claim.value, verifierId = "stub") =
   verdict: result === "abstain" ? { result, abstainReason: "timeout" } : { result },
   createdAt: "2026-11-01T00:00:00.000Z",
 });
-function lateContradiction(supporting) {
+/** A claim with `supporting` supporting records and one contradiction that sorts before them or after them (Survey orders applicable records by id). */
+function contradictionAmong(supporting, position) {
   const claim = make();
   const supports = Array.from({ length: supporting }, (_, i) => verification(claim, "supported", claim.value, `support-${i}`));
   for (let i = 0; i < 500; i++) {
     const contradicting = verification(claim, "contradicted", claim.value, `check-${i}`);
-    if (supports.every(record => record.id < contradicting.id)) return change(claim, { verifications: [...supports, verification(claim, "abstain", claim.value, "gave-up"), contradicting] });
+    const placed = position === "last" ? supports.every(record => record.id < contradicting.id) : supports.every(record => contradicting.id < record.id);
+    if (placed) return change(claim, { verifications: [...supports, verification(claim, "abstain", claim.value, "gave-up"), contradicting] });
   }
-  throw new Error("no contradicting record sorts last; widen the search");
+  throw new Error(`no contradicting record sorts ${position}; widen the search`);
 }
+const lateContradiction = supporting => contradictionAmong(supporting, "last");
 const rulesOf = decision => decision.reasons.map(reason => reason.rule);
 
 // ---------------------------------------------------------------------------
@@ -59,6 +62,7 @@ const RULE_CASES = {
       // a rule that only looked at the first record would pass these.
       ["a supported record does not mask a contradiction recorded by another verifier", () => lateContradiction(1)],
       ["the contradiction sorts after several supporting records", () => lateContradiction(3)],
+      ["the contradiction sorts before several supporting records", () => contradictionAmong(3, "first")],
     ],
     passes: [
       ["a supported verdict", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "supported")] }); }],
