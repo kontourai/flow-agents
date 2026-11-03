@@ -167,8 +167,8 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
         const attempts = [
           () => legacy.update(id, { body: "reintroduced" }, { agent: "test" }),
           () => legacy.link(id, [{ target_id: other, kind: "related" }], { agent: "test" }),
-          () => legacy.link(survivor, [{ target_id: id, kind: "source" }], { agent: "test" }),
           () => legacy.link(survivor, [{ target_id: id, kind: "related", label: "erased title" }], { agent: "test" }),
+          () => legacy.link(survivor, [{ target_id: id, kind: "source" }], { agent: "test" }),
           () => legacy.update(survivor, { links: [{ target_id: id, kind: "source" }] }, { agent: "test" }),
           () => legacy.create({ type: "raw", title: "new", body: "new", category: "private",
             provenance: { agent: "test", source_ids: [id] } }),
