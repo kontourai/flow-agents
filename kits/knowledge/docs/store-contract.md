@@ -2036,8 +2036,7 @@ that rests only on erased sources is rejected and its candidate scrubbed; one
 with remaining support is blocked from application and returned for review. A
 blocked proposal retains its candidate, which may itself reproduce erased
 content, so the host must review it. The Corpus-backed adapter mode adopts this
-behavior; the packed branch evidence must be repeated against the merged,
-published package before release.
+behavior from the published `@kontourai/corpus-store@0.1.0-next.0`.
 
 When a purged record is projected into a Surface claim, the Knowledge Surface
 adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
@@ -2046,19 +2045,16 @@ and does not quote a tombstoned linking record as evidence for a live target. Mi
 purge audit evidence fails the projection; no erasure actor or rationale is
 invented. A shortened vault tombstone keeps a bounded, non-blank rationale; a
 malformed tombstone with an empty or whitespace-only rationale fails closed.
-The bounded-rationale resolution is tracked in corpus#57 and must be verified
-again against the merged, published package.
+The bounded-rationale resolution is tracked in corpus#57.
 If a minimal tombstone's oversized type is replaced with `[omitted]`, the
 default provider and Surface projection still include the deletion fact via the
 purged-category history. An explicit record-type filter can exclude it.
-Survivor content remains the producer's responsibility. To exercise
-the packed Corpus-backed adapters through this projection before publication,
-install the scratch-built tarball outside the repository and run:
+Survivor content remains the producer's responsibility. The conformance gate
+exercises the pinned published package through both adapters and this projection,
+including a cascade fault in an isolated copy:
 
 ```sh
-CORPUS_STORE_ENTRY=/absolute/path/to/installed/package/dist/index.js \
-SURFACE_ENTRY=/absolute/path/to/installed/surface/dist/src/index.js \
-  node --test kits/knowledge/providers/surface-adapter/packed-purge.test.mjs
+bash evals/static/test_knowledge_purge.sh
 ```
 
 Corpus tombstones have category `purged`, so a projection filtered by an earlier

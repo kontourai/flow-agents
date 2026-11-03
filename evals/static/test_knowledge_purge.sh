@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
-# Build unpublished Corpus main at its pinned merge commit, install its tarball
-# outside the repository, and prove the kit adapter seam catches a lost cascade.
+# Exercise the pinned published Corpus package, with faults in an isolated copy.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/knowledge-purge-gate.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
-CORPUS_REV=250138191da992f7aae928c9cf638fbf2b36cfe5
-
-git clone --quiet --no-checkout https://github.com/kontourai/corpus.git "$WORK_DIR/corpus"
-git -C "$WORK_DIR/corpus" checkout --quiet --detach "$CORPUS_REV"
-test "$(git -C "$WORK_DIR/corpus" rev-parse HEAD)" = "$CORPUS_REV"
-(cd "$WORK_DIR/corpus" && npm ci --ignore-scripts && npm run build --workspace=@kontourai/corpus-store)
-mkdir "$WORK_DIR/pack" "$WORK_DIR/consumer"
-(cd "$WORK_DIR/corpus" && npm pack --workspace=@kontourai/corpus-store --pack-destination "$WORK_DIR/pack")
-printf '{"private":true,"type":"module"}\n' > "$WORK_DIR/consumer/package.json"
-(cd "$WORK_DIR/consumer" && npm install --ignore-scripts --no-save "$WORK_DIR/pack/kontourai-corpus-store-0.1.0-next.0.tgz")
-CORPUS_STORE_ENTRY="$WORK_DIR/consumer/node_modules/@kontourai/corpus-store/dist/index.js"
+node -e 'const p = require(process.argv[1]); if (p.version !== "0.1.0-next.0") throw new Error("unexpected Corpus Store version")' "$ROOT_DIR/node_modules/@kontourai/corpus-store/package.json"
+mkdir "$WORK_DIR/package"
+cp -R "$ROOT_DIR/node_modules/@kontourai/corpus-store/dist" "$WORK_DIR/package/dist"
+cp "$ROOT_DIR/node_modules/@kontourai/corpus-store/package.json" "$WORK_DIR/package/package.json"
+mkdir "$WORK_DIR/package/node_modules"
+YAML_DIR="$(node -e 'const path = require("node:path"); const fs = require("node:fs"); const root = fs.realpathSync(process.argv[1]); console.log(path.dirname(require.resolve("js-yaml/package.json", { paths: [root] })))' "$ROOT_DIR/node_modules/@kontourai/corpus-store")"
+ln -s "$YAML_DIR" "$WORK_DIR/package/node_modules/js-yaml"
+CORPUS_STORE_ENTRY="$WORK_DIR/package/dist/index.js"
 SURFACE_ENTRY="$ROOT_DIR/node_modules/@kontourai/surface-knowledge/dist/src/index.js"
 export CORPUS_STORE_ENTRY SURFACE_ENTRY
 TEST_FILE="$ROOT_DIR/kits/knowledge/providers/surface-adapter/packed-purge.test.mjs"
 node --test "$TEST_FILE"
-PURGE_FILE="$WORK_DIR/consumer/node_modules/@kontourai/corpus-store/dist/shared/purge.js"
+PURGE_FILE="$WORK_DIR/package/dist/shared/purge.js"
 cp "$PURGE_FILE" "$WORK_DIR/purge-original.js"
 node --input-type=module - "$PURGE_FILE" <<'JS'
 import { readFileSync, writeFileSync } from 'node:fs';
