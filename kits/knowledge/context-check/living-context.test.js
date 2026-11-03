@@ -1053,6 +1053,24 @@ describe("Living Context: review round 3 regressions (#1572)", () => {
     assert.equal(acrossRoots.answered, "abstained");
   });
 
+  test("an ambiguous hidden id explains nothing to a reader who may not see the edge, or before the edge was recorded", () => {
+    const hidden = { visibility: { audiences: ["auditor"] } };
+    const normalise = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
+    const entry = (predecessor, withTwin, asOf) => {
+      const twin = withTwin ? [mk("h", { ...hidden, slot: "other" })] : [];
+      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [predecessor, mk("h", { ...hidden }), ...twin, mk("z", {})] });
+      const result = recallOf(run(repo, revision, { claim_ids: ["a"], ...(asOf ? { as_of: asOf } : {}) }), "a");
+      remove(repo);
+      return normalise(result);
+    };
+    const restricted = mk("a", edge("h", { supersession_visibility: { audiences: ["auditor"] } }));
+    assert.equal(entry(restricted, true), entry(restricted, false), "a restricted edge: the reader's view is identical with or without the extra hidden copy");
+    const early = { now: NOW, known_at: "2026-01-01T12:00:00Z", valid_at: NOW };
+    const open = mk("a", edge("h", { supersession_visibility: "public" }));
+    assert.equal(entry(open, true, early), entry(open, false, early), "an edge recorded after known_at is not on the chain yet");
+    assert.match(entry(open, true), /supersession_ambiguous/, "control: the same graph with a visible edge is ambiguous");
+  });
+
   test("a hidden duplicate that no visible claim's chain reaches changes nothing, in any position", async () => {
     const hidden = { visibility: { audiences: ["auditor"] } };
     const normalise = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
