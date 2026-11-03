@@ -129,15 +129,15 @@ test("a replaced claim is not current, and its successor is; a retraction remove
   assert.deepEqual(out.notCurrent.map((i) => i.claim.id), [retraction.claim.id], "and the retraction itself is not a current claim");
 });
 
-test("authority to replace: only a reviewed claim, in the same slot, by the same speaker, can take another out of the brief", () => {
+test("authority to replace: only a reviewed claim, in the same slot, by the same speaker, can take another out of the brief; an unreviewed succession is a contest", () => {
   const old = item({ ...slot, value: "PostgreSQL 15" });
   const edge = (target, kind = "succession") => [{ claimId: target.claim.id, kind, reason: "the speaker said so" }];
 
   const pending = item({ ...slot, value: "PostgreSQL 16", state: "pending", supersedes: edge(old) });
   const holds = classifyCurrent([old, pending]);
-  assert.deepEqual(values(holds.current), ["PostgreSQL 15", "PostgreSQL 16"], "an unreviewed replacement takes nothing out, and the pair is a replacement, not a contest");
-  assert.equal(holds.superseded.length + holds.contested.length, 0);
-  assert.deepEqual(values(rankItems([old, pending], { now: NOW_ISO })), ["PostgreSQL 15"], "the reviewed claim stays in the brief until the replacement is reviewed");
+  assert.deepEqual(values(holds.contested), ["PostgreSQL 15", "PostgreSQL 16"], "as in Surface, an unreviewed succession leaves both candidates contested until a reviewer verifies it");
+  assert.equal(holds.superseded.length, 0, "an unreviewed claim replaces nothing");
+  assert.deepEqual(rankItems([old, pending], { now: NOW_ISO }), [], "so neither is in the brief while the reviewer decides");
 
   const elsewhere = item({ subject: "db", property: "backup schedule", value: "nightly" });
   const crossSlot = item({ ...slot, value: "PostgreSQL 99", supersedes: edge(elsewhere) });

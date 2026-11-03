@@ -873,7 +873,7 @@ test("a foreign writer's contest of an applied claim reaches the review queue, t
   assert.equal(report.claims.contested_routed, 1);
   assert.equal(host.published.length, 1, "and the no-op run still hands the contest to review");
   assert.equal(host.published[0].reviewItems.length, 1);
-  assert.equal(host.published[0].decisions[0].reasons[0].rule, "conflicting-current-values");
+  assert.equal(host.published[0].decisions[0].reasons[0].rule, "contested-by-accumulation");
 });
 
 test("an envelope over its byte bound is refused to encode, and a stored claim over the claim bound is unverifiable", async () => {
@@ -904,4 +904,43 @@ test("an over-size body of this run's own is refused without being parsed, even 
     assert.throws(() => indexProposals([proposal], "knowledge.dream"), (error) => error.code === "DREAM_RECEIPT_CORRUPT" && !/format/.test(error.message));
   } finally { JSON.parse = original; }
   assert.equal(parsed, 0);
+});
+
+test("the host's Surface projection, when it provides one, decides the contest: current routes nothing, contested and invalid route, and a projection that cannot answer fails closed", async (t) => {
+  const clash = (content) => (content.includes("banker's rounding")
+    ? ["half up", "half even"].map((value) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value, posture: "stated" }))
+    : []);
+  const outcomes = {};
+  const run = async (label, project) => {
+    const { ws, host, store } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: clash } });
+    t.after(ws.cleanup);
+    const seen = [];
+    const report = await runDream({ ...host, project: async (request) => { seen.push(request); return project(request); } }, runOptions(ws));
+    outcomes[label] = { report, seen, store };
+    return outcomes[label];
+  };
+  const current = (request) => ({ outcome: "current", candidateClaimIds: [request.claims[0].id], gapCodes: [] });
+  const contested = (request) => ({ outcome: "contested", candidateClaimIds: request.claims.map((c) => c.id).sort(), gapCodes: [] });
+
+  const calm = await run("current", current);
+  assert.equal(calm.report.claims.routed, 0, "the host's projection said current, so the run did not second-guess it");
+  const first = calm.seen[0];
+  assert.equal(first.query.valuePolicy, "single-json-v1");
+  assert.equal(first.query.slot.fieldOrBehavior, "rounding");
+  assert.ok(first.claims.every((claim) => claim.status === "proposed" && claim.facet === "memory"), "claims are mapped into Surface's shape by the Kit's own mapper");
+
+  const clash2 = await run("contested", contested);
+  assert.equal(clash2.report.claims.routed, 2);
+
+  const invalid = await run("invalid", () => ({ outcome: "invalid", reason: "identity unresolved", candidateClaimIds: [], gapCodes: ["identity"] }));
+  assert.equal(invalid.report.claims.routed, 2, "an invalid projection gives no unique answer, which routes");
+
+  const broken = await run("throws", () => { throw new Error("authority snapshot unavailable"); });
+  assert.equal(broken.report.claims.routed, 2, "a projection that cannot answer is not read as uncontested");
+  const stored = JSON.parse((await broken.store.listProposals())[0].candidate.body);
+  assert.equal(stored.decision.input.accumulation.outcome, "invalid");
+  assert.deepEqual(stored.decision.input.accumulation.gapCodes, ["projection-failed"]);
+
+  const garbage = await run("not-a-fact", () => ({ hello: "world" }));
+  assert.equal(garbage.report.claims.routed, 2, "a result that is not a projection fact fails closed too");
 });

@@ -37,6 +37,8 @@ import {
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, classifyCurrent, effectiveItems, isSealed, writeBriefs } from "./brief.js";
 import { memorySlotKey } from "@kontourai/flow-agents/memory-claims";
+import { canonicalJson } from "@kontourai/relay";
+import { memoryAccumulationClaims, memoryAccumulationFact, memoryAccumulationQuery } from "../adapters/memory-claims/index.mjs";
 
 import { MAX_CLAIM_BYTES, fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
 import { acquireDreamLock } from "./lock.js";
@@ -266,34 +268,74 @@ export async function runDream(host, options = {}) {
     // each decision cost the size of the store. `siblings` are the other claims of the same plan, which are peers too:
     // two claims from one sitting that disagree are a contest like any other.
     let slotPeers = new Map();
+    let slotFacts = new Map();
     const reslot = () => {
       slotPeers = new Map();
+      slotFacts = new Map();
       for (const { proposal, envelope } of index.byClaim.values()) {
         if (proposal.state === "rejected") continue;
         const key = memorySlotKey(envelope.claim);
-        slotPeers.set(key, [...(slotPeers.get(key) ?? []), envelope.claim]);
+        slotPeers.set(key, [...(slotPeers.get(key) ?? []), { claim: envelope.claim, state: proposal.state, project: envelope.project, agreement: envelope.agreement }]);
       }
     };
     reslot();
-    // Which peers can change a decision: one that disagrees, or one the claim would be wider than. A peer that agrees
-    // and is no narrower adds nothing to the decision's outcome, so it is not embedded: routing validates and stores
-    // every peer it is given, and a slot can hold thousands. Relevant peers beyond the cap leave the outcome unchanged
-    // (one is enough to route), and are counted so the cut is visible.
-    const MAX_RELEVANT_PEERS = 16;
-    const route = (claim, agreement, siblings = []) => {
+
+    // The contest fact for a claim's slot. Surface's accumulation projection owns it (#1571 routes on it and compares no
+    // values itself), and the HOST runs it, because it needs observations with custody and an authority snapshot this
+    // run does not hold: `host.project({ query, claims })` returns `projectAccumulation`'s result for the slot. Without a
+    // host projection the fact comes from `classifyCurrent`, the stand-in that applies the same slot rules locally
+    // (kontourai/flow-agents#1584). Either way routing sees one fact, so the review queue and the brief agree.
+    const factFor = async (claim, siblings) => {
+      if (claim.posture !== "stated") return null;
       const slot = memorySlotKey(claim);
-      const candidates = [...(slotPeers.get(slot) ?? []), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot)]
+      const items = [...(slotPeers.get(slot) ?? []), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot).map((other) => ({ claim: other, state: "pending" }))];
+      const together = [...items.filter((item) => item.claim.id !== claim.id), { claim, state: "pending" }];
+      if (typeof host.project === "function") {
+        const key = `${slot}|${together.map((item) => item.claim.id).sort().join(",")}`;
+        if (!slotFacts.has(key)) {
+          let fact;
+          try {
+            const stated = together.map((item) => item.claim);
+            fact = memoryAccumulationFact(await host.project({ query: memoryAccumulationQuery(claim, now()), claims: memoryAccumulationClaims(stated.filter((c) => c.posture === "stated"), stated) }));
+          } catch (error) {
+            // A projection that cannot answer gives no unique answer for the slot: fail closed, route it.
+            fact = { outcome: "invalid", reason: String(error?.message ?? error).slice(0, 200), candidateClaimIds: together.map((item) => item.claim.id).sort(), gapCodes: ["projection-failed"] };
+          }
+          slotFacts.set(key, fact);
+        }
+        return slotFacts.get(key);
+      }
+      const out = classifyCurrent(together, policy);
+      const ids = out.contested.map((item) => item.claim.id).sort();
+      return out.contested.some((item) => item.claim.id === claim.id)
+        ? { outcome: "contested", candidateClaimIds: ids, gapCodes: ["dream-stand-in"] }
+        : { outcome: "current", candidateClaimIds: [claim.id], gapCodes: ["dream-stand-in"] };
+    };
+
+    // Which peers belong in a decision: the rivals the fact names (the review item shows the pair) and any peer the claim
+    // would be wider than. Others add nothing, and routing validates and stores every peer it is given, while a slot can
+    // hold thousands. Beyond the cap the outcome is unchanged (one rival is enough to route); the cut is counted.
+    const MAX_RELEVANT_PEERS = 16;
+    const route = async (claim, agreement, siblings = []) => {
+      const slot = memorySlotKey(claim);
+      const candidates = [...(slotPeers.get(slot) ?? []).map((item) => item.claim), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot)]
         // A peer over the claim size bound cannot be this run's, and would make the stored decision too large.
         .filter((peer) => peer.id !== claim.id && Buffer.byteLength(JSON.stringify(peer)) <= MAX_CLAIM_BYTES)
         .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      const base = { type: "claim", claim, agreement, sourceVisibility: options.visibility ?? null };
+      const accumulation = await factFor(claim, siblings);
+      const base = { type: "claim", claim, agreement, accumulation, sourceVisibility: options.visibility ?? null };
       const alone = routeMemoryChange({ ...base, current: [] }, policy);
+      const named = new Set(accumulation?.candidateClaimIds ?? []);
       const relevant = candidates.filter((peer) => {
+        if (named.has(peer.id)) return true;
         const withPeer = routeMemoryChange({ ...base, current: [peer] }, policy);
         return withPeer.outcome !== alone.outcome || withPeer.reasons.length !== alone.reasons.length;
       });
       if (relevant.length > MAX_RELEVANT_PEERS) report.claims.peers_capped += 1; // reported, never silent
-      return routeMemoryChange({ ...base, current: relevant.slice(0, MAX_RELEVANT_PEERS) }, policy);
+      // Rivals first: a peer that holds a different value is what the review item exists to show.
+      const mine = canonicalJson(claim.value);
+      const ordered = [...relevant].sort((a, b) => (canonicalJson(a.value) !== mine) === (canonicalJson(b.value) !== mine) ? 0 : canonicalJson(a.value) !== mine ? -1 : 1);
+      return routeMemoryChange({ ...base, current: ordered.slice(0, MAX_RELEVANT_PEERS) }, policy);
     };
 
     if (dryRun) {
@@ -329,7 +371,8 @@ export async function runDream(host, options = {}) {
       // The plan is what was drafted and stays as written. The decisions the run acts on are made now, against the
       // claims, policy and visibility in force now, so a resumed plan may route differently from when it was drafted.
       const siblings = plan.map((entry) => entry.claim);
-      const decided = plan.map((entry) => ({ ...entry, decision: route(entry.claim, entry.agreement, siblings) }));
+      const decided = [];
+      for (const entry of plan) decided.push({ ...entry, decision: await route(entry.claim, entry.agreement, siblings) });
       if (known) {
         report.claims.rerouted += decided.filter((entry) => {
           const before = index.byClaim.get(entry.claim.id)?.envelope.decision;
@@ -373,7 +416,7 @@ export async function runDream(host, options = {}) {
     const alreadyRouted = new Set(decisions.filter((decision) => decision.outcome === "routed").map((decision) => decision.changeId));
     for (const item of contestedNow) {
       if (item.state !== "pending" || alreadyRouted.has(item.claim.id)) continue;
-      const decision = route(item.claim, item.agreement);
+      const decision = await route(item.claim, item.agreement);
       if (decision.outcome === "routed") {
         decisions.push(decision);
         report.claims.contested_routed += 1;

@@ -39,7 +39,7 @@ test("a claim that contradicts a current one is routed to review, published once
   const [batch] = published;
   assert.equal(batch.runId, report.run_id);
   assert.equal(batch.decisions.length, 3, "two proposed, plus the earlier claim routed now");
-  assert.deepEqual(batch.decisions.filter((d) => d.outcome === "routed")[0].reasons.map((r) => r.rule), ["conflicting-current-values"]);
+  assert.deepEqual(batch.decisions.filter((d) => d.outcome === "routed")[0].reasons.map((r) => r.rule), ["contested-by-accumulation"]);
   assert.equal(batch.reviewItems.length, 2);
   assert.equal(batch.reviewItems[0].spec.candidates.length, 2, "a current/proposed pair for the reviewer");
   assert.equal(batch.metrics.routed, 2);

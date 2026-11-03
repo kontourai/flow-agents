@@ -156,12 +156,11 @@ id is the sitting's working-directory name. Nothing else decides scope.
 - **Sealed claims.** A claim whose visibility is sealed (none given, or restricted to no audience) is never in a brief: a brief is injected into sessions, and sealed means visible to no one. Set `visibility` in the config, for a single-owner machine usually `{"kind": "restricted", "audiences": ["user:<you>"]}`; without it the run still proposes, but nothing it proposes reaches a brief.
 - **Current and uncontested only.** A brief ranks claims that are current and that no rival
   contests. A stated claim is *contested* when another stated claim in the same slot holds a
-  different value over an overlapping valid time and neither replaces the other. These are
-  the slot rules of #1571's `conflicting-current-values` routing rule. Every claim in a
+  different value over an overlapping valid time and neither replaces the other. Every claim in a
   contested slot leaves the brief, applied or not: a pending rival contests a reviewed
   claim until review settles it, and rejecting the rival (or retiring the loser's record)
   brings the survivor back. A contested pair is a review-queue matter, not brief content:
-  the later claim is routed to review when it is proposed (`conflicting-current-values`), a
+  the later claim is routed to review when it is proposed (`contested-by-accumulation`), a
   pending claim the brief holds back for a rival that its own decision never flagged (the
   earlier of two, or a rival from another writer) is routed on the run that finds the contest
   and handed to `publish` (`claims.contested_routed`), and `brief_excluded.contested` counts
@@ -177,6 +176,16 @@ id is the sitting's working-directory name. Nothing else decides scope.
   Surface's accumulation projection (surface#359), which owns "which claims are current", is
   merged but unpublished, and needs host-supplied admission decisions. See
   [#1584](https://github.com/kontourai/flow-agents/issues/1584).
+- **Where the contest fact comes from.** #1571 routes on a projection fact (`contested-by-
+  accumulation`) and compares no values itself. The host runs Surface's `projectAccumulation`
+  because it needs observations with custody and an authority snapshot this run does not hold:
+  pass `host.project({ query, claims })` and the run maps its claims in with #1571's mapper,
+  reads the result with `memoryAccumulationFact`, and routes on it. A projection that throws,
+  or returns something that is not a fact, is recorded as an `invalid` fact, which routes:
+  a slot that cannot be answered is not read as uncontested. Without `host.project` the fact
+  comes from the local stand-in (`gapCodes: ["dream-stand-in"]`), which is also what the brief
+  uses, so the review queue and the brief agree. The brief itself still uses the stand-in;
+  consuming the projection there is #1584.
 - **Eligibility (the quarantine).** An `applied` proposal is eligible when its record is
   active and is the record Corpus made from it: the record's `apply-create` entry names the
   proposal and the record body is the proposal's. A settlement that points at some other

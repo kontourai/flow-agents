@@ -115,9 +115,9 @@ const overlap = (x, y) => x === null || y === null || (x.from < y.until && y.fro
  * the Kit can see: a `succession` edge from a stated claim by the same speaker, or a
  * `correction` edge from a retracted claim by the same speaker that holds the same value
  * (the speaker withdrawing their own assertion). Another speaker's edge replaces nothing
- * (it needs an authority decision); neither does an edge into another slot, nor an edge from
- * an unreviewed claim. A pair joined by a valid edge does not contest each other; until the
- * replacing claim is reviewed, the older one stays current.
+ * (it needs an authority decision); neither does an edge into another slot. An edge from an
+ * unreviewed claim replaces nothing yet: as in Surface, an unreviewed succession leaves both
+ * candidates contested until a reviewer verifies the successor, and both wait in the review queue.
  * A hypothetical or retracted claim asserts nothing about the present and is not current.
  * Properties the policy lists as `multiValued` cannot be contested. A contested claim is
  * contested however it got there: a pending rival contests an applied claim until review
@@ -143,7 +143,6 @@ export function classifyCurrent(items, policy = {}) {
   const info = new Map(items.map((item) => [item, { slot: memorySlotKey(item.claim), value: canonicalJson(item.claim.value), span: bounds(item.claim.validTime) }]));
   const byId = new Map(items.map((item) => [item.claim.id, item]));
   const replaced = new Set();
-  const linked = new Set(); // pairs joined by a valid edge, in either direction: a replacement is not a contest
   for (const item of items) {
     for (const edge of item.claim.supersedes ?? []) {
       const target = byId.get(edge.claimId);
@@ -151,9 +150,8 @@ export function classifyCurrent(items, policy = {}) {
       const succession = item.claim.posture === "stated" && edge.kind === "succession";
       const withdrawal = item.claim.posture === "retracted" && edge.kind === "correction" && info.get(target).value === info.get(item).value;
       if (!succession && !withdrawal) continue;
-      linked.add(`${item.claim.id}|${target.claim.id}`);
-      linked.add(`${target.claim.id}|${item.claim.id}`);
-      // Only a reviewed claim can replace one: an unreviewed claim cannot take a reviewed one out of the brief.
+      // Only a reviewed claim replaces one. Until the successor is verified Surface keeps both candidates, so an
+      // unreviewed succession is a contest like any other, and both wait for the reviewer.
       if (item.state === "applied") replaced.add(target.claim.id);
     }
   }
@@ -165,7 +163,7 @@ export function classifyCurrent(items, policy = {}) {
     if (multiValued(policy, group[0].claim.property)) continue;
     if (new Set(group.map((item) => info.get(item).value)).size < 2) continue; // restatements agree
     for (const a of group) {
-      const rival = group.some((b) => info.get(b).value !== info.get(a).value && !linked.has(`${a.claim.id}|${b.claim.id}`) && overlap(info.get(a).span, info.get(b).span));
+      const rival = group.some((b) => info.get(b).value !== info.get(a).value && overlap(info.get(a).span, info.get(b).span));
       if (rival) contested.add(a.claim.id);
     }
   }
