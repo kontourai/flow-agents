@@ -248,23 +248,13 @@ test("one claim has one decision id, however its audiences or edges were ordered
   assert.equal(routeMemoryChange(change(make({ supersedes: edges }))).id, routeMemoryChange(change(make({ supersedes: [...edges].reverse() }))).id);
 });
 
-test("the Kit's visibility order is Surface's lattice: Surface's own meet vectors, and the real function once it is installed", async () => {
+test("the Kit's visibility order is Surface's lattice (surface@6.3.0 meetVisibility): the pinned release answers Surface's own meet vectors", () => {
   const sealed = only();
   const vectors = [[PUBLIC, PUBLIC, true], [only("a"), PUBLIC, true], [PUBLIC, only("a"), false], [only("a"), only("a", "b"), true], [only("a", "b"), only("a"), false],
     [only("a"), only("b"), false], [sealed, only("a"), true], [sealed, sealed, true], [only("a"), sealed, false], [sealed, PUBLIC, true], [PUBLIC, sealed, false],
     // unreadable is sealed on either side, never wider
     [{ kind: "restricted", audiences: [1] }, only("a"), true], [only("a"), { kind: "restricted", audiences: [1] }, false], [undefined, only("a"), true], [only("a"), undefined, false], [undefined, undefined, true], [PUBLIC, undefined, false]];
   for (const [inner, outer, within] of vectors) assert.equal(memoryVisibilityWithin(inner, outer), within, `${JSON.stringify(inner)} within ${JSON.stringify(outer)}`);
-  const surface = await import("@kontourai/surface");
-  if (typeof surface.meetVisibility !== "function") {
-    // Surface #356 is merged but unreleased. When the pinned Surface has it, this block checks the Kit against it.
-    assert.equal(typeof surface.meetVisibility, "undefined");
-    return;
-  }
-  const grid = [PUBLIC, sealed, only("a"), only("b"), only("a", "b"), only("a", "b", "c"), { kind: "restricted", audiences: [1] }, undefined];
-  for (const inner of grid) for (const outer of grid) {
-    assert.equal(memoryVisibilityWithin(inner, outer), JSON.stringify(surface.meetVisibility(inner ?? sealed, outer ?? sealed)) === JSON.stringify(surface.meetVisibility(inner ?? sealed)), `${JSON.stringify(inner)} / ${JSON.stringify(outer)}`);
-  }
 });
 
 

@@ -12,13 +12,14 @@
  */
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
+import { meetVisibility } from "@kontourai/surface";
 import {
   currentProposedReviewItem, foldCandidateVerifications, reviewResourceApiVersion, runSupportVerifier,
-  type CandidateVerification, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
+  type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import { memoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
 import {
-  MemoryClaimError, assertMemoryClaim, foldMemoryText, memorySlotKey, readMemoryVisibility, readAudienceList,
+  MemoryClaimError, assertMemoryClaim, foldMemoryText, memorySlotKey, readMemoryVisibility,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
 } from "./memory-claims.js";
 
@@ -75,14 +76,8 @@ export interface MemoryEntityRoutingInput {
   /** Every subject the proposal names, as Survey's `SubjectRef`, sorted. Not flattened: a type or id may hold any character. */
   subjects: { subjectType: string; subjectId: string }[];
 }
-/**
- * The part of Survey's `EntityProposal` (kontourai/survey#243, `createEntityProposal`) this Kit reads. Structural so
- * the Kit does not import an unreleased Survey; pass the real proposal object.
- */
-export interface SurveyEntityProposalLike {
-  id: string;
-  spec: { alternatives: readonly { operation: string; subjects: readonly { subjectType: string; subjectId: string }[] }[] };
-}
+/** The part of Survey's `EntityProposal` (`createEntityProposal`, survey@8.3.0) this Kit reads: pass the real proposal object. */
+export type SurveyEntityProposal = Pick<EntityProposal, "id" | "spec">;
 export type MemoryRoutingInput = MemoryClaimRoutingInput | MemoryEntityRoutingInput;
 
 export interface MemoryRoutingReason { rule: MemoryRoutingRuleId; detail: Record<string, unknown> }
@@ -109,34 +104,16 @@ const rule = <T extends MemoryRoutingInput>(id: MemoryRoutingRuleId, appliesTo: 
   ({ id, appliesTo, check: check as RoutingRule["check"] });
 
 const agreementWellFormed = (a: MemoryAgreement): boolean => Number.isInteger(a.passes) && Number.isInteger(a.agreeing) && a.passes >= 1 && a.agreeing >= 0 && a.agreeing <= a.passes;
-const SEALED: MemoryVisibility = { kind: "restricted", audiences: [] };
 /**
- * Whether `inner` is no more visible than `outer` in Surface's lattice: `meetVisibility(inner, outer)` equals `inner`.
- * Surface's `meetVisibility` is merged (surface#356) but not in a published release, so this is the one place the Kit
- * states the order. It is checked against Surface's own meet vectors, and against the real function as soon as the
- * installed Surface has one. Undeclared or unreadable is sealed, as in Surface: omission never widens.
+ * Whether `inner` is no more visible than `outer` in Surface's lattice (surface@6.3.0): the meet of the two is `inner`'s own
+ * meet. Surface's `meetVisibility` is total and fail-closed, so undeclared or unreadable is sealed and omission never widens;
+ * the Kit states no order of its own. `meetVisibility` returns audiences sorted, so the two results compare as JSON.
  */
 export function memoryVisibilityWithin(inner: unknown, outer: unknown): boolean {
-  const a = surfaceReading(inner), b = surfaceReading(outer);
-  if (b.kind === "public") return true;
-  if (a.kind === "public") return false;
-  return a.audiences.every(audience => b.audiences.includes(audience));
+  const bound = meetVisibility(inner as MeetArgument, outer as MeetArgument), own = meetVisibility(inner as MeetArgument);
+  return JSON.stringify(bound) === JSON.stringify(own);
 }
-
-/**
- * How Surface's `meetVisibility` reads one argument (it is total): `public` is public whatever else the object carries,
- * `restricted` with a readable audience list is that set, and everything else (null, undefined, a string, a malformed
- * list) is sealed. Not the strict claim reading: the order must agree with Surface on any input, including bad ones.
- */
-function surfaceReading(value: unknown): MemoryVisibility {
-  // Surface reads `.kind` off anything that is not null or undefined, so a function carrying one reads as it would there.
-  if (value === null || (typeof value !== "object" && typeof value !== "function")) return SEALED;
-  const { kind, audiences } = value as { kind?: unknown; audiences?: unknown };
-  if (kind === "public") return { kind: "public" };
-  if (kind !== "restricted") return SEALED;
-  const named = readAudienceList(audiences);
-  return named === undefined ? SEALED : { kind: "restricted", audiences: [...new Set(named)].sort() };
-}
+type MeetArgument = Parameters<typeof meetVisibility>[number];
 const listed = (names: string[], name: string) => names.some(entry => entry === "*" || foldMemoryText(entry) === foldMemoryText(name));
 
 export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
@@ -225,7 +202,7 @@ export interface MemoryClaimChange {
   /** Visibility of the source the claim came from; null or absent is undeclared, which reads as sealed. */
   sourceVisibility?: MemoryVisibility | null;
 }
-export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProposalLike }
+export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProposal }
 export type MemoryChange = MemoryClaimChange | MemoryEntityChange;
 
 /**
