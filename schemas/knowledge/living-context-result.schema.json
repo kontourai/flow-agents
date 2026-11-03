@@ -261,7 +261,9 @@
               "knowledge_time_unknown",
               "not_valid_at_as_of",
               "declared_unverifiable",
-              "stale_at_as_of"
+              "stale_at_as_of",
+              "supersession_slot_mismatch",
+              "correction_interval_excludes_valid_at"
             ]
           }
         },
@@ -343,7 +345,9 @@
               "knowledge_time_unknown",
               "not_valid_at_as_of",
               "declared_unverifiable",
-              "stale_at_as_of"
+              "stale_at_as_of",
+              "supersession_slot_mismatch",
+              "correction_interval_excludes_valid_at"
             ]
           }
         },
@@ -427,7 +431,9 @@
               "knowledge_time_unknown",
               "not_valid_at_as_of",
               "declared_unverifiable",
-              "stale_at_as_of"
+              "stale_at_as_of",
+              "supersession_slot_mismatch",
+              "correction_interval_excludes_valid_at"
             ]
           }
         },
@@ -474,7 +480,9 @@
               "knowledge_time_unknown",
               "not_valid_at_as_of",
               "declared_unverifiable",
-              "stale_at_as_of"
+              "stale_at_as_of",
+              "supersession_slot_mismatch",
+              "correction_interval_excludes_valid_at"
             ]
           }
         }

@@ -1,18 +1,38 @@
 {
-  "readers": ["engineer", "auditor"],
+  "readers": [
+    "engineer",
+    "auditor"
+  ],
   "claims": [
     {
       "id": "current-context-contract",
       "claim": "The context adapter reads from the revision-bound manifest.",
       "status": "current",
-      "authority": { "path": "docs/decisions/context-contract.md", "citation": "Context contract decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/context-contract.md" },
-      "affected_surfaces": ["src/context-adapter.js"],
-      "visibility": ["engineer", "auditor"],
+      "authority": {
+        "path": "docs/decisions/context-contract.md",
+        "citation": "Context contract decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/context-contract.md"
+      },
+      "affected_surfaces": [
+        "src/context-adapter.js"
+      ],
+      "visibility": [
+        "engineer",
+        "auditor"
+      ],
       "recorded_at": "2026-01-10T00:00:00Z",
-      "valid_time": { "from": "2026-01-10T00:00:00Z" },
+      "valid_time": {
+        "from": "2026-01-10T00:00:00Z"
+      },
       "expires_at": "2027-01-01T00:00:00Z",
-      "review": { "posture": "reviewed", "reviewer": "maintainer" }
+      "review": {
+        "posture": "reviewed",
+        "reviewer": "maintainer"
+      },
+      "slot": "context-contract"
     },
     {
       "id": "superseded-context-contract",
@@ -20,20 +40,44 @@
       "status": "superseded",
       "superseded_by": "current-context-contract",
       "supersession_kind": "correction",
-      "authority": { "path": "docs/decisions/context-contract.md", "citation": "Context contract decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/context-contract.md" },
-      "affected_surfaces": ["src/context-adapter.js"],
-      "visibility": ["engineer", "auditor"],
-      "recorded_at": "2025-12-01T00:00:00Z"
+      "authority": {
+        "path": "docs/decisions/context-contract.md",
+        "citation": "Context contract decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/context-contract.md"
+      },
+      "affected_surfaces": [
+        "src/context-adapter.js"
+      ],
+      "visibility": [
+        "engineer",
+        "auditor"
+      ],
+      "recorded_at": "2025-12-01T00:00:00Z",
+      "slot": "context-contract",
+      "supersession_recorded_at": "2026-01-10T00:00:00Z"
     },
     {
       "id": "clean-control",
       "claim": "The unrelated CLI command preserves its documented output.",
       "status": "current",
-      "authority": { "path": "docs/decisions/cli.md", "citation": "CLI decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/cli.md" },
-      "affected_surfaces": ["src/cli.js"],
-      "visibility": ["engineer", "auditor"],
+      "authority": {
+        "path": "docs/decisions/cli.md",
+        "citation": "CLI decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/cli.md"
+      },
+      "affected_surfaces": [
+        "src/cli.js"
+      ],
+      "visibility": [
+        "engineer",
+        "auditor"
+      ],
       "recorded_at": "2026-01-05T00:00:00Z"
     },
     {
@@ -42,41 +86,88 @@
       "status": "superseded",
       "superseded_by": "new-limit",
       "supersession_kind": "succession",
-      "authority": { "path": "docs/decisions/retry.md", "citation": "Retry decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/retry.md" },
-      "affected_surfaces": ["src/retry.js"],
-      "visibility": ["engineer", "auditor"],
+      "authority": {
+        "path": "docs/decisions/retry.md",
+        "citation": "Retry decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/retry.md"
+      },
+      "affected_surfaces": [
+        "src/retry.js"
+      ],
+      "visibility": [
+        "engineer",
+        "auditor"
+      ],
       "recorded_at": "2025-06-01T00:00:00Z",
-      "valid_time": { "from": "2025-06-01T00:00:00Z" }
+      "valid_time": {
+        "from": "2025-06-01T00:00:00Z"
+      },
+      "slot": "retry-limit",
+      "supersession_recorded_at": "2026-03-02T00:00:00Z"
     },
     {
       "id": "new-limit",
       "claim": "The retry limit is five.",
       "status": "current",
-      "authority": { "path": "docs/decisions/retry.md", "citation": "Retry decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/retry.md" },
-      "affected_surfaces": ["src/retry.js"],
-      "visibility": ["engineer", "auditor"],
+      "authority": {
+        "path": "docs/decisions/retry.md",
+        "citation": "Retry decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/retry.md"
+      },
+      "affected_surfaces": [
+        "src/retry.js"
+      ],
+      "visibility": [
+        "engineer",
+        "auditor"
+      ],
       "recorded_at": "2026-03-02T00:00:00Z",
-      "valid_time": { "from": "2026-03-01T00:00:00Z" }
+      "valid_time": {
+        "from": "2026-03-01T00:00:00Z"
+      },
+      "slot": "retry-limit"
     },
     {
       "id": "auditor-only",
       "claim": "Audit findings are recorded outside the engineering tree.",
       "status": "current",
-      "authority": { "path": "docs/decisions/audit.md", "citation": "Audit decision" },
-      "owning_source": { "owner": "audit", "path": "docs/decisions/audit.md" },
-      "affected_surfaces": ["src/audit.js"],
-      "visibility": ["auditor"],
+      "authority": {
+        "path": "docs/decisions/audit.md",
+        "citation": "Audit decision"
+      },
+      "owning_source": {
+        "owner": "audit",
+        "path": "docs/decisions/audit.md"
+      },
+      "affected_surfaces": [
+        "src/audit.js"
+      ],
+      "visibility": [
+        "auditor"
+      ],
       "recorded_at": "2026-01-02T00:00:00Z"
     },
     {
       "id": "no-visibility",
       "claim": "A claim that never declared who may see it.",
       "status": "current",
-      "authority": { "path": "docs/decisions/audit.md", "citation": "Audit decision" },
-      "owning_source": { "owner": "audit", "path": "docs/decisions/audit.md" },
-      "affected_surfaces": ["src/hidden.js"],
+      "authority": {
+        "path": "docs/decisions/audit.md",
+        "citation": "Audit decision"
+      },
+      "owning_source": {
+        "owner": "audit",
+        "path": "docs/decisions/audit.md"
+      },
+      "affected_surfaces": [
+        "src/hidden.js"
+      ],
       "recorded_at": "2026-01-02T00:00:00Z"
     },
     {
@@ -85,30 +176,65 @@
       "status": "superseded",
       "superseded_by": "auditor-only-successor",
       "supersession_kind": "correction",
-      "authority": { "path": "docs/decisions/deploy.md", "citation": "Deploy decision" },
-      "owning_source": { "owner": "operations", "path": "docs/decisions/deploy.md" },
-      "affected_surfaces": ["src/deploy.js"],
-      "visibility": ["engineer", "auditor"],
-      "recorded_at": "2025-09-01T00:00:00Z"
+      "authority": {
+        "path": "docs/decisions/deploy.md",
+        "citation": "Deploy decision"
+      },
+      "owning_source": {
+        "owner": "operations",
+        "path": "docs/decisions/deploy.md"
+      },
+      "affected_surfaces": [
+        "src/deploy.js"
+      ],
+      "visibility": [
+        "engineer",
+        "auditor"
+      ],
+      "recorded_at": "2025-09-01T00:00:00Z",
+      "slot": "scheduler",
+      "supersession_recorded_at": "2026-02-01T00:00:00Z"
     },
     {
       "id": "auditor-only-successor",
       "claim": "Deployments run on the audited scheduler.",
       "status": "current",
-      "authority": { "path": "docs/decisions/deploy.md", "citation": "Deploy decision" },
-      "owning_source": { "owner": "operations", "path": "docs/decisions/deploy.md" },
-      "affected_surfaces": ["src/deploy.js"],
-      "visibility": ["auditor"],
-      "recorded_at": "2026-02-01T00:00:00Z"
+      "authority": {
+        "path": "docs/decisions/deploy.md",
+        "citation": "Deploy decision"
+      },
+      "owning_source": {
+        "owner": "operations",
+        "path": "docs/decisions/deploy.md"
+      },
+      "affected_surfaces": [
+        "src/deploy.js"
+      ],
+      "visibility": [
+        "auditor"
+      ],
+      "recorded_at": "2026-02-01T00:00:00Z",
+      "slot": "scheduler"
     },
     {
       "id": "stale-claim",
       "claim": "The cache directory is cleaned weekly.",
       "status": "current",
-      "authority": { "path": "docs/decisions/cache.md", "citation": "Cache decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/cache.md" },
-      "affected_surfaces": ["src/cache.js"],
-      "visibility": ["engineer", "auditor"],
+      "authority": {
+        "path": "docs/decisions/cache.md",
+        "citation": "Cache decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/cache.md"
+      },
+      "affected_surfaces": [
+        "src/cache.js"
+      ],
+      "visibility": [
+        "engineer",
+        "auditor"
+      ],
       "recorded_at": "2026-01-15T00:00:00Z",
       "expires_at": "2026-02-01T00:00:00Z"
     },
@@ -116,10 +242,20 @@
       "id": "ttl-claim",
       "claim": "The session token lifetime is one hour.",
       "status": "current",
-      "authority": { "path": "docs/decisions/cache.md", "citation": "Cache decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/cache.md" },
-      "affected_surfaces": ["src/session.js"],
-      "visibility": ["engineer"],
+      "authority": {
+        "path": "docs/decisions/cache.md",
+        "citation": "Cache decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/cache.md"
+      },
+      "affected_surfaces": [
+        "src/session.js"
+      ],
+      "visibility": [
+        "engineer"
+      ],
       "recorded_at": "2026-01-15T00:00:00Z",
       "verified_at": "2026-05-01T00:00:00Z",
       "ttl_seconds": 864000
@@ -128,21 +264,44 @@
       "id": "unrecorded",
       "claim": "A claim whose knowledge time was never recorded.",
       "status": "current",
-      "authority": { "path": "docs/decisions/cache.md", "citation": "Cache decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/cache.md" },
-      "affected_surfaces": ["src/unrecorded.js"],
-      "visibility": ["engineer"]
+      "authority": {
+        "path": "docs/decisions/cache.md",
+        "citation": "Cache decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/cache.md"
+      },
+      "affected_surfaces": [
+        "src/unrecorded.js"
+      ],
+      "visibility": [
+        "engineer"
+      ]
     },
     {
       "id": "bounded-validity",
       "claim": "The beta endpoint is enabled.",
       "status": "current",
-      "authority": { "path": "docs/decisions/cache.md", "citation": "Cache decision" },
-      "owning_source": { "owner": "documentation", "path": "docs/decisions/cache.md" },
-      "affected_surfaces": ["src/beta.js"],
-      "visibility": ["engineer"],
+      "authority": {
+        "path": "docs/decisions/cache.md",
+        "citation": "Cache decision"
+      },
+      "owning_source": {
+        "owner": "documentation",
+        "path": "docs/decisions/cache.md"
+      },
+      "affected_surfaces": [
+        "src/beta.js"
+      ],
+      "visibility": [
+        "engineer"
+      ],
       "recorded_at": "2026-01-01T00:00:00Z",
-      "valid_time": { "from": "2026-01-01T00:00:00Z", "until": "2026-02-01T00:00:00Z" }
+      "valid_time": {
+        "from": "2026-01-01T00:00:00Z",
+        "until": "2026-02-01T00:00:00Z"
+      }
     }
   ]
 }

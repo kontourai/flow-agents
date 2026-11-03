@@ -128,11 +128,19 @@ export function readManifestAtRevision(repoRoot, revision, root, extension) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).some((key) => !allowedManifestKeys.has(key)) || !Array.isArray(parsed.claims)) {
     throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} must contain only a claims array${extension ? " and declared extension keys" : ""}`);
   }
-  return {
-    claims: parsed.claims.map((claim, index) => normalizeClaim(claim, root, manifestPath, index, extension)),
-    extension: extension?.parseManifest ? extension.parseManifest(parsed, manifestPath) : undefined,
-    manifestPath,
-  };
+  // Manifest-level admission (for 1.1: refuse an unrecognised reader) runs before any claim is parsed.
+  const manifestExtension = extension?.parseManifest ? extension.parseManifest(parsed, manifestPath) : undefined;
+  const claims = [];
+  parsed.claims.forEach((claim, index) => {
+    try {
+      claims.push(normalizeClaim(claim, root, manifestPath, index, extension));
+    } catch (cause) {
+      // A claim the caller is not entitled to see must not disclose its content through a parse error.
+      if (extension?.isHiddenFromCaller?.(claim)) return;
+      throw cause;
+    }
+  });
+  return { claims, extension: manifestExtension, manifestPath };
 }
 
 function readClaimsAtRevision(repoRoot, revision, root) {

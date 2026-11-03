@@ -17,13 +17,16 @@ import { validateCandidateVerification } from "@kontourai/survey";
 import { runLivingContext, deriveLivingContext, validateLivingContextInput, validateLivingContextResult, estimateTokens } from "./living-context.js";
 import { observeRepositoryChange, DEFAULT_MAX_CHANGED_PATHS } from "./observe-change.js";
 import { reapplyVerifiedFreshness } from "@kontourai/surface";
-import { answerLivingContext, createQuoteSupportVerifier, MAX_EVIDENCE_BYTES } from "./living-context-answer.js";
+import { answerLivingContext as answerWith, createLineSupportVerifier, MAX_EVIDENCE_BYTES } from "./living-context-answer.js";
 import { runContextCheck } from "./index.js";
+import { validate } from "../providers/lib/schema-validate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const KIT_ROOT = path.resolve(__dirname, "..");
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/living-claims.json"), "utf8"));
 const NOW = "2026-06-01T00:00:00Z";
+const lineVerifier = createLineSupportVerifier();
+const answerLivingContext = (args) => answerWith({ verifier: lineVerifier, ...args });
 const NOW_MS = "2026-06-01T00:00:00.000Z";
 
 function git(repo, args) {
@@ -467,9 +470,11 @@ describe("Living Context: abstention is a separate step backed by Survey support
   });
 
   test("the default verifier is deterministic and normalises case, whitespace and the final full stop", async () => {
-    const verifier = createQuoteSupportVerifier();
+    const verifier = createLineSupportVerifier();
     const verdict = (value, excerpt) => verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] });
     assert.deepEqual(await verdict("The retry limit is five.", "intro\n  the RETRY   limit is five \nmore"), { result: "supported" });
+    assert.deepEqual(await verdict("The retry limit is five.", "- The retry limit is five.\n"), { result: "supported" }, "a list marker is not part of the statement");
+    assert.deepEqual(await verdict("The retry limit is five.", "REJECTED statement: The retry limit is five.\n"), { result: "not-addressed" }, "a substring inside a longer line is not support");
     assert.deepEqual(await verdict("The retry limit is five.", "The retry limit is six."), { result: "not-addressed" });
   });
 });
@@ -594,3 +599,165 @@ describe("Living Context: bounded repository-change observation", () => {
     remove(repo);
   });
 });
+
+describe("Living Context: review round 1 regressions (#1572)", () => {
+  const run = (repo, revision, overrides = {}) => runLivingContext({ repoRoot: repo, input: input(revision, overrides), write: false });
+  const failure = (repo, revision, overrides = {}) => { try { run(repo, revision, overrides); } catch (cause) { return cause; } return undefined; };
+
+  test("a malformed claim hidden from the reader discloses nothing; only a listed reader sees its own error", () => {
+    const manifest = withClaim("auditor-only", (claim) => { claim.top_secret_project_name = "x"; });
+    const { repo, revision } = seededRepo(manifest);
+    assert.equal(failure(repo, revision), undefined, "a reader outside the claim's visibility is unaffected");
+    assert.ok(!run(repo, revision).recalls.some((entry) => entry.claim_id === "auditor-only"));
+    const listed = failure(repo, revision, { reader: "auditor" });
+    assert.equal(listed.code, "INVALID_CLAIM_MANIFEST");
+    const stranger = failure(repo, revision, { reader: "stranger" });
+    assert.equal(stranger.code, "UNKNOWN_READER_IDENTITY");
+    assert.ok(!/top_secret|auditor-only|claims\[/.test(stranger.message));
+    remove(repo);
+  });
+
+  test("the reader is refused before any claim is parsed", () => {
+    const manifest = clone(fixture);
+    manifest.claims = [{ visibility: ["engineer"], not: "a claim" }, 7, null];
+    const { repo, revision } = seededRepo(manifest, { docs: {} });
+    assert.equal(failure(repo, revision, { reader: "stranger" }).code, "UNKNOWN_READER_IDENTITY");
+    assert.equal(failure(repo, revision).code, "INVALID_CLAIM_MANIFEST", "a recognised reader reaches claim parsing, where an unlisted malformed claim is dropped and a listed one is reported");
+    remove(repo);
+  });
+
+  test("a duplicate claim id error never names the id", () => {
+    const manifest = clone(fixture);
+    manifest.claims.push(clone(manifest.claims.find((claim) => claim.id === "auditor-only")));
+    const { repo, revision } = seededRepo(manifest);
+    const cause = failure(repo, revision);
+    assert.equal(cause.code, "DUPLICATE_CLAIM_ID");
+    assert.ok(!cause.message.includes("auditor-only"));
+    remove(repo);
+  });
+
+  test("a verification after known_at cannot anchor a TTL", () => {
+    const manifest = withClaim("ttl-claim", (claim) => { claim.verified_at = "2026-12-01T00:00:00Z"; });
+    const { repo, revision } = seededRepo(manifest);
+    const entry = run(repo, revision, { claim_ids: ["ttl-claim"] }).recalls[0];
+    assert.equal(entry.status, "unverifiable");
+    assert.equal(entry.freshness.expires_at, "2026-01-25T00:00:00.000Z", "anchored on recording, not on the future verification");
+    const known = run(repo, revision, { claim_ids: ["ttl-claim"], as_of: { now: NOW, known_at: "2026-12-02T00:00:00Z", valid_at: NOW } }).recalls[0];
+    assert.equal(known.freshness.expires_at, "2026-12-11T00:00:00.000Z", "a verification that has happened by known_at does anchor it");
+    remove(repo);
+  });
+
+  test("a supersession edge is its own observation: untimed is indeterminate, recorded after known_at is ignored", () => {
+    const untimed = withClaim("superseded-context-contract", (claim) => { delete claim.supersession_recorded_at; });
+    const first = seededRepo(untimed);
+    const entry = recallOf(run(first.repo, first.revision, { claim_ids: ["superseded-context-contract"] }), "superseded-context-contract");
+    assert.equal(entry.status, "unverifiable");
+    assert.deepEqual(entry.reasons, ["supersession_time_unknown"]);
+    remove(first.repo);
+    const late = withClaim("superseded-context-contract", (claim) => { claim.supersession_recorded_at = "2026-05-01T00:00:00Z"; });
+    const second = seededRepo(late);
+    const early = recallOf(run(second.repo, second.revision, { claim_ids: ["superseded-context-contract"], as_of: { now: NOW, known_at: "2026-02-01T00:00:00Z", valid_at: NOW } }), "superseded-context-contract");
+    assert.equal(early.status, "current");
+    assert.deepEqual(early.reasons, ["successor_not_known_at_as_of", "current_at_as_of"]);
+    assert.equal(recallOf(run(second.repo, second.revision, { claim_ids: ["superseded-context-contract"] }), "superseded-context-contract").status, "superseded");
+    remove(second.repo);
+  });
+
+  test("a hidden successor does not change a visible claim's answer before its edge was recorded", () => {
+    const { repo, revision } = seededRepo();
+    const early = recallOf(run(repo, revision, { claim_ids: ["hidden-successor-predecessor"], as_of: { now: NOW, known_at: "2025-12-01T00:00:00Z", valid_at: NOW } }), "hidden-successor-predecessor");
+    assert.equal(early.status, "current");
+    assert.deepEqual(early.reasons, ["successor_not_known_at_as_of", "current_at_as_of"]);
+    remove(repo);
+  });
+
+  test("contradiction evidence counts only once recorded by known_at", () => {
+    const evidence = { status: "contradicted", authority: { path: "docs/decisions/context-contract.md", citation: "Contradiction evidence" } };
+    const reconcile = (mutate, asOf) => {
+      const { repo, revision } = seededRepo(withClaim("current-context-contract", mutate));
+      const result = run(repo, revision, { claim_ids: ["current-context-contract"], ...(asOf ? { as_of: asOf } : {}) });
+      remove(repo);
+      return result.reconciliation[0].status;
+    };
+    assert.equal(reconcile((claim) => { claim.reconciliation_evidence = evidence; }), "affected", "untimed evidence is not applied");
+    assert.equal(reconcile((claim) => { claim.reconciliation_evidence = evidence; claim.reconciliation_recorded_at = "2026-02-01T00:00:00Z"; }), "contradicted");
+    assert.equal(reconcile((claim) => { claim.reconciliation_evidence = evidence; claim.reconciliation_recorded_at = "2026-05-01T00:00:00Z"; }, { now: NOW, known_at: "2026-04-01T00:00:00Z", valid_at: NOW }), "affected");
+  });
+
+  test("a historical scan names no claim that does not exist yet, and the chain lists only known predecessors", () => {
+    const { repo, revision } = seededRepo();
+    const ids = run(repo, revision, { as_of: { now: NOW, known_at: "2025-12-15T00:00:00Z", valid_at: NOW } }).recalls.map((entry) => entry.claim_id);
+    for (const future of ["current-context-contract", "clean-control", "new-limit", "stale-claim", "ttl-claim", "bounded-validity"]) assert.ok(!ids.includes(future), `${future} was recorded after known_at`);
+    remove(repo);
+    for (const mutate of [(claim) => { delete claim.recorded_at; }, (claim) => { claim.recorded_at = "2027-01-01T00:00:00Z"; }]) {
+      const second = seededRepo(withClaim("superseded-context-contract", mutate));
+      const chain = recallOf(run(second.repo, second.revision, { claim_ids: ["current-context-contract"] }), "current-context-contract").supersession_chain;
+      assert.deepEqual(chain.map((link) => link.claim_id), ["current-context-contract"]);
+      remove(second.repo);
+    }
+  });
+
+  test("a correction applies only within the corrected (successor valid) interval", () => {
+    const manifest = withClaim("current-context-contract", (claim) => { claim.valid_time = { from: "2026-03-01T00:00:00Z", until: "2026-04-01T00:00:00Z" }; });
+    const { repo, revision } = seededRepo(manifest);
+    const at = (valid_at) => recallOf(run(repo, revision, { claim_ids: ["superseded-context-contract"], as_of: { now: NOW, valid_at } }), "superseded-context-contract");
+    assert.equal(at("2026-03-15T00:00:00Z").status, "superseded");
+    const outside = at("2026-02-01T00:00:00Z");
+    assert.equal(outside.status, "current");
+    assert.deepEqual(outside.reasons, ["correction_interval_excludes_valid_at", "current_at_as_of"]);
+    assert.equal(at("2026-04-01T00:00:00Z").status, "current", "until is exclusive");
+    remove(repo);
+  });
+
+  test("a supersession edge must join one slot: a cross-slot or unslotted edge is inert and never serves the claim", () => {
+    for (const mutate of [(claim) => { claim.slot = "another-slot"; }, (claim) => { delete claim.slot; }]) {
+      const { repo, revision } = seededRepo(withClaim("superseded-context-contract", mutate));
+      const entry = recallOf(run(repo, revision, { claim_ids: ["superseded-context-contract"] }), "superseded-context-contract");
+      assert.equal(entry.status, "unverifiable");
+      assert.deepEqual(entry.reasons, ["supersession_slot_mismatch"]);
+      remove(repo);
+    }
+  });
+
+  test("reconciliation keeps a derived unverifiable status instead of reporting an ordinary affected claim", () => {
+    const { repo, revision } = seededRepo();
+    const result = run(repo, revision, { claim_ids: ["stale-claim", "unrecorded", "bounded-validity", "clean-control"], changed_surfaces: ["src/cache.js", "src/unrecorded.js", "src/beta.js", "src/cli.js"] });
+    assert.deepEqual(Object.fromEntries(result.reconciliation.map((item) => [item.claim_id, item.status])), { "stale-claim": "unverifiable", unrecorded: "unverifiable", "bounded-validity": "unverifiable", "clean-control": "affected" });
+    assert.match(result.proposals.find((proposal) => proposal.claim_id === "stale-claim").rationale, /remains unverifiable/);
+    remove(repo);
+  });
+
+  test("the answer step has no implicit verifier, and a line that only quotes a statement is not support", async () => {
+    const { repo, revision } = seededRepo(fixture, { docs: { ...authorityDocs(fixture), "docs/decisions/cli.md": "REJECTED statement: The unrelated CLI command preserves its documented output.\nThis statement is false.\n" } });
+    await assert.rejects(answerWith({ repoRoot: repo, input: input(revision, { claim_ids: ["clean-control"] }) }), (cause) => cause.code === "VERIFIER_REQUIRED");
+    const answer = await answerLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: ["clean-control"] }) });
+    assert.equal(answer.answers[0].outcome, "abstained");
+    assert.equal(answer.answers[0].reason, "not_addressed");
+    remove(repo);
+  });
+
+  test("the result validator rejects internally contradictory results", () => {
+    const { repo, revision } = seededRepo();
+    const result = run(repo, revision, { claim_ids: ["current-context-contract", "clean-control"] });
+    const forge = (mutate) => { const copy = clone(result); mutate(copy); return validateLivingContextResult(copy).join(" "); };
+    assert.equal(validateLivingContextResult(result).length, 0);
+    assert.match(forge((copy) => { copy.recalls[0].freshness.stale = true; }), /stale recall must not be current/);
+    assert.match(forge((copy) => { copy.budget.used_tokens = 1; }), /used_tokens: must equal/);
+    assert.match(forge((copy) => { copy.budget.max_tokens = 1; copy.budget.used_tokens = copy.budget.used_tokens; }), /must not exceed max_tokens/);
+    assert.match(forge((copy) => { copy.input.as_of.now = "2026-02-31T00:00:00Z"; }), /real calendar instant/);
+    assert.match(forge((copy) => { copy.recalls = []; copy.budget.used_tokens = 0; copy.verdict = "pass"; }), /pass is invalid without any recall/);
+    assert.match(forge((copy) => { copy.recalls[0].supersession_chain.find((link) => link.relation === "self").claim_id = "someone-else"; }), /exactly once as self/);
+    remove(repo);
+  });
+
+  test("the shared validator treats inherited Object property names as undeclared", () => {
+    const schema = { type: "object", additionalProperties: false, required: ["a"], properties: { a: { type: "string" } } };
+    for (const key of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const value = JSON.parse(`{"a":"x","${key}":1}`);
+      assert.match(validate(value, schema).errors.join(" "), /unexpected property/, key);
+    }
+    assert.match(validate(JSON.parse("{}"), { type: "object", required: ["constructor"] }).errors.join(" "), /missing required property 'constructor'/);
+    assert.ok(validateLivingContextInput({ ...input("0".repeat(40)), constructor: 1 }).length > 0);
+  });
+});
+

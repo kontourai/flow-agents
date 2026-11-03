@@ -11,7 +11,7 @@
  */
 
 import { runSupportVerifier, validateCandidateVerification } from "@kontourai/survey";
-import { gitRaw } from "./index.js";
+import { error, gitRaw } from "./index.js";
 import { deriveLivingContext, parseInstant } from "./living-context.js";
 
 /** An authority document larger than this is refused (abstain), never truncated into a verifier. */
@@ -21,18 +21,22 @@ const DEFAULT_VERIFIER_TIMEOUT_MS = 5000;
 const normalize = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
 /**
- * Deterministic default verifier: the claim statement must appear in its authority text, ignoring
- * case, whitespace and one trailing full stop. It never says `contradicted`; paraphrase is `not-addressed`.
+ * Deterministic fixture verifier: the claim statement must be a whole line of its authority text (ignoring case,
+ * whitespace, a list or quote marker, and one trailing full stop). Anything else, including paraphrase, is
+ * `not-addressed`. It never says `contradicted` and it cannot read negation: a document that quotes a statement
+ * on its own line in order to reject it still "supports" it. It exists for fixtures and as a floor; a caller
+ * that needs entailment must inject a model or human `SupportVerifier`, which is why one is required.
  */
-export function createQuoteSupportVerifier() {
+export function createLineSupportVerifier() {
+  const clean = (text) => normalize(text.replace(/^[\s>*+-]+/, "")).replace(/\.$/, "");
   return {
-    id: "knowledge.living-context.statement-in-authority",
-    version: "1",
+    id: "knowledge.living-context.statement-line-in-authority",
+    version: "2",
     method: "deterministic",
     async verify(input) {
-      const statement = normalize(String(input.value)).replace(/\.$/, "");
+      const statement = clean(String(input.value));
       if (statement === "") return { result: "abstain", abstainReason: "malformed" };
-      const supported = input.evidence.some((item) => normalize(item.excerpt).includes(statement));
+      const supported = input.evidence.some((item) => item.excerpt.split(/\r?\n/).some((line) => clean(line) === statement));
       return { result: supported ? "supported" : "not-addressed" };
     },
   };
@@ -55,7 +59,9 @@ function readAuthority(repoRoot, revision, authorityPath) {
  *
  * @returns {Promise<{schema_version:"1.1", flow:"knowledge.living-context", revision:string, reader:string, answers:object[], verdict:"answered"|"not_verified"}>}
  */
-export async function answerLivingContext({ repoRoot, input, verifier = createQuoteSupportVerifier(), timeoutMs = DEFAULT_VERIFIER_TIMEOUT_MS } = {}) {
+export async function answerLivingContext({ repoRoot, input, verifier, timeoutMs = DEFAULT_VERIFIER_TIMEOUT_MS } = {}) {
+  // No default: choosing what counts as support is the caller's decision, never an implicit weak one.
+  if (!verifier || typeof verifier.verify !== "function") throw error("VERIFIER_REQUIRED", "answerLivingContext requires an explicit Survey SupportVerifier");
   const { result, byId, repoRoot: resolvedRoot, revision } = deriveLivingContext({ repoRoot, input });
   const createdAt = new Date(parseInstant(input.as_of.now, "as_of.now")).toISOString();
   const answers = [];

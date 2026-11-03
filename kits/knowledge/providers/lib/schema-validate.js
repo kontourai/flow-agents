@@ -121,15 +121,15 @@ function validateNode(value, schema, root, pathStr, errors) {
   if (typeOf(value) === "object") {
     const props = schema.properties || {};
     for (const req of schema.required || []) {
-      if (!(req in value)) errors.push(`${pathStr}: missing required property '${req}'`);
+      if (!Object.hasOwn(value, req)) errors.push(`${pathStr}: missing required property '${req}'`);
     }
     if (schema.additionalProperties === false) {
       for (const key of Object.keys(value)) {
-        if (!(key in props)) errors.push(`${pathStr}: unexpected property '${key}'`);
+        if (!Object.hasOwn(props, key)) errors.push(`${pathStr}: unexpected property '${key}'`);
       }
     }
     for (const [key, propSchema] of Object.entries(props)) {
-      if (key in value) {
+      if (Object.hasOwn(value, key)) {
         validateNode(value[key], propSchema, root, `${pathStr}/${key}`, errors);
       }
     }

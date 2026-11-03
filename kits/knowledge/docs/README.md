@@ -325,21 +325,30 @@ const answer = await answerLivingContext({ repoRoot, input });       // separate
 
 **Identity is required and fails closed.** A missing or blank `reader` is `READER_IDENTITY_REQUIRED`;
 a reader that every selected root does not list under its manifest `readers` is
-`UNKNOWN_READER_IDENTITY`. Both are refused before any claim is read and before any file is written.
+`UNKNOWN_READER_IDENTITY`. Both are refused before any claim is parsed and before any file is written.
 Context Check does not authenticate: the host supplies an identity it has authenticated, and Context
 Check only refuses one it does not recognise. A claim is visible only to the readers in its
-`visibility` list; a claim with no `visibility` is visible to no one. Hidden, absent, and
-not-yet-known claims return the same plain `no_answer`, so a reader cannot learn that a claim
-exists. Reconciliation and proposals cover only claims the reader may see.
+`visibility` list; a claim with no `visibility` is visible to no one, and a malformed claim that does
+not list the reader is dropped without an error, so a parse error never describes a hidden claim
+(error text for duplicates and cycles names no claim id). Asked for by id, a hidden, absent, or
+not-yet-known claim returns the same plain `no_answer`; a default scan never names a claim that is
+hidden or recorded after `known_at`. Residual disclosure, accepted and stated: when a visible
+claim's recorded successor is hidden from the reader, the visible claim becomes `unverifiable`
+(`successor_not_visible_or_unresolved`), which shows that something the reader cannot read bears
+on it, though never what. Reconciliation and proposals cover only claims the reader may see.
 
 **As-of on two time axes**, with the semantics of Surface's knowledge-accumulation decision
 (kontourai/surface#204, merged as Surface `7486c6d`): `known_at` is knowledge time, filtered on the manifest's
 `recorded_at` (the receiver-recorded instant, never a claim's own authored time), and `valid_at`
 is valid time, a half-open `[from, until)` interval from `valid_time` (an absent bound is
-unbounded and asserts nothing about perpetual truth). A supersession edge counts only once its
-successor is recorded at or before `known_at`; a `succession` takes effect at the successor's
-`valid_time.from`, while a `correction` (the default) supersedes the claim throughout. A missing
-or untimed input makes the answer `unverifiable`, never guessed. No wall clock is read: `now` is
+unbounded and asserts nothing about perpetual truth). A supersession edge is its own observation: it
+counts only once the claim's `supersession_recorded_at` and its successor's `recorded_at` are at or
+before `known_at` (untimed is indeterminate, never guessed), and both ends must declare the same
+`slot` or the edge is inert and the claim `unverifiable`. A `succession` takes effect at the
+successor's `valid_time.from`; a `correction` (the default) applies within the successor's valid
+interval, throughout when it has none. Contradiction evidence needs `reconciliation_recorded_at`
+by `known_at`, and a `verified_at` after `known_at` cannot anchor a TTL. The authority text itself is
+read at the pinned revision, not as of `known_at`: pin the revision that existed at the knowledge cut. No wall clock is read: `now` is
 explicit and also the instant freshness is judged at; `expires_at`/`ttl_seconds` govern freshness only, never world validity. Slot identity, cardinality, and the admission policy for who may supersede whom are not modelled (see the decision record). `status` is the status **as of the stated
 instants** and the result echoes them, so a predecessor read at a `valid_at` before its
 succession, or a `known_at` before its successor was recorded, is `current` with a reason saying
@@ -349,7 +358,7 @@ a successor the reader cannot see makes it `unverifiable` rather than `current`,
 **Reasons, not just rank.** Every recall carries `matched_signals`, `freshness` (Surface's
 claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surface does; a stale
 claim is `unverifiable`), `review_posture` (`proposed` unless the manifest names a reviewer),
-`supersession_chain` (only edges this reader may see and that were known at `known_at`), and
+`supersession_chain` (only edges this reader may see, whose ends were recorded by `known_at`), and
 `reasons`. A requested `claim_ids` list keeps its own order; a default scan lists claims that
 intersect the change first, then by id. Order is the only ranking, and the reasons say why each
 result is there.
@@ -364,8 +373,9 @@ hides an affected claim.
 **Abstention is a separate step.** Recall returns evidence and never an answer.
 `answerLivingContext` re-derives recall and sends only a `current` recall, with its authority
 document read at the pinned revision, to an independent `@kontourai/survey` `SupportVerifier`;
-the default verifier is deterministic (the claim statement must appear in its authority text) and
-production callers inject a model or human verifier. Only `supported` answers; `contradicted` is
+a verifier is a required argument. `createLineSupportVerifier` is a deterministic fixture floor (the
+claim statement must be a whole line of its authority text); it cannot read negation, so production
+callers inject a model or human verifier. Only `supported` answers; `contradicted` is
 reported; `not-addressed`, an abstaining, throwing, or timed-out verifier, an unreadable, empty or
 oversized (`MAX_EVIDENCE_BYTES`) authority document, and budget drops all abstain, and any
 abstention makes the set `not_verified`. Each verdict is kept as Survey's immutable
@@ -373,11 +383,13 @@ abstention makes the set `not_verified`. Each verdict is kept as Survey's immuta
 
 **Change observation.** `observeRepositoryChange({ repoRoot, base, head })` turns two raw commits
 into the `diff.paths` input. It is a thin shim: Lookout observes registered web, API and
-structured-file sources and has no Git-revision source yet. It refuses an empty or oversized
+structured-file sources over guarded HTTP (plus structural and proposal diff helpers over those
+observations) and has no Git-revision source yet. It refuses an empty or oversized
 change (`maxPaths`, default 500) rather than truncating.
 
-Freshness is Surface's, not a second derivation; Ephemeris is the time actor that wakes a Flow
-run when a claim expires and owns no derivation, so it is not a dependency of this check.
+Freshness is Surface's, not a second derivation. Ephemeris is the time actor that wakes a Flow run
+at a claim's deadline (it derives wake-up instants, not a trust or freshness status), so it is not a
+dependency of a synchronous, explicit-`now` check.
 
 ```bash
 node --test kits/knowledge/context-check/living-context.test.js
