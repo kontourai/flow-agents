@@ -292,7 +292,7 @@ export async function runDream(host, options = {}) {
       const { views, byView } = effectiveItems([...peers, ...fromPlan, { claim, state: "pending" }], reviewDecisions);
       const contested = classifyCurrent(views, policy).contested.map((view) => byView.get(view).claim.id).sort();
       // A projection RESULT, as #1571 reads one (it adds the slot from the query we pass beside it).
-      return contested.includes(claim.id) && contested.length > 1
+      return contested.includes(claim.id)
         ? { outcome: "contested", candidateClaimIds: contested, supportingClaimIds: [], gapCodes: ["dream-stand-in"] }
         : { outcome: "current", candidateClaimIds: [claim.id], supportingClaimIds: [], gapCodes: ["dream-stand-in"] };
     };
