@@ -18,6 +18,7 @@ const KNOWLEDGE_SCHEMA_FILES = [
   "living-context-result.schema.json",
   "node.schema.json",
   "proposal.schema.json",
+  "residue.schema.json",
 ];
 
 test("Knowledge Kit ships exact copies of its canonical root schemas", () => {

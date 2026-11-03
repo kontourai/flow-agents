@@ -18,6 +18,11 @@
       "for": "Route utterance extraction across model runtimes with attempt receipts."
     },
     {
+      "product": "ferry",
+      "via": "@kontourai/ferry",
+      "for": "Import Claude Code and Codex runtime transcripts as canonical Thread conversations for residue ingest."
+    },
+    {
       "product": "flow",
       "via": "@kontourai/flow",
       "for": "Evaluate workflow gates and persist resumable, evidence-bound process runs."
@@ -36,6 +41,11 @@
       "product": "survey",
       "via": "@kontourai/survey",
       "for": "Bind review queues and apply persisted decisions to workflow evidence."
+    },
+    {
+      "product": "thread",
+      "via": "@kontourai/thread",
+      "for": "Canonical conversation schema that runtime-session residue is read from."
     }
   ],
   "product": "flow-agents",

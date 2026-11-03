@@ -76,6 +76,11 @@ _Avoid_: Graph database as the default store (it is opt-in and a view, not the s
 The Knowledge Kit's codebase-facing pipeline (the "flow within a flow") that a delivered session's promotion runs through: ingest the session artifacts, distill schema-valid draft decision/vocabulary/learning deltas, link their provenance (PR, merge SHA, session archive, touched topics), and health-check the registry for contradictions with a merge-repair proposal. It is proposals-only — every output is a draft under the session's proposals directory that the promote step applies; the sub-flow never writes docs directly. Invokable standalone and composable from the Builder promote step. See docs/decisions/knowledge-promote-sub-flow.md.
 _Avoid_: Promotion gate as a synonym (the gate is the recorded promote claim; this is the assisted pipeline)
 
+### Runtime Session Residue
+
+The scrubbed user and assistant text of one sitting of a Claude Code or Codex conversation, with its provenance. A sitting is a stretch of conversation separated from the next by an idle gap. It is produced by the `runtime-session` residue source (see kits/knowledge/docs/README.md). It is candidate input for later distillation; it is not a transcript archive, evidence, or instruction authority. Ingest returns a candidate cursor, and the transaction owner commits it only after its work succeeds.
+_Avoid_: Runtime transcript (the raw transcript stays runtime-owned; residue is a filtered, redacted projection)
+
 ### Kontour Resource Contract
 
 A versioned Kontour record shape for durable machine-readable configuration, scope, run state, evidence, provider output, and cross-product interchange. Kontour Resource Contracts are the default for new pre-public durable contracts unless a product records why a native shape is clearer.

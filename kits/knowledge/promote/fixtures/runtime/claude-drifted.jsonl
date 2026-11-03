@@ -1,0 +1,2 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-30T11:00:00.000Z","sessionId":"5b1f2c3d-0000-4000-8000-00000000d41f"}
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":{"blocks":[{"kind":"text","value":"DRIFT_MARKER"}]}},"uuid":"d1","timestamp":"2026-10-30T11:00:01.000Z","cwd":"/Users/fixture-user/dev/widget-service","sessionId":"5b1f2c3d-0000-4000-8000-00000000d41f","version":"9.0.0","gitBranch":"main"}
