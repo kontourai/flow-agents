@@ -158,6 +158,22 @@ test("a malformed interval cannot clear a conflict: the pure rules fail closed, 
   assert.throws(() => routeMemoryChange(change(make({ value: "PostgreSQL 16" }), { current: [poisoned] })));
 });
 
+test("each layer defends itself: the entry point drops other-slot claims and stale records, and the pure rules ignore them if a stored input still carries them", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const otherSlot = make({ property: "backup database", value: "MySQL" });
+  const stale = verification(claim, "contradicted", "PostgreSQL 9");
+  // Entry point: what it records is already filtered.
+  const decision = routeMemoryChange(change(claim, { current: [otherSlot], verifications: [stale] }));
+  assert.deepEqual([decision.input.current, decision.input.verifications], [[], []]);
+  assert.equal(decision.outcome, "proposed");
+  // Rules: handed a record that was edited to carry them anyway, they still do not route on them.
+  const edited = { type: "claim", claim, current: [otherSlot], verifications: [stale], agreement: AGREED, baselines: [] };
+  assert.deepEqual(evaluateMemoryRouting(edited, DEFAULT_MEMORY_ROUTING_POLICY).reasons, []);
+  // A verification of the right value still routes through the pure rules.
+  const bound = { ...edited, verifications: [verification(claim, "contradicted")] };
+  assert.deepEqual(evaluateMemoryRouting(bound, DEFAULT_MEMORY_ROUTING_POLICY).reasons.map(reason => reason.rule), ["contradicted-by-verification"]);
+});
+
 // ---------------------------------------------------------------------------
 // Recomputation
 
