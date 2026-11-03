@@ -663,3 +663,29 @@ test("the Kit's visibility order agrees with Surface's meetVisibility on every p
   }));
   assert.deepEqual(disagreements, []);
 });
+
+// --- the projection fact is an input like any other ---------------------------------------------------------------
+
+test("the projection fact is validated and put in canonical form at the door, so one situation has one decision id", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const a = routeMemoryChange(change(claim, { current: [current], accumulation: { outcome: "contested", candidateClaimIds: [current.id, claim.id], gapCodes: ["contested-value", "supersession-pending"] } }));
+  const b = routeMemoryChange(change(claim, { current: [current], accumulation: { outcome: "contested", candidateClaimIds: [claim.id, current.id], gapCodes: ["supersession-pending", "contested-value"], supportingClaimIds: ["ignored"], pendingEventIds: [] } }));
+  assert.equal(a.id, b.id);
+  assert.deepEqual(a.input.accumulation.candidateClaimIds, [...a.input.accumulation.candidateClaimIds].sort());
+  for (const bad of [{}, { outcome: "current" }, { outcome: "maybe", candidateClaimIds: [], gapCodes: [] }, { outcome: "current", candidateClaimIds: [1], gapCodes: [] }, "contested"]) {
+    assert.throws(() => routeMemoryChange(change(claim, { accumulation: bad })), /accumulation projection result/, JSON.stringify(bad));
+  }
+});
+
+test("a stored decision whose projection fact was edited or is not canonical is refused by recomputation", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const routed = routeMemoryChange(change(claim, { current: [current], accumulation: contested(claim.id, current.id) }));
+  assert.equal(recomputeMemoryRouting(routed).ok, true);
+  for (const [what, edit] of [["not an object", d => { d.input.accumulation = "contested"; }], ["an unknown outcome", d => { d.input.accumulation.outcome = "maybe"; }],
+    ["candidates not a list", d => { d.input.accumulation.candidateClaimIds = "x"; }], ["unsorted candidates", d => { d.input.accumulation.candidateClaimIds.reverse(); }], ["missing", d => { delete d.input.accumulation; }]]) {
+    const d = plain(routed);
+    edit(d);
+    const check = recomputeMemoryRouting(d);
+    assert.equal(check.ok, false, what);
+  }
+});
