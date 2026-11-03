@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { memoryEntityProposalInput } from "@kontourai/flow-agents/memory-entity";
+import { MemoryClaimError } from "@kontourai/flow-agents/memory-claims";
 import { routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import { distillFixtureSitting, loadEntityProposals, loadSittings } from "./memory-claims-support.mjs";
 
@@ -51,6 +52,22 @@ test("the emitter refuses what Survey's createEntityProposal would: blank identi
   };
   for (const [name, over] of Object.entries(cases)) assert.throws(() => memoryEntityProposalInput({ ...(await_request ?? {}), ...over }), /entity|needs|score|stance|evidence|confidence|operation/, name);
   for (const operation of ["merge", "split", "alias", "same-as", "related-to", "domain:billing"]) assert.doesNotThrow(() => memoryEntityProposalInput({ ...(await_request ?? {}), candidates: [cand({ operation })] }), operation);
+});
+
+test("the emitter refuses what Survey\'s createEntityProposal would also refuse: blank ids and checksums, lossy JSON, anything but two subjects", async () => {
+  const { owner } = await claims();
+  const ok = await request();
+  const cand = over => ({ ...ok.candidates[0], ...over });
+  const cases = {
+    "a blank subject id": { candidates: [cand({ subjects: [{ type: "person", id: " " }, SUBJECTS[1]] })] }, "a blank subject type": { candidates: [cand({ subjects: [{ type: "", id: "a" }, SUBJECTS[1]] })] },
+    "one subject": { candidates: [cand({ subjects: [SUBJECTS[0]] })] }, "three subjects": { candidates: [cand({ subjects: [...SUBJECTS, { type: "person", id: "c" }] })] }, "no subjects": { candidates: [cand({ subjects: [] })] },
+    "a whitespace checksum": { checksums: { [owner.source.ref]: "   " } }, "a numeric checksum": { checksums: { [owner.source.ref]: 7 } },
+    "NaN in the proposer": { proposer: { id: "p", model: NaN } }, "undefined list entry": { candidates: [cand({ claims: [{ claim: owner, stance: "supports" }, undefined] })] },
+    "a getter": { proposer: Object.defineProperty({ id: "p" }, "rule", { enumerable: true, get() { return "r"; } }) }, "a __proto__ key": { proposer: JSON.parse('{"id":"p","__proto__":{"x":1}}') },
+  };
+  for (const [name, over] of Object.entries(cases)) assert.throws(() => memoryEntityProposalInput({ ...ok, ...over }), MemoryClaimError, name);
+  assert.doesNotThrow(() => memoryEntityProposalInput(ok));
+  assert.equal(memoryEntityProposalInput({ ...ok, proposer: { id: "p", model: undefined } }).proposer.model, undefined, "an absent optional field is just absent");
 });
 
 test("each claim's stance toward the proposal is carried to Survey as given", async () => {

@@ -433,3 +433,31 @@ test("a retry after a failure between recording the routing and recording the me
   await runMemoryRouting({ ...where(second), changes });
   assert.equal((await readLatestMemoryMetrics("run-1", second)).value.decisions, (await readMemoryRoutingDecisions("run-1", second)).length);
 });
+
+// --- review round 5: the blocking counterexample, exactly -------------------------------------------------------------
+
+test("plain JSON with a __proto__ key cannot pass validation through an inherited spec and then poison the run", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const good = JSON.parse(JSON.stringify(rejection(run.items[0], 5).reviewDecisions[0]));
+  const hostile = JSON.parse(`{"kind":"ReviewDecision","apiVersion":${JSON.stringify(good.apiVersion)},"metadata":${JSON.stringify(good.metadata)},"__proto__":{"spec":${JSON.stringify(good.spec)}}}`);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [hostile] }), /__proto__/);
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: CHANGES(), reviewDecisions: [hostile] }), /__proto__/);
+  assert.equal((await reviewEvidence(cwd)).length, 0, "nothing was attached");
+  await refreshMemoryRunMetrics({ ...where(cwd) }); // the run still refreshes
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [good] });
+});
+
+test("the list itself is read by index: a custom .map, holes and -0 cannot change what is recorded", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const { reviewDecisions: [good] } = rejection(run.items[0], 5);
+  const mapped = [good]; mapped.map = () => [{ kind: "ReviewDecision", spec: { reviewItemName: "x", status: "verified", reviewedAt: "2026-11-02T10:00:00Z" }, metadata: { name: "n" }, apiVersion: good.apiVersion, extra: NaN }];
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: mapped }), /review input/);
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [good] });
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).decisions.length, 1);
+  const copy = JSON.parse(JSON.stringify(good));
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [{ ...copy, spec: { ...copy.spec, editedValue: -0 } }] }), /negative zero/);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [copy, , copy] }), /review input/);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: "not a list" }), /expected a list/);
+});

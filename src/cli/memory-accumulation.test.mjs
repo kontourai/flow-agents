@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { memoryAccumulationClaims, memoryAccumulationFact, memoryAccumulationQuery, memoryClaimToAccumulationClaim } from "@kontourai/flow-agents/memory-accumulation";
 import { memoryClaim, MemoryClaimError } from "@kontourai/flow-agents/memory-claims";
-import { routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { canonicalJson } from "@kontourai/relay";
+import { recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import { distillFixtureSitting, readJson } from "./memory-claims-support.mjs";
 
 const fixture = () => readJson(import.meta.dirname, "fixtures", "memory-claims", "accumulation.json");
@@ -84,11 +87,11 @@ test("a projection result becomes a fact, sorted, or is refused if it does not l
 });
 
 test("routing reads Surface's real projection: unreviewed, a replacement and a conflict are contested; once reviewed and admitted, the replacement is current and the conflict still is not", async () => {
-  const { c1 } = await claims();
+  const { c0, c1 } = await claims();
   const route = (scenario, property) => {
     const claim = byProperty(c1, property);
     const entry = fixture().scenarios[scenario].facts[claim.id];
-    return routeMemoryChange({ type: "claim", claim, agreement: { passes: 2, agreeing: 2 }, accumulation: entry.fact ?? entry, sourceVisibility: { kind: "restricted", audiences: ["user:fixture"] } }, { consequential: { properties: ["primary database"], subjectTypes: [] } });
+    return routeMemoryChange({ type: "claim", claim, current: c0, agreement: { passes: 2, agreeing: 2 }, accumulation: entry.fact ?? entry, sourceVisibility: { kind: "restricted", audiences: ["user:fixture"] } }, { consequential: { properties: ["primary database"], subjectTypes: [] } });
   };
   const rules = decision => decision.reasons.map(reason => reason.rule);
   assert.deepEqual(rules(route("sitting1", "primary database")), ["contested-by-accumulation", "consequential-supersession"]);
@@ -103,11 +106,103 @@ test("routing reads Surface's real projection: unreviewed, a replacement and a c
   assert.deepEqual(fixture().scenarios.sitting1.facts[byProperty(c1, "primary database").id].edges.map(e => e.state), ["pending"]);
 });
 
-test("when the installed Surface has the projection, it reproduces every committed fact from the committed bundles", async t => {
-  const surface = await import("@kontourai/surface");
+test("a replacement chain carries every claim it reaches, not only the direct targets", () => {
+  const base = { subject: { type: "service", id: "w" }, claimType: "knowledge.memory-claim", property: "db", speaker: "user", posture: "stated", source: { ref: "s", locator: "chars:0-1", excerpt: "x", observedAt: "2026-10-28T09:00:00.000Z" } };
+  const A = memoryClaim({ ...base, value: "a" });
+  const B = memoryClaim({ ...base, value: "b", supersedes: [{ claimId: A.id, kind: "succession", reason: "r" }] });
+  const C = memoryClaim({ ...base, value: "c", supersedes: [{ claimId: B.id, kind: "succession", reason: "r" }] });
+  assert.deepEqual(memoryAccumulationClaims([C], [A, B]).map(claim => claim.value).sort(), ["a", "b", "c"]);
+  assert.deepEqual(memoryAccumulationClaims([C, B, A]).map(claim => claim.value).sort(), ["a", "b", "c"], "and each is carried once");
+  assert.throws(() => memoryAccumulationClaims([C], [B]), /not available to carry/, "A is reached through B and is missing");
+  const loopA = memoryClaim({ ...base, value: "x", supersedes: [{ claimId: "sha256:" + "0".repeat(64), kind: "succession", reason: "r" }] });
+  assert.throws(() => memoryAccumulationClaims([loopA], []), /not available/);
+});
+
+test("one claim maps to one Surface claim, however its edges were ordered", () => {
+  const base = { subject: { type: "service", id: "w" }, claimType: "knowledge.memory-claim", property: "db", value: "z", speaker: "user", posture: "stated", source: { ref: "s", locator: "chars:0-1", excerpt: "x", observedAt: "2026-10-28T09:00:00.000Z" } };
+  const edges = [{ claimId: memoryClaim({ ...base, value: "a" }).id, kind: "succession", reason: "r1" }, { claimId: memoryClaim({ ...base, value: "b" }).id, kind: "correction", reason: "r2" }];
+  const x = memoryClaim({ ...base, supersedes: edges }), y = memoryClaim({ ...base, supersedes: [...edges].reverse() });
+  assert.equal(x.id, y.id);
+  assert.deepEqual(memoryClaimToAccumulationClaim(x), memoryClaimToAccumulationClaim(y), "same Kit id, same Surface content digest");
+});
+
+test("instants reach Surface as the UTC date-times it parses, and an unparseable one is an error here", () => {
+  const base = { subject: { type: "service", id: "w" }, claimType: "knowledge.memory-claim", property: "db", value: "z", speaker: "user", posture: "stated", source: { ref: "s", locator: "chars:0-1", excerpt: "x", observedAt: "2026-10-28T09:00:00.000Z" } };
+  const mapped = memoryClaimToAccumulationClaim(memoryClaim({ ...base, validTime: { from: "2026-10-01", until: "2026-12-01T10:00:00+02:00" }, source: { ...base.source, observedAt: "2026-10-28" } }));
+  assert.deepEqual(mapped.validTime, { from: "2026-10-01T00:00:00.000Z", until: "2026-12-01T08:00:00.000Z" });
+  assert.equal(mapped.createdAt, "2026-10-28T00:00:00.000Z");
+  assert.equal(mapped.updatedAt, "2026-10-28T00:00:00.000Z");
+  for (const bad of [{ validTime: { from: "soon" } }, { validTime: { until: "2026-02-30" } }, { source: { ...base.source, observedAt: "yesterday" } }]) {
+    assert.throws(() => memoryClaimToAccumulationClaim(memoryClaim({ ...base, ...bad })), { code: "invalid" }, JSON.stringify(bad));
+  }
+});
+
+test("qualifiers reach Surface, as a copy, so a qualified slot is a different slot there too", () => {
+  const base = { subject: { type: "service", id: "w" }, claimType: "knowledge.memory-claim", property: "db", value: "z", speaker: "user", posture: "stated", source: { ref: "s", locator: "chars:0-1", excerpt: "x", observedAt: "2026-10-28T09:00:00.000Z" } };
+  const claim = memoryClaim({ ...base, qualifiers: { env: "prod" } });
+  const mapped = memoryClaimToAccumulationClaim(claim);
+  assert.deepEqual(mapped.qualifiers, { env: "prod" });
+  mapped.qualifiers.env = "changed";
+  assert.deepEqual(claim.qualifiers, { env: "prod" }, "the claim is not shared with the mapping");
+  assert.equal("qualifiers" in memoryClaimToAccumulationClaim(memoryClaim(base)), false);
+});
+
+test("a contest is between at least two candidates, and lists are read by index", () => {
+  assert.throws(() => memoryAccumulationFact({ outcome: "contested", candidateClaimIds: [], gapCodes: [] }), /at least two/);
+  assert.throws(() => memoryAccumulationFact({ outcome: "contested", candidateClaimIds: ["a"], gapCodes: [] }), /at least two/);
+  assert.throws(() => memoryAccumulationFact({ outcome: "contested", candidateClaimIds: ["a", "a"], gapCodes: [] }), /at least two/, "the same candidate twice is one candidate");
+  assert.deepEqual(memoryAccumulationFact({ outcome: "contested", candidateClaimIds: ["b", "a", "a"], gapCodes: ["x", "x"] }), { outcome: "contested", candidateClaimIds: ["a", "b"], gapCodes: ["x"] });
+  const sparse = new Array(2); sparse[0] = "a";
+  const proto = Object.getOwnPropertyDescriptor(Array.prototype, "1");
+  try {
+    Array.prototype[1] = "inherited";
+    assert.throws(() => memoryAccumulationFact({ outcome: "current", candidateClaimIds: sparse, gapCodes: [] }), MemoryClaimError, "a hole is refused, not skipped and not filled from the prototype");
+  } finally { if (proto) Object.defineProperty(Array.prototype, "1", proto); else delete Array.prototype[1]; }
+  for (const bad of [[""], [1], [null], [undefined]]) assert.throws(() => memoryAccumulationFact({ outcome: "current", candidateClaimIds: bad, gapCodes: [] }), MemoryClaimError, JSON.stringify(bad));
+  assert.throws(() => memoryAccumulationFact({ outcome: "invalid", candidateClaimIds: new Array(10_001).fill("a"), gapCodes: [] }), MemoryClaimError, "an unbounded list is refused");
+});
+
+test("a projection that names a rival the Kit was not given is refused: every bound and item is built from the slot's claims", async () => {
+  const { c1 } = await claims();
+  const claim = byProperty(c1, "retry budget");
+  const rivalId = "sha256:" + "d".repeat(64);
+  const fact = { outcome: "contested", candidateClaimIds: [claim.id, rivalId].sort(), gapCodes: ["contested-value"] };
+  assert.throws(() => routeMemoryChange({ type: "claim", claim, current: [], agreement: { passes: 2, agreeing: 2 }, accumulation: fact }), /not among the slot's current claims/);
+  assert.throws(() => routeMemoryChange({ type: "claim", claim, current: [memoryClaim({ ...claim, property: "elsewhere", value: "x" })], agreement: { passes: 2, agreeing: 2 }, accumulation: fact }), /not among the slot's current claims/, "a claim from another slot does not stand in for it");
+  const rival = memoryClaim({ ...claim, value: "9 attempts per request", source: { ...claim.source, ref: "elsewhere" } });
+  const ok = routeMemoryChange({ type: "claim", claim, current: [rival], agreement: { passes: 2, agreeing: 2 }, accumulation: { outcome: "contested", candidateClaimIds: [claim.id, rival.id].sort(), gapCodes: ["contested-value"] } });
+  assert.equal(ok.outcome, "routed");
+  // And the stored form is held to the same rule, even with the digest recomputed.
+  const edited = JSON.parse(JSON.stringify(ok));
+  edited.input.current = [];
+  edited.input.baselines = edited.input.baselines.filter(base => base.ref === "source");
+  edited.id = `sha256:${createHash("sha256").update(canonicalJson({ input: edited.input, policy: edited.policy })).digest("hex")}`;
+  const check = recomputeMemoryRouting(edited);
+  assert.equal(check.ok, false);
+  assert.match(check.mismatches.join("\n"), /not among the current claims/);
+});
+
+test("with the real Surface projection, every committed fact is reproduced and the mapped claims are the ones it accepted", async t => {
+  // Runs for real when the installed Surface exports the projection. Until then MEMORY_SURFACE_MODULE can point at a build of
+  // surface@b7d932b so this check can be exercised today; with neither, it skips and says why.
+  const surface = await import(process.env.MEMORY_SURFACE_MODULE ? pathToFileURL(process.env.MEMORY_SURFACE_MODULE).href : "@kontourai/surface");
   if (typeof surface.projectAccumulation !== "function") { t.skip("surface#359 is merged but unreleased; the committed facts were produced by its projectAccumulation at b7d932b"); return; }
-  assert.equal(typeof surface.accumulationDigest, "function");
-  // Reproduction needs the host's observations and authority, which the fixture does not store; the check that matters
-  // once Surface publishes is that the mapped claims pass its validation and project to these outcomes.
-  for (const scenario of Object.values(fixture().scenarios)) for (const bundle of scenario.bundles) assert.ok(bundle.claims.length > 0);
+  const { c0, c1 } = await claims();
+  let checked = 0;
+  for (const [name, scenario] of Object.entries(fixture().scenarios)) {
+    for (const observation of scenario.observations) assert.equal(observation.contentDigest, surface.accumulationDigest(observation.bundle), `${name}: observation digest`);
+    const { integrityRef, ...policy } = scenario.authority;
+    assert.equal(integrityRef, surface.accumulationDigest(policy), `${name}: authority digest`);
+    for (const [claimId, recorded] of Object.entries(scenario.facts)) {
+      const result = surface.projectAccumulation(scenario.observations, scenario.authority, recorded.query);
+      assert.deepEqual(memoryAccumulationFact(result), recorded.fact, `${name}: ${claimId}`);
+      assert.deepEqual(result.supersessions.map(e => ({ claimId: e.claimId, byClaimId: e.byClaimId, state: e.state })), recorded.edges, `${name}: ${claimId} edges`);
+      checked++;
+    }
+    // The committed bundles hold exactly what the Kit's mapper makes of the claims.
+    const expected = name === "sitting0" ? memoryAccumulationClaims(c0, c0) : memoryAccumulationClaims(c1, c0);
+    const bundle = scenario.bundles.at(-1);
+    assert.deepEqual(bundle.claims.map(claim => claim.id).sort(), expected.map(claim => claim.id).sort(), name);
+  }
+  assert.equal(checked, 9);
 });

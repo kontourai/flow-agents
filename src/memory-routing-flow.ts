@@ -17,6 +17,7 @@ import path from "node:path";
 import { attachEvidence, loadRun, type FlowEvidenceEntry } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
 import { MemoryClaimError } from "./memory-claims.js";
+import { jsonSnapshotList } from "./memory-json.js";
 import type { ReviewDecision, ReviewItem, ReviewSessionEvent } from "@kontourai/survey";
 import {
   MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
@@ -246,8 +247,9 @@ type ReviewInput = { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?:
  * value that changes between reads cannot pass validation and then poison the evidence.
  */
 function prepareReview(input: ReviewInput): PreparedReview {
-  const decisions = (input.reviewDecisions ?? []).map(item => jsonSnapshot(item) as ReviewDecision);
-  const events = (input.reviewEvents ?? []).map(item => jsonSnapshot(item) as ReviewSessionEvent);
+  // The whole list is snapshotted by index: a caller-supplied `.map` or a hole in the list cannot change what is recorded.
+  const decisions = jsonSnapshotList(input.reviewDecisions, "review input") as ReviewDecision[];
+  const events = jsonSnapshotList(input.reviewEvents, "review input") as ReviewSessionEvent[];
   decisions.forEach(assertReviewDecision);
   events.forEach(assertReviewEvent);
   return { decisions, events };
@@ -267,43 +269,6 @@ async function recordReview(input: Location & { review: PreparedReview }): Promi
   if (decisions.length === 0 && events.length === 0) return;
   const record: MemoryReviewRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions, events };
   await attachJson(input, MEMORY_REVIEW_EVIDENCE_KIND, record);
-}
-
-const MAX_SNAPSHOT_NODES = 20_000, MAX_SNAPSHOT_DEPTH = 32;
-/** A strict deep copy of plain JSON data. Refuses accessors, non-finite numbers, non-plain objects, symbols and cycles. */
-function jsonSnapshot(value: unknown): unknown {
-  let nodes = 0;
-  const walk = (item: unknown, depth: number, ancestors: Set<object>): unknown => {
-    if (++nodes > MAX_SNAPSHOT_NODES || depth > MAX_SNAPSHOT_DEPTH) return bad("too large or too deep to record");
-    if (item === null || typeof item === "string" || typeof item === "boolean") return item;
-    if (typeof item === "number") return Number.isFinite(item) ? item : bad("a number that is not finite cannot be recorded as JSON");
-    if (typeof item !== "object") return bad(`a ${typeof item} cannot be recorded as JSON`);
-    if (ancestors.has(item)) return bad("a cycle cannot be recorded");
-    ancestors.add(item);
-    try {
-      if (Array.isArray(item)) {
-        if (Object.getPrototypeOf(item) !== Array.prototype) return bad("an array subclass cannot be recorded");
-        return Array.from({ length: item.length }, (_, index) => {
-          const descriptor = Object.getOwnPropertyDescriptor(item, index);
-          if (!descriptor || !("value" in descriptor)) return bad("a hole or accessor in a list cannot be recorded");
-          return walk(descriptor.value, depth + 1, ancestors);
-        });
-      }
-      const prototype = Object.getPrototypeOf(item);
-      if (prototype !== Object.prototype && prototype !== null) return bad("only plain objects can be recorded");
-      if (Object.getOwnPropertySymbols(item).length) return bad("a symbol key cannot be recorded");
-      const copy: Record<string, unknown> = {};
-      for (const key of Object.keys(item)) {
-        const descriptor = Object.getOwnPropertyDescriptor(item, key)!;
-        if (!("value" in descriptor)) return bad(`${key} is an accessor, which cannot be recorded`);
-        if (descriptor.value !== undefined) copy[key] = walk(descriptor.value, depth + 1, ancestors);
-      }
-      return copy;
-    } finally {
-      ancestors.delete(item);
-    }
-  };
-  return walk(value, 0, new Set());
 }
 
 const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);

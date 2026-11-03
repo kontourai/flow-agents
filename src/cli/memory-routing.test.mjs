@@ -60,6 +60,7 @@ const onCall = make({ property: "on-call owner", value: "Maya Chen" });
 const newer = make({ value: "PostgreSQL 16", validTime: { from: "2026-10-30" } });
 const replacing = make({ value: "PostgreSQL 16", validTime: { from: "2026-10-30" }, supersedes: [{ claimId: make().id, kind: "succession", reason: "replaces" }] });
 const current = make();
+const otherPeer = make({ value: "PostgreSQL 17", source: { ...base.source, ref: "other-peer" } });
 
 const RULE_CASES = {
   "contradicted-by-verification": {
@@ -89,8 +90,8 @@ const RULE_CASES = {
       ["Surface projects one current value", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: CURRENT })],
       ["Surface accepted the replacement: reviewed and admitted, the slot is current", () => change(replacing, { current: [current], accumulation: CURRENT })],
       ["Surface has no answer, for a reason that is not a contest", () => change(make(), { accumulation: { outcome: "none", reason: "withdrawn", candidateClaimIds: [], gapCodes: [] } })],
-      ["a contest the claim is not part of: it was excluded as superseded or withdrawn", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: contested("sha256:" + "a".repeat(64), "sha256:" + "b".repeat(64)) })],
-      ["a plan is never a candidate for the slot, so it is never contested", () => change(make({ posture: "proposed", value: "PostgreSQL 16" }), { current: [current], accumulation: contested("x", "y") })],
+      ["a contest the claim is not part of: it was excluded as superseded or withdrawn", () => change(make({ value: "PostgreSQL 16" }), { current: [current, otherPeer], accumulation: contested(current.id, otherPeer.id) })],
+      ["a plan is never a candidate for the slot, so it is never contested", () => { const plan = make({ posture: "proposed", value: "PostgreSQL 16" }); return change(plan, { current: [current], accumulation: contested(plan.id, current.id) }); }],
       ["a what-if is never contested, projection or none", () => change(make({ posture: "hypothetical", value: "PostgreSQL 16" }), { current: [current], accumulation: null })],
       ["a property the host declares multi-valued is not projected: Surface has one value policy", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: null }), { multiValued: ["primary database"] }],
       ["no projection, but nothing else is in the slot, so nothing can contest it", () => change(make(), { accumulation: null })],

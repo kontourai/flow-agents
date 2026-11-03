@@ -129,7 +129,8 @@ export function memoryVisibilityWithin(inner: unknown, outer: unknown): boolean 
  * list) is sealed. Not the strict claim reading: the order must agree with Surface on any input, including bad ones.
  */
 function surfaceReading(value: unknown): MemoryVisibility {
-  if (value === null || typeof value !== "object") return SEALED;
+  // Surface reads `.kind` off anything that is not null or undefined, so a function carrying one reads as it would there.
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) return SEALED;
   const { kind, audiences } = value as { kind?: unknown; audiences?: unknown };
   if (kind === "public") return { kind: "public" };
   if (kind !== "restricted") return SEALED;
@@ -227,6 +228,18 @@ export interface MemoryClaimChange {
 export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProposalLike }
 export type MemoryChange = MemoryClaimChange | MemoryEntityChange;
 
+/**
+ * The rival candidates a projection names must be among the claims the Kit was given for the slot. The visibility bounds, the
+ * review item and the verification evidence are all built from those claims; a rival the Kit never saw would be silently
+ * missing from every one of them, so the projection and the slot must agree.
+ */
+function boundFact(fact: MemoryAccumulationFact, claimId: string, slot: readonly MemoryClaim[]): MemoryAccumulationFact {
+  const known = new Set([claimId, ...slot.map(other => other.id)]);
+  const missing = fact.candidateClaimIds.filter(id => !known.has(id));
+  if (missing.length) throw new MemoryClaimError("invalid", `the projection names candidate(s) ${missing.join(", ")} that are not among the slot's current claims`);
+  return fact;
+}
+
 /** A claim's id ignores the order of its audiences and edges; so must the decision that embeds it, or one claim gets two decision ids. */
 const canonicalOrder = (claim: MemoryClaim): MemoryClaim => ({
   ...claim,
@@ -249,7 +262,7 @@ function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   return {
     type: "claim", claim: canonicalOrder(change.claim), current: ordered, verifications: [...applicable],
     agreement: change.agreement ?? null,
-    accumulation: change.accumulation ? memoryAccumulationFact(change.accumulation) : null,
+    accumulation: change.accumulation ? boundFact(memoryAccumulationFact(change.accumulation), change.claim.id, ordered) : null,
     baselines: [
       { ref: SOURCE_BASELINE, visibility: readMemoryVisibility(change.sourceVisibility) ?? null },
       ...ordered.map(other => ({ ref: other.id, visibility: other.visibility ?? null })),
@@ -304,6 +317,8 @@ function assertStoredInputShape(input: MemoryRoutingInput): void {
     try { memoryAccumulationFact(input.accumulation); } catch { bad("accumulation is not a projection result"); }
     // memoryAccumulationFact also sorts; a stored fact must already be in that form, or the id would not be stable.
     if (canonicalJson(memoryAccumulationFact(input.accumulation)) !== canonicalJson(input.accumulation)) bad("accumulation is not in canonical form");
+    const known = new Set([input.claim.id, ...input.current.map(other => other.id)]);
+    if (input.accumulation.candidateClaimIds.some(id => !known.has(id))) bad("accumulation names a candidate that is not among the current claims");
   }
   if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.visibility === null || readMemoryVisibility(base.visibility) !== undefined))) bad("baselines are malformed");
   // The peers' baselines are re-derivable from the embedded claims; a stored input may not drop one to clear a widening.

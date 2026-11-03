@@ -10,7 +10,7 @@
  * Surface's package is not yet published with the projection, so none of it is imported here: the shapes below are
  * structural mirrors of the parts read, pinned by fixtures that were produced by running the real projection.
  */
-import { MemoryClaimError, readMemoryVisibility, type MemoryClaim } from "./memory-claims.js";
+import { MemoryClaimError, memoryInstant, readMemoryVisibility, type MemoryClaim } from "./memory-claims.js";
 
 /** Surface's `AccumulationClaim` (a `Claim` plus the provisional `validTime` and `supersedes`), as the Kit fills it. */
 export interface MemoryAccumulationClaim {
@@ -30,6 +30,12 @@ export interface MemoryAccumulationClaim {
   supersedes?: { claimId: string; kind: "correction" | "succession"; reason: string }[];
   metadata: { visibility?: "public" | { audiences: string[] }; memory: { speaker: string; source: MemoryClaim["source"] } };
 }
+
+const utc = (text: string, what: string): string => {
+  const ms = memoryInstant(text);
+  if (ms === undefined) throw new MemoryClaimError("invalid", `${what} is not an ISO 8601 date or date-time, which Surface requires`);
+  return new Date(ms).toISOString();
+};
 
 /** Surface's `AccumulationQuery` for the slot of a claim. */
 export interface MemoryAccumulationQuery {
@@ -62,12 +68,20 @@ export function memoryClaimToAccumulationClaim(claim: MemoryClaim): MemoryAccumu
   const visibility = claim.visibility === undefined ? undefined : readMemoryVisibility(claim.visibility);
   if (claim.visibility !== undefined && visibility === undefined) throw new MemoryClaimError("invalid", "visibility must be public or restricted to named audiences");
   const declared = visibility === undefined ? undefined : visibility.kind === "public" ? "public" as const : { audiences: [...visibility.audiences] };
+  // Surface parses timestamps strictly, and a claim built directly keeps whatever spelling it was given (a bare date): the
+  // mapping is where they become the UTC instants Surface reads.
+  const observed = utc(claim.source.observedAt, "source.observedAt");
+  const validTime = claim.validTime === undefined ? undefined : {
+    ...(claim.validTime.from !== undefined ? { from: utc(claim.validTime.from, "validTime.from") } : {}),
+    ...(claim.validTime.until !== undefined ? { until: utc(claim.validTime.until, "validTime.until") } : {}),
+  };
   return {
     id: claim.id, subjectType: claim.subject.type, subjectId: claim.subject.id, facet: "memory", claimType: claim.claimType, fieldOrBehavior: claim.property,
-    ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}), value: claim.value, status: "proposed",
-    createdAt: claim.source.observedAt, updatedAt: claim.source.observedAt, impactLevel: "medium",
-    ...(claim.validTime ? { validTime: claim.validTime } : {}),
-    ...(claim.supersedes ? { supersedes: claim.supersedes.map(edge => ({ claimId: edge.claimId, kind: edge.kind, reason: edge.reason })) } : {}),
+    ...(claim.qualifiers ? { qualifiers: { ...claim.qualifiers } } : {}), value: claim.value, status: "proposed",
+    createdAt: observed, updatedAt: observed, impactLevel: "medium",
+    ...(validTime ? { validTime } : {}),
+    // Edges are a set, as in the claim id: one claim maps to one Surface claim whatever order its edges were given in.
+    ...(claim.supersedes ? { supersedes: [...claim.supersedes].sort((x, y) => x.claimId < y.claimId ? -1 : x.claimId > y.claimId ? 1 : 0).map(edge => ({ claimId: edge.claimId, kind: edge.kind, reason: edge.reason })) } : {}),
     metadata: { ...(declared !== undefined ? { visibility: declared } : {}), memory: { speaker: claim.speaker, source: claim.source } },
   };
 }
@@ -79,18 +93,21 @@ export function memoryClaimToAccumulationClaim(claim: MemoryClaim): MemoryAccumu
  * rather than a throw inside the projection.
  */
 export function memoryAccumulationClaims(claims: readonly MemoryClaim[], available: readonly MemoryClaim[] = []): MemoryAccumulationClaim[] {
-  const byId = new Map(available.map(claim => [claim.id, claim]));
+  const byId = new Map([...available, ...claims].map(claim => [claim.id, claim]));
   const out = new Map<string, MemoryClaim>();
-  for (const claim of claims) {
-    if (claim.posture !== "stated") continue;
+  // Surface refuses an edge whose target is not in the same bundle, so every claim reachable through edges travels with
+  // the successor (a chain C -> B -> A carries all three), not only the direct targets. A cycle simply stops the walk.
+  const carry = (claim: MemoryClaim): void => {
+    if (out.has(claim.id)) return;
     out.set(claim.id, claim);
     for (const edge of claim.supersedes ?? []) {
-      const target = out.get(edge.claimId) ?? claims.find(other => other.id === edge.claimId) ?? byId.get(edge.claimId);
+      const target = byId.get(edge.claimId);
       if (!target) throw new MemoryClaimError("invalid", `claim ${claim.id} replaces ${edge.claimId}, which is not available to carry with it`);
       if (target.posture !== "stated") throw new MemoryClaimError("invalid", `claim ${claim.id} replaces ${edge.claimId}, which is not a stated claim`);
-      out.set(target.id, target);
+      carry(target);
     }
-  }
+  };
+  for (const claim of claims) if (claim.posture === "stated") carry(claim);
   return [...out.values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map(memoryClaimToAccumulationClaim);
 }
 
@@ -103,13 +120,29 @@ export function memoryAccumulationQuery(claim: MemoryClaim, now: string): Memory
 }
 
 const OUTCOMES = ["current", "contested", "invalid", "none"];
-const stringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string");
+/** A list of non-empty strings, read by own index so a hole or an inherited entry is refused rather than skipped or invented. */
+function readStrings(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > 10_000) return undefined;
+  const out: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    if (!Object.hasOwn(value, index)) return undefined;
+    const item: unknown = value[index];
+    if (typeof item !== "string" || item === "") return undefined;
+    out.push(item);
+  }
+  return out;
+}
 
 /** Reads the fact out of a `projectAccumulation` result, or throws: a result that does not look like one is not a fact. */
 export function memoryAccumulationFact(result: unknown): MemoryAccumulationFact {
   const r = result as Partial<Record<keyof MemoryAccumulationFact, unknown>> | null;
-  if (!r || typeof r !== "object" || typeof r.outcome !== "string" || !OUTCOMES.includes(r.outcome) || !stringList(r.candidateClaimIds) || !stringList(r.gapCodes)) {
+  const candidates = r && typeof r === "object" ? readStrings(r.candidateClaimIds) : undefined;
+  const gaps = r && typeof r === "object" ? readStrings(r.gapCodes) : undefined;
+  if (!r || typeof r !== "object" || typeof r.outcome !== "string" || !OUTCOMES.includes(r.outcome) || !candidates || !gaps) {
     throw new MemoryClaimError("invalid", "not an accumulation projection result: it needs an outcome, candidateClaimIds and gapCodes");
   }
-  return { outcome: r.outcome as MemoryAccumulationFact["outcome"], ...(typeof r.reason === "string" ? { reason: r.reason } : {}), candidateClaimIds: [...r.candidateClaimIds].sort(), gapCodes: [...r.gapCodes].sort() };
+  const distinct = [...new Set(candidates)].sort();
+  // A contest is between at least two candidates: Surface reports `contested` only when they hold different values.
+  if (r.outcome === "contested" && distinct.length < 2) throw new MemoryClaimError("invalid", "a contested projection names at least two candidates");
+  return { outcome: r.outcome as MemoryAccumulationFact["outcome"], ...(typeof r.reason === "string" ? { reason: r.reason } : {}), candidateClaimIds: distinct, gapCodes: [...new Set(gaps)].sort() };
 }
