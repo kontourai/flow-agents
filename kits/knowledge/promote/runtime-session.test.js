@@ -944,6 +944,9 @@ describe("review round 1 regressions (PR #1575)", () => {
     // offsets survive a blob of astral characters (UTF-16 length, not code points), so prose after it is untouched
     assert.equal(scrubResidueText(`${"\u{1F600}".repeat(101)} then prose, mail a@b.example.com`), "<BLOB> then prose, mail <EMAIL>");
     assert.equal(scrubResidueText(`${"\u{1F600}".repeat(101)} keep this sentence intact. a@b.example.com`), "<BLOB> keep this sentence intact. <EMAIL>");
+    // prose longer than the shift a wrong mask length would cause: it must come through byte for byte
+    const prose = "this sentence is ordinary prose and must not be touched. ".repeat(6);
+    assert.equal(scrubResidueText(`${"\u{1F600}".repeat(101)} ${prose}mail a@b.example.com`), `<BLOB> ${prose}mail <EMAIL>`);
     // a real URL password and a real scheme are still found
     assert.equal(scrubResidueText(`(ftp://u:p${canary}@h/x) and HTTPS://a:b@c`), "(ftp://u:<SECRET>@h/x) and HTTPS://a:<SECRET>@c");
   });

@@ -207,7 +207,7 @@ function urlPasswordAt(ranges, position) {
   while (low <= high) {
     const mid = (low + high) >> 1;
     if (position < ranges[mid].start) high = mid - 1;
-    else if (position > ranges[mid].end) low = mid + 1;
+    else if (position >= ranges[mid].end) low = mid + 1;
     else return ranges[mid];
   }
   return null;
