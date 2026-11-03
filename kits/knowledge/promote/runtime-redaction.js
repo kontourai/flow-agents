@@ -39,7 +39,12 @@ const URL_CREDENTIAL = /\b([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s/]+(@)/gi;
 const BEARER = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
 // NAME=value, "name": "value", name: value — for secret-ish names.
 const ASSIGNMENT = new RegExp(
-  `(["']?\\b${SECRET_NAME}["']?\\s*[:=]\\s*(?:(?:bearer|basic)\\s+)?)(?:"[^"\\r\\n]*"|'[^'\\r\\n]*'|[^\\s"',;}]{4,})`,
+  `(["']?\\b${SECRET_NAME}["']?\\s*[:=]\\s*(?:(?:bearer|basic)\\s+)?)(?:"[^"]*"|'[^']*'|[^\\s"',;}]{4,})`,
+  "gi",
+);
+// YAML block scalar: `token: |` followed by indented lines.
+const BLOCK_SCALAR = new RegExp(
+  `(\\b${SECRET_NAME}\\s*:[ \\t]*[|>][+-]?[ \\t]*\\r?\\n)(?:[ \\t]+[^\\r\\n]*(?:\\r?\\n|$))+`,
   "gi",
 );
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
@@ -57,6 +62,7 @@ export function scrubResidueText(value) {
   for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, "<SECRET>");
   text = text.replace(URL_CREDENTIAL, "$1<SECRET>$2");
   text = text.replace(BEARER, "$1<SECRET>");
+  text = text.replace(BLOCK_SCALAR, "$1<SECRET>\n");
   text = text.replace(ASSIGNMENT, "$1<SECRET>");
   text = text.replace(EMAIL, "<EMAIL>");
   text = text.replace(WINDOWS_HOME, "~");

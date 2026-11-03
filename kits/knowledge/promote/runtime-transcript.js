@@ -13,11 +13,13 @@
  * runtime-ferry-shims.js (kontourai/thread#76, #77, #78) and by the tag list
  * below (#78).
  *
- * Drift: a transcript that is not the format its telemetry runtime claims, or
- * one that Ferry reports skipping records from, throws `TranscriptFormatError`.
- * The caller reports it and holds its cursor. Only newline-terminated lines are
- * read: a trailing partial line is a write in progress and is left for the next
- * run.
+ * Drift: a transcript that is not the format its telemetry runtime claims, is
+ * not valid UTF-8, has no UUID session id, has a conversation record with no
+ * source timestamp, or that Ferry reports skipping records from, throws
+ * `TranscriptFormatError`. The caller reports it and holds its cursor. Only
+ * newline-terminated lines are read: a trailing partial line is a write in
+ * progress; `readConversation` reports it as `partialTail` so the caller holds
+ * the cursor until the line is complete.
  *
  * @module promote/runtime-transcript
  */
@@ -25,7 +27,7 @@
 import { createClaudeCodeImporter, createCodexImporter, detectFormat } from "@kontourai/ferry";
 
 import { INJECTED_MEMORY_CLOSE, INJECTED_MEMORY_OPEN } from "../memory-marker.js";
-import { claudeHarnessEntryIds, codexDeveloperPartKeys, codexSessionMeta, partKey } from "./runtime-ferry-shims.js";
+import { claudeLineFacts, codexLineFacts, codexSessionMeta } from "./runtime-ferry-shims.js";
 
 // The marker lives in a dependency-free module so #672's hook path can import
 // it without this file's Ferry import; re-exported here for existing callers.
@@ -65,7 +67,11 @@ const AGENTS_HEADER = /^# AGENTS\.md instructions for [^\n]*\n?/;
 
 // Ferry's thread id when a Claude Code transcript carries no sessionId.
 const FERRY_CLAUDE_FALLBACK_ID = "claude-code-session";
-const FERRY_EMPTY_THREAD = /no (?:importable messages|Claude Code conversation events)/i;
+// What Ferry throws for a transcript with no conversation in it (both adapters).
+const FERRY_EMPTY_THREAD = /no (?:Codex )?importable (?:messages|items)|no Claude Code conversation events/i;
+// Real Claude Code and Codex session ids are UUIDs. Anything else is drift, so a
+// transcript can never put free text (or a secret) into sitting ids and cursor keys.
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class TranscriptFormatError extends Error {
   constructor(reason, message) {
@@ -83,36 +89,95 @@ function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const TAG_BLOCKS = HARNESS_TAGS.map(
-  (tag) => new RegExp(`<${escapeRegExp(tag)}(?:\\s[^>]*)?>[\\s\\S]*?</${escapeRegExp(tag)}>`, "g"),
-);
-const MEMORY_BLOCK = new RegExp(
-  `${escapeRegExp(INJECTED_MEMORY_OPEN)}[\\s\\S]*?(?:${escapeRegExp(INJECTED_MEMORY_CLOSE)}|$)`,
-  "g",
-);
+/**
+ * Remove balanced `open … close` blocks from `input` with a depth counter, so
+ * nesting cannot end a block early. `tokens` is a global regex matching either
+ * token; `isOpen(match)` tells them apart. Fails closed: a block with no close
+ * runs to the end of the input. A close with no open drops only the token,
+ * unless `strayCloseWipesHead` (the text before it was inside a block whose
+ * open was lost). Returns the kept text and the depth still open at the end.
+ */
+function removeBlocks(input, tokens, isOpen, depth, strayCloseWipesHead) {
+  let out = "";
+  let position = 0;
+  for (const match of input.matchAll(tokens)) {
+    if (depth === 0) {
+      if (isOpen(match)) {
+        out += input.slice(position, match.index);
+        depth = 1;
+      } else {
+        out = strayCloseWipesHead ? "" : out + input.slice(position, match.index);
+      }
+    } else {
+      depth += isOpen(match) ? 1 : -1;
+    }
+    position = match.index + match[0].length;
+  }
+  if (depth === 0) out += input.slice(position);
+  return { out, depth };
+}
 
-/** Remove injected memory and harness tag blocks; returns trimmed text. */
-export function stripInjectedContent(text) {
-  let out = String(text).replace(MEMORY_BLOCK, "");
-  for (const pattern of TAG_BLOCKS) out = out.replace(pattern, "");
+const MEMORY_MARKERS = new RegExp(`${escapeRegExp(INJECTED_MEMORY_OPEN)}|${escapeRegExp(INJECTED_MEMORY_CLOSE)}`, "g");
+
+// Attribute values may contain `>` inside quotes.
+const TAG_TOKENS = HARNESS_TAGS.map((tag) => {
+  const name = escapeRegExp(tag);
+  return new RegExp(`(<${name}(?:\\s(?:[^>"']|"[^"]*"|'[^']*')*)?>)|(</${name}\\s*>)`, "gi");
+});
+
+/**
+ * Injected-memory filter with state, so a block opened in one text part or
+ * message and closed in a later one is removed whole. Blocks nest, an
+ * unterminated block hides everything after it (until a later close), and a
+ * close with no open removes what came before it. Cost of failing closed: an
+ * unterminated marker the model merely quotes also hides what follows it;
+ * injection (#672) always writes a closed pair. A marker spelled across two
+ * text parts is not recognised: no writer splits a token.
+ */
+export function createInjectedMemoryFilter() {
+  let depth = 0;
+  return (text) => {
+    const result = removeBlocks(String(text), MEMORY_MARKERS, (m) => m[0] === INJECTED_MEMORY_OPEN, depth, true);
+    depth = result.depth;
+    return result.out;
+  };
+}
+
+function stripHarnessTags(text) {
+  let out = text;
+  for (const tokens of TAG_TOKENS) out = removeBlocks(out, tokens, (m) => m[1] !== undefined, 0, false).out;
   return out.replace(AGENTS_HEADER, "").trim();
 }
 
+/** Remove injected memory and harness tag blocks from one string; returns trimmed text. */
+export function stripInjectedContent(text) {
+  return stripHarnessTags(createInjectedMemoryFilter()(text));
+}
+
 /**
- * Newline-terminated lines of a transcript. A trailing line with no newline is
- * a write in progress and is ignored. This splits; it does not parse.
+ * Split a transcript into newline-terminated lines. The bytes after the last
+ * newline are a write in progress: they are not decoded and are reported as
+ * `partialTail`, never silently dropped.
  * @param {Buffer} buffer
- * @returns {string[]}
+ * @returns {{ lines: string[], partialTail: boolean }}
+ * @throws {TranscriptFormatError} when the complete lines are not valid UTF-8
  */
 export function completeLines(buffer) {
-  const text = buffer.toString("utf8");
-  const end = text.lastIndexOf("\n");
-  if (end === -1) return [];
-  return text
-    .slice(0, end)
+  const end = buffer.lastIndexOf(0x0a);
+  const tail = buffer.subarray(end + 1);
+  const partialTail = tail.some((byte) => byte !== 0x20 && byte !== 0x09 && byte !== 0x0d);
+  if (end === -1) return { lines: [], partialTail };
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, end));
+  } catch {
+    throw drift("transcript is not valid UTF-8");
+  }
+  const lines = text
     .split("\n")
     .map((line) => line.replace(/\r$/, ""))
     .filter((line) => line.trim() !== "");
+  return { lines, partialTail };
 }
 
 /** Run a Ferry incremental importer over complete lines; any Ferry warning is drift. */
@@ -132,27 +197,32 @@ function importThread(createImporter, lines) {
   return thread;
 }
 
-/** User/assistant text parts of one canonical message that survive `dropPart`. */
-function messageText(message, dropPart) {
+/** User/assistant text of one canonical message, with injected content removed. */
+function messageText(message, memoryFilter) {
   if (!Array.isArray(message.content)) return "";
   const texts = [];
   for (const part of message.content) {
     if (part.type !== "text" || typeof part.text !== "string") continue;
-    if (dropPart(part.text, message)) continue;
-    texts.push(part.text);
+    texts.push(stripHarnessTags(memoryFilter(part.text)));
   }
-  return stripInjectedContent(texts.join("\n\n"));
+  return texts.filter((t) => t !== "").join("\n\n");
 }
 
-function conversationFromThread(thread, dropMessage, dropPart) {
+function conversationFromThread(thread) {
+  const memoryFilter = createInjectedMemoryFilter();
   const messages = [];
   for (const message of thread.messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
-    if (message.metadata?.sidechain === true || dropMessage(message)) continue;
-    const text = messageText(message, dropPart);
+    if (message.metadata?.sidechain === true) continue;
+    const text = messageText(message, memoryFilter);
     if (text) messages.push({ role: message.role, text, timestampMs: message.timestamp });
   }
   return messages;
+}
+
+function requireSessionId(id) {
+  if (typeof id !== "string" || !SESSION_ID.test(id)) throw drift("session id is not a UUID");
+  return id;
 }
 
 /**
@@ -161,12 +231,13 @@ function conversationFromThread(thread, dropMessage, dropPart) {
  * @param {"claude-code" | "codex"} harness  the runtime telemetry says wrote it
  * @param {Buffer} content  the whole transcript file
  * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
- *   gitBranch: string | null, messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}> }}
+ *   gitBranch: string | null, partialTail: boolean,
+ *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}> }}
  * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
 export function readConversation(harness, content) {
-  const lines = completeLines(content);
-  const empty = { sessionId: null, sidechain: false, cwd: null, gitBranch: null, messages: [] };
+  const { lines, partialTail } = completeLines(content);
+  const empty = { sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, messages: [] };
   if (lines.length === 0) return empty;
 
   const detected = detectFormat(lines.slice(0, 200).join("\n"));
@@ -175,35 +246,44 @@ export function readConversation(harness, content) {
   }
 
   if (harness === "claude-code") {
-    const thread = importThread(createClaudeCodeImporter, lines);
+    const kept = [];
+    for (const line of lines) {
+      const facts = claudeLineFacts(line);
+      if (facts.missingTime) throw drift("claude-code: a conversation record has no source timestamp");
+      if (!facts.harnessEntry) kept.push(line);
+    }
+    const thread = importThread(createClaudeCodeImporter, kept);
     if (!thread) return empty;
     if (thread.id === FERRY_CLAUDE_FALLBACK_ID) throw drift("claude-code: no record carries a sessionId");
-    const harnessEntries = claudeHarnessEntryIds(lines);
     return {
-      sessionId: thread.id,
+      sessionId: requireSessionId(thread.id),
       sidechain: false,
       cwd: thread.metadata?.cwd ?? null,
       gitBranch: thread.metadata?.git?.branch ?? null,
-      messages: conversationFromThread(thread, (message) => harnessEntries.has(message.id), () => false),
+      partialTail,
+      messages: conversationFromThread(thread),
     };
   }
 
   const meta = codexSessionMeta(lines);
   if (!meta) throw drift("codex: first record is not a session_meta with an id");
-  if (meta.sidechain) return { ...empty, sessionId: meta.id, sidechain: true };
-  const thread = importThread(createCodexImporter, lines);
-  if (!thread) return { ...empty, sessionId: meta.id, gitBranch: meta.gitBranch };
-  const developerParts = codexDeveloperPartKeys(lines);
+  const sessionId = requireSessionId(meta.id);
+  if (meta.sidechain) return { ...empty, sessionId, sidechain: true };
+  const kept = [];
+  for (const line of lines) {
+    const facts = codexLineFacts(line);
+    if (facts.missingTime) throw drift("codex: a conversation record has no source timestamp");
+    if (!facts.developerMessage) kept.push(line);
+  }
+  const thread = importThread(createCodexImporter, kept);
+  if (!thread) return { ...empty, sessionId, gitBranch: meta.gitBranch };
   return {
-    sessionId: meta.id,
+    sessionId,
     sidechain: false,
     cwd: thread.metadata?.cwd ?? null,
     gitBranch: meta.gitBranch,
-    messages: conversationFromThread(
-      thread,
-      () => false,
-      (text, message) => developerParts.has(partKey(message.timestamp, text)),
-    ),
+    partialTail,
+    messages: conversationFromThread(thread),
   };
 }
 

@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -31,6 +32,8 @@ import {
 import { stripInjectedContent } from "./runtime-transcript.js";
 import { validate } from "../providers/lib/schema-validate.js";
 
+// The CJS fs object: the one whose methods can be hooked (an ESM namespace is read-only).
+const cjsFs = createRequire(import.meta.url)("node:fs");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const KIT = path.resolve(HERE, "..");
 const SESSION_FIXTURE = path.join(HERE, "fixtures", "session");
@@ -284,15 +287,16 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
     assert.equal(candidateCursor.telemetry.offset, 0);
   });
 
-  test("a trailing partial transcript line is left for the next run", () => {
+  test("a trailing partial transcript line is not ingested and holds the cursor until it is complete", () => {
     const box = sandbox();
     fs.appendFileSync(
       box.claudeTranscript,
       JSON.stringify({ type: "user", sessionId: CLAUDE_SESSION, timestamp: "2026-10-30T10:32:00.000Z", message: { role: "user", content: "PARTIAL_LINE" } }),
     );
     appendTelemetry(box, event("claude-code", box.claudeTranscript));
-    const { residues, report } = run(box);
-    assert.equal(report.blocked.length, 0);
+    const { residues, report, candidateCursor } = run(box);
+    assert.deepEqual(report.blocked.map((b) => b.reason), ["TRANSCRIPT_PARTIAL_TAIL"]);
+    assert.equal(candidateCursor.telemetry.offset, 0);
     assert.equal(JSON.stringify(residues).includes("PARTIAL_LINE"), false);
   });
 
@@ -506,6 +510,254 @@ describe("AC3 deterministic redaction scrub", () => {
       assert.equal(scrubResidueText(input), expected);
       assert.equal(scrubResidueText(scrubResidueText(input)), expected);
     }
+  });
+});
+
+describe("review round 1 regressions (PR #1575)", () => {
+  const UID = "5b1f2c3d-0000-4000-8000-00000000f001";
+  const STAMP = "2026-10-30T09:00:00.000Z";
+  const claudeRec = (text, extra = {}) => ({
+    parentUuid: null, isSidechain: false, type: "user", uuid: "u1", timestamp: STAMP, cwd: "/w",
+    sessionId: UID, version: "2.1.0", gitBranch: "main", message: { role: "user", content: text }, ...extra,
+  });
+  const codexMeta = (extra = {}) => ({
+    timestamp: STAMP, type: "session_meta",
+    payload: { id: "019a0000-0000-7000-8000-00000000f002", cwd: "/w", cli_version: "0.130.0", source: "cli", ...extra },
+  });
+  const codexMsg = (role, text, at = STAMP) => ({
+    timestamp: at, type: "response_item",
+    payload: { type: "message", role, content: [{ type: role === "assistant" ? "output_text" : "input_text", text }] },
+  });
+  const ndjson = (records) => `${records.map((r) => (typeof r === "string" ? r : JSON.stringify(r))).join("\n")}\n`;
+
+  function single(runtime, body) {
+    const box = sandbox();
+    const file = path.join(box.roots[0], "case.jsonl");
+    fs.writeFileSync(file, body);
+    appendTelemetry(box, event(runtime, file));
+    return { box, file };
+  }
+
+  test("F1: an unterminated transcript tail holds the cursor and is read once completed", () => {
+    for (const tail of [JSON.stringify(claudeRec("TAIL_MUST_BE_READ", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" })), "{", '{"x":"\u00e9'.slice(0, 5)]) {
+      const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
+      fs.appendFileSync(file, Buffer.concat([Buffer.from(tail), Buffer.from([0xf0, 0x9f])]));
+      const first = run(box);
+      assert.deepEqual(first.report.blocked.map((b) => b.reason), ["TRANSCRIPT_PARTIAL_TAIL"]);
+      assert.equal(first.report.cursor_held, true);
+      assert.equal(first.candidateCursor.telemetry.offset, 0);
+      assert.match(JSON.stringify(first.residues), /FIRST_LINE/, "complete lines are still emitted");
+    }
+    const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
+    fs.appendFileSync(file, JSON.stringify(claudeRec("TAIL_MUST_BE_READ", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" })));
+    const first = run(box);
+    fs.appendFileSync(file, "\n");
+    const second = run(box, { cursor: first.candidateCursor });
+    assert.match(JSON.stringify(second.residues), /TAIL_MUST_BE_READ/);
+    assert.equal(second.report.cursor_held, false);
+    assert.equal(second.candidateCursor.telemetry.offset, fs.statSync(box.telemetryFile).size);
+  });
+
+  test("F1: a transcript that grows between two telemetry references is re-read, not served from the first snapshot", () => {
+    const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
+    appendTelemetry(box, event("claude-code", file));
+    const real = fs.realpathSync(file);
+    const closeSync = cjsFs.closeSync;
+    let grown = false;
+    cjsFs.closeSync = function (fd, ...rest) {
+      const result = closeSync.call(this, fd, ...rest);
+      if (!grown) {
+        grown = true;
+        fs.appendFileSync(real, ndjson([claudeRec("GROWTH_MUST_SURVIVE", { uuid: "u2", timestamp: "2026-10-30T09:00:05.000Z" })]));
+      }
+      return result;
+    };
+    syncBuiltinESMExports();
+    let first;
+    try {
+      first = run(box);
+    } finally {
+      cjsFs.closeSync = closeSync;
+      syncBuiltinESMExports();
+    }
+    assert.equal(grown, true, "the growth hook must have fired");
+    assert.match(JSON.stringify(first.residues), /GROWTH_MUST_SURVIVE/);
+  });
+
+  test("F1: a transcript that grows while it is being read holds the cursor", () => {
+    const { box, file } = single("claude-code", ndjson([claudeRec("FIRST_LINE")]));
+    const real = fs.realpathSync(file);
+    const readFileSync = cjsFs.readFileSync;
+    let grown = false;
+    cjsFs.readFileSync = function (target, ...rest) {
+      const content = readFileSync.call(this, target, ...rest);
+      if (typeof target === "number" && !grown) {
+        grown = true;
+        fs.appendFileSync(real, ndjson([claudeRec("GROWTH_MUST_BE_READ", { uuid: "u2", timestamp: "2026-10-30T09:00:05.000Z" })]));
+      }
+      return content;
+    };
+    syncBuiltinESMExports();
+    let first;
+    try {
+      first = run(box);
+    } finally {
+      cjsFs.readFileSync = readFileSync;
+      syncBuiltinESMExports();
+    }
+    assert.equal(grown, true, "the growth hook must have fired");
+    assert.deepEqual(first.report.blocked.map((b) => b.reason), ["TRANSCRIPT_CHANGED_DURING_READ"]);
+    assert.equal(first.candidateCursor.telemetry.offset, 0);
+    const second = run(box, { cursor: first.candidateCursor });
+    assert.match(JSON.stringify(second.residues), /GROWTH_MUST_BE_READ/);
+  });
+
+  test("F2: a transcript swapped for a symlink out of the authorized roots after the root check is not read", () => {
+    const { box, file } = single("claude-code", ndjson([claudeRec("INSIDE_ROOT")]));
+    const outside = path.join(box.root, "outside.jsonl");
+    fs.writeFileSync(outside, ndjson([claudeRec("OUTSIDE_RACE")]));
+    const real = fs.realpathSync(file);
+    const { statSync, openSync } = cjsFs;
+    let fired = false;
+    const swap = () => {
+      if (fired) return;
+      fired = true;
+      fs.unlinkSync(real);
+      fs.symlinkSync(outside, real);
+    };
+    cjsFs.statSync = function (p, ...rest) {
+      if (String(p) === real) swap();
+      return statSync.call(this, p, ...rest);
+    };
+    cjsFs.openSync = function (p, ...rest) {
+      if (String(p) === real) swap();
+      return openSync.call(this, p, ...rest);
+    };
+    syncBuiltinESMExports();
+    let result;
+    try {
+      result = run(box);
+    } finally {
+      cjsFs.statSync = statSync;
+      cjsFs.openSync = openSync;
+      syncBuiltinESMExports();
+    }
+    assert.equal(fired, true, "the swap must have fired");
+    assert.equal(JSON.stringify(result.residues).includes("OUTSIDE_RACE"), false);
+    assert.equal(result.candidateCursor.telemetry.offset, 0, "the unread transcript holds the cursor");
+  });
+
+  test("F3: nested, cross-message and upper-case wrappers cannot leak injected memory", () => {
+    const O = INJECTED_MEMORY_OPEN;
+    const C = INJECTED_MEMORY_CLOSE;
+    assert.equal(stripInjectedContent(`a ${O}x ${O}y${C} LEAK_NESTED ${C} b`), "a  b");
+    assert.equal(stripInjectedContent(`LEAK_STRAY_HEAD${C} kept`), "kept");
+    assert.equal(stripInjectedContent("<SYSTEM-REMINDER>LEAK_CASE</SYSTEM-REMINDER>real"), "real");
+    const { box } = single(
+      "claude-code",
+      ndjson([
+        claudeRec(`${O}hidden LEAK_OPEN`, { uuid: "u1" }),
+        claudeRec("LEAK_BETWEEN", { uuid: "u2", timestamp: "2026-10-30T09:00:01.000Z" }),
+        claudeRec(`LEAK_CLOSE${C} real follow-up`, { uuid: "u3", timestamp: "2026-10-30T09:00:02.000Z" }),
+      ]),
+    );
+    const out = JSON.stringify(run(box).residues);
+    for (const leak of ["LEAK_OPEN", "LEAK_BETWEEN", "LEAK_CLOSE", "hidden"]) assert.equal(out.includes(leak), false, leak);
+    assert.match(out, /real follow-up/);
+  });
+
+  test("F4: a session id that is not a UUID is drift and never reaches residue or cursor keys", () => {
+    const secret = ["gh", "p_", "A".repeat(36)].join("");
+    for (const [runtime, body] of [
+      ["claude-code", ndjson([claudeRec("hello", { sessionId: secret })])],
+      ["codex", ndjson([codexMeta({ id: secret }), codexMsg("user", "hello")])],
+    ]) {
+      const { box } = single(runtime, body);
+      const result = run(box);
+      assert.equal(result.residues.length, 0, runtime);
+      assert.equal(result.report.blocked[0].reason, "UNKNOWN_TRANSCRIPT_FORMAT", runtime);
+      assert.equal(JSON.stringify(result).includes(secret), false, runtime);
+      assert.equal(result.candidateCursor.telemetry.offset, 0);
+    }
+  });
+
+  test("F5: multi-line quoted and block-style secret assignments are scrubbed", () => {
+    const first = ["multi", "Line", "First"].join("");
+    const last = ["multi", "Line", "Last"].join("");
+    for (const input of [
+      `api_key="${first}\n${last}"`,
+      `password='${first}\n${last}'`,
+      `token: |\n  ${first}\n  ${last}\nnext: kept`,
+    ]) {
+      const out = scrubResidueText(input);
+      assert.equal(out.includes(first) || out.includes(last), false, input);
+      assert.equal(scrubResidueText(out), out, "idempotent");
+    }
+    assert.match(scrubResidueText(`token: |\n  ${first}\nnext: kept`), /next: kept$/);
+  });
+
+  test("F6: Claude harness entries are excluded per record, for every message the record produced", () => {
+    const toolAndText = claudeRec(
+      [{ type: "tool_result", tool_use_id: "t1", content: "x" }, { type: "text", text: "LEAK_PEER_MIXED" }],
+      { uuid: "m1", origin: { kind: "peer", from: "w", body: "b" } },
+    );
+    const dupHuman = claudeRec("REAL_HUMAN_SAME_UUID", { uuid: "dup", timestamp: "2026-10-30T09:00:01.000Z", origin: { kind: "human" } });
+    const dupPeer = claudeRec("PEER_SAME_UUID", { uuid: "dup", timestamp: "2026-10-30T09:00:02.000Z", origin: { kind: "peer" } });
+    const { box } = single("claude-code", ndjson([claudeRec("HUMAN_ONE"), toolAndText, dupHuman, dupPeer]));
+    const out = JSON.stringify(run(box).residues);
+    assert.equal(out.includes("LEAK_PEER_MIXED"), false);
+    assert.equal(out.includes("PEER_SAME_UUID"), false);
+    assert.match(out, /REAL_HUMAN_SAME_UUID/);
+    assert.match(out, /HUMAN_ONE/);
+  });
+
+  test("F7: Codex developer items are excluded per record, whatever their timestamp or text", () => {
+    const numeric = { ...codexMsg("developer", "NUMERIC_DEVELOPER"), timestamp: Date.parse(STAMP) };
+    const { box } = single(
+      "codex",
+      ndjson([
+        codexMeta(),
+        numeric,
+        codexMsg("developer", "SAME_TEXT", "2026-10-30T09:00:03.000Z"),
+        codexMsg("user", "SAME_TEXT", "2026-10-30T09:00:03.000Z"),
+        codexMsg("assistant", "answer", "2026-10-30T09:00:04.000Z"),
+      ]),
+    );
+    const result = run(box);
+    assert.equal(result.report.blocked.length, 0);
+    const out = JSON.stringify(result.residues);
+    assert.equal(out.includes("NUMERIC_DEVELOPER"), false);
+    assert.equal((out.match(/SAME_TEXT/g) || []).length, 1, "the genuine user turn survives, the developer one does not");
+  });
+
+  test("F8: a conversation record with no source timestamp is drift, so hashes never depend on the clock", () => {
+    for (const [runtime, body] of [
+      ["codex", ndjson([codexMeta(), { ...codexMsg("user", "NO_TIME"), timestamp: undefined }])],
+      ["claude-code", ndjson([claudeRec("NO_TIME", { timestamp: undefined })])],
+    ]) {
+      const { box } = single(runtime, body);
+      const result = run(box);
+      assert.equal(result.residues.length, 0, runtime);
+      assert.equal(result.report.blocked[0].reason, "UNKNOWN_TRANSCRIPT_FORMAT", runtime);
+    }
+  });
+
+  test("F9: invalid UTF-8 in a complete line is drift, not silently replaced", () => {
+    const line = Buffer.from(ndjson([claudeRec("PLACEHOLDER_TEXT")]));
+    const at = line.indexOf("PLACEHOLDER_TEXT");
+    line[at] = 0xff;
+    const { box } = single("claude-code", line);
+    const result = run(box);
+    assert.equal(result.residues.length, 0);
+    assert.equal(result.report.blocked[0].reason, "UNKNOWN_TRANSCRIPT_FORMAT");
+  });
+
+  test("F10: a Codex rollout with a session_meta and no conversation is skipped, not blocked", () => {
+    const { box } = single("codex", ndjson([codexMeta()]));
+    const result = run(box);
+    assert.equal(result.report.blocked.length, 0);
+    assert.deepEqual(result.report.skipped.map((s) => s.reason), ["NO_CONVERSATION"]);
+    assert.equal(result.candidateCursor.telemetry.offset, fs.statSync(box.telemetryFile).size);
   });
 });
 

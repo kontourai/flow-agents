@@ -116,7 +116,28 @@ class Skipped extends Error {
   }
 }
 
-/** Resolve and read a transcript inside the authorized roots. */
+/** True when the file at `transcriptPath` still looks like the one that was read (or was never readable). */
+function sameFileStamp(stamp, transcriptPath) {
+  if (!stamp) return true;
+  try {
+    const now = fs.statSync(transcriptPath);
+    return now.size === stamp.size && now.mtimeMs === stamp.mtimeMs && now.ino === stamp.ino;
+  } catch {
+    return false;
+  }
+}
+
+const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+
+/**
+ * Resolve and read a transcript inside the authorized roots.
+ *
+ * The path is resolved to a real path inside a root, opened without following a
+ * final symlink, and read through that one descriptor. Afterwards the path must
+ * still resolve to the same inode and the file must not have grown, otherwise
+ * the read is not trusted: a swap between the root check and the read, or an
+ * append during it, holds the cursor instead of leaking or losing content.
+ */
 function readTranscript(transcriptPath, roots, maxBytes) {
   let real;
   try {
@@ -127,21 +148,44 @@ function readTranscript(transcriptPath, roots, maxBytes) {
   }
   const root = roots.find((r) => real === r || real.startsWith(`${r}${path.sep}`));
   if (!root) throw new Skipped("TRANSCRIPT_OUTSIDE_ROOTS");
-  let stat;
+  let fd;
   try {
-    stat = fs.statSync(real);
-  } catch {
-    throw new Blocked("TRANSCRIPT_UNREADABLE", "transcript could not be stat'd");
+    fd = fs.openSync(real, fs.constants.O_RDONLY | O_NOFOLLOW);
+  } catch (error) {
+    if (error && error.code === "ENOENT") throw new Skipped("TRANSCRIPT_MISSING");
+    throw new Blocked("TRANSCRIPT_UNREADABLE", "transcript could not be opened");
   }
-  if (!stat.isFile()) throw new Blocked("TRANSCRIPT_NOT_REGULAR", "transcript is not a regular file");
-  if (stat.size > maxBytes) throw new Blocked("TRANSCRIPT_TOO_LARGE", "transcript exceeds the byte limit");
   try {
-    const content = fs.readFileSync(real);
+    const before = fs.fstatSync(fd);
+    if (!before.isFile()) throw new Blocked("TRANSCRIPT_NOT_REGULAR", "transcript is not a regular file");
+    if (before.size > maxBytes) throw new Blocked("TRANSCRIPT_TOO_LARGE", "transcript exceeds the byte limit");
+    const content = fs.readFileSync(fd);
     if (content.length > maxBytes) throw new Blocked("TRANSCRIPT_TOO_LARGE", "transcript exceeds the byte limit");
-    return { content, ref: path.relative(root, real).split(path.sep).join("/") };
+    const after = fs.fstatSync(fd);
+    let current;
+    try {
+      current = { real: fs.realpathSync(transcriptPath), stat: fs.statSync(real) };
+    } catch {
+      throw new Blocked("TRANSCRIPT_CHANGED_DURING_READ", "transcript path changed while it was read");
+    }
+    if (
+      after.size !== content.length ||
+      current.real !== real ||
+      current.stat.ino !== before.ino ||
+      current.stat.dev !== before.dev
+    ) {
+      throw new Blocked("TRANSCRIPT_CHANGED_DURING_READ", "transcript changed while it was read");
+    }
+    return {
+      content,
+      ref: path.relative(root, real).split(path.sep).join("/"),
+      stamp: { size: after.size, mtimeMs: after.mtimeMs, ino: after.ino },
+    };
   } catch (error) {
     if (error instanceof Blocked) throw error;
     throw new Blocked("TRANSCRIPT_UNREADABLE", "transcript could not be read");
+  } finally {
+    fs.closeSync(fd);
   }
 }
 
@@ -244,7 +288,8 @@ export function ingestRuntimeSessions(options = {}) {
     report.telemetry_lines_read += 1;
 
     const block = (reason, detail) => {
-      report.blocked.push({ telemetry_offset: lineStart, reason, ...(detail ? { detail } : {}) });
+      // Details can echo transcript-derived text (Ferry warnings), so they are scrubbed too.
+      report.blocked.push({ telemetry_offset: lineStart, reason, ...(detail ? { detail: scrubResidueText(detail) } : {}) });
       if (heldAt === null) heldAt = lineStart;
     };
     const skip = (reason) => report.skipped.push({ telemetry_offset: lineStart, reason });
@@ -273,16 +318,26 @@ export function ingestRuntimeSessions(options = {}) {
 
     const key = `${harness}\u0000${transcriptPath}`;
     let outcome = transcriptOutcomes.get(key);
+    // A second reference to a transcript that has since grown (or been replaced)
+    // must not be answered from the first snapshot.
+    if (outcome && !sameFileStamp(outcome.stamp, transcriptPath)) outcome = undefined;
     if (!outcome) {
+      let stampOf;
       try {
-        const { content, ref } = readTranscript(transcriptPath, roots, limits.maxTranscriptBytes);
+        const { content, ref, stamp } = readTranscript(transcriptPath, roots, limits.maxTranscriptBytes);
+        stampOf = stamp;
         const parsed = readConversation(harness, content);
         if (parsed.sidechain) {
           outcome = { kind: "skip", reason: "SIDECHAIN_TRANSCRIPT" };
-        } else if (parsed.messages.length === 0) {
+        } else if (parsed.messages.length === 0 && !parsed.partialTail) {
           outcome = { kind: "skip", reason: "NO_CONVERSATION" };
         } else {
-          outcome = { kind: "ok", residues: buildSittingResidues(harness, parsed, ref, idleGapMs, now) };
+          outcome = {
+            kind: "ok",
+            residues: buildSittingResidues(harness, parsed, ref, idleGapMs, now),
+            // A write in progress: emit what is complete, but do not move past the line.
+            hold: parsed.partialTail,
+          };
         }
       } catch (error) {
         if (error instanceof Skipped) outcome = { kind: "skip", reason: error.reason };
@@ -292,6 +347,7 @@ export function ingestRuntimeSessions(options = {}) {
           outcome = { kind: "block", reason: "TRANSCRIPT_UNREADABLE", detail: "unexpected read failure" };
         }
       }
+      outcome.stamp = stampOf;
       transcriptOutcomes.set(key, outcome);
       if (outcome.kind === "ok") {
         for (const residue of outcome.residues) {
@@ -305,6 +361,7 @@ export function ingestRuntimeSessions(options = {}) {
         }
       }
     }
+    if (outcome.kind === "ok" && outcome.hold) block("TRANSCRIPT_PARTIAL_TAIL", "transcript ends in an unterminated line");
     if (outcome.kind === "skip") skip(outcome.reason);
     if (outcome.kind === "block") block(outcome.reason, outcome.detail);
   }
