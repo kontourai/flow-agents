@@ -539,7 +539,7 @@ export class DefaultKnowledgeStore {
     for (const l of links) {
       const target = this._readRecord(l.target_id);
       if (!target) throw notFoundError(l.target_id);
-      if (l.kind === "source") assertLegacyNotPurged(target);
+      assertLegacyNotPurged(target);
     }
 
     const now = this._now();

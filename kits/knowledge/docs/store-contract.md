@@ -1961,8 +1961,12 @@ writer does not participate in Corpus transactions; a boolean declaration is
 not proof that other processes have stopped. Do not mix modes on a live root.
 As an additional fail-closed guard, the legacy vault adapter refuses to open a
 root containing Corpus's `path-index.json`; the legacy default adapter refuses
-to mutate tombstones or introduce new `source` support for them. These checks
+to mutate tombstones, add links to them via `link`, or introduce new `source`
+support for them. These checks
 do not stop older processes that were already running.
+Opening the legacy default adapter can initialize `cache-version.json`, and
+its `reindex` can rewrite the graph index. Refusing tombstone mutation does not
+make a legacy open or reindex a coordinated Corpus operation.
 Compatibility changes and the vault migration are described by Corpus's store
 contract; Corpus mode is not a byte-for-byte replacement for all legacy inputs.
 For example, it refuses a compiled record without a `source` link to an existing

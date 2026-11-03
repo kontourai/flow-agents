@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,4 +54,43 @@ test("the installed public provider entry reads a vault without optional Surface
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("standalone Knowledge projection accepts ordinary erasure-capable Surface and rejects older Surface", () => {
+  const root = mkdtempSync(join(tmpdir(), "knowledge-surface-fallback-"));
+  try {
+    const installed = join(root, "kit");
+    cpSync(kitRoot, installed, { recursive: true });
+    const adapter = join(installed, "providers/surface-adapter/index.js");
+    const scope = join(root, "node_modules/@kontourai");
+    mkdirSync(scope, { recursive: true });
+    const publicName = join(scope, "surface");
+    const packageRoot = (specifier) => resolve(fileURLToPath(import.meta.resolve(specifier)), "../../..");
+    const run = (expectSuccess) => {
+      const program = `
+        import { pathToFileURL } from "node:url";
+        const { buildKnowledgeTrustBundle } = await import(pathToFileURL(process.argv[1]));
+        const at = "2026-11-02T12:00:00.000Z";
+        const store = { readGraph: async () => ({ nodes: [{ id: "erased", type: "note", title: "[purged]",
+          attributes: { record_type: "raw", category: "purged", status: "purged", created_at: at, updated_at: at,
+            mutation_log: [{ op: "purged", at, agent: "owner", rationale: "request" }] },
+          provenance: { source: "knowledge:erased", retrieved_at: at } }], edges: [] }) };
+        try {
+          const bundle = await buildKnowledgeTrustBundle({ store });
+          if (!${expectSuccess} || bundle.claims[0]?.metadata?.surfaceRetention?.state !== "deleted") process.exit(2);
+        } catch (error) {
+          if (${expectSuccess} || !/requires @kontourai\\/surface 6\\.3\\.0/.test(error.message)) throw error;
+        }
+      `;
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
+      return spawnSync(process.execPath, ["--input-type=module", "-e", program, adapter], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    };
+    symlinkSync(packageRoot("@kontourai/surface-knowledge"), publicName, "junction");
+    let result = run(true);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    rmSync(publicName);
+    symlinkSync(packageRoot("@kontourai/surface"), publicName, "junction");
+    result = run(false);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

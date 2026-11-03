@@ -21,9 +21,10 @@ loaded without Surface or Neo4j packages. The providers remain readers and
 proposal producers; importing them does not approve or apply a change.
 
 `buildKnowledgeTrustBundle` loads the `@kontourai/surface-knowledge` npm alias
-of `@kontourai/surface` 6.3.0 only when explicitly called. A consuming Node
-project that uses that projection must supply that alias (the Flow Agents
-package manifest pins it). If it is unavailable, the projection rejects; it
+of `@kontourai/surface` 6.3.0 only when explicitly called. If the alias is absent,
+a standalone Kit can use an erasure-capable `@kontourai/surface` installed under
+its ordinary name. Older packages that lack the deletion API are refused. The
+Flow Agents package manifest pins the alias. If neither is available, the projection rejects; it
 does not produce a placeholder bundle or block unrelated vault reads. Neo4j
 likewise needs its driver and service only when that provider is selected.
 
