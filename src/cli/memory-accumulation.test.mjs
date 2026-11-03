@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { memoryAccumulationClaims, memoryAccumulationFact, memoryAccumulationQuery, memoryClaimToAccumulationClaim } from "@kontourai/flow-agents/memory-accumulation";
+import { memoryAccumulationClaims, memoryAccumulationFact, memoryAccumulationQuery, memoryClaimToAccumulationClaim, readMemoryAccumulationFact } from "@kontourai/flow-agents/memory-accumulation";
 import { memoryClaim, MemoryClaimError } from "@kontourai/flow-agents/memory-claims";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
@@ -9,6 +9,7 @@ import { distillFixtureSitting, readJson } from "./memory-claims-support.mjs";
 
 const QUERY = { slot: { subjectType: "service", subjectId: "widget service", fieldOrBehavior: "primary database", claimType: "knowledge.memory-claim" }, now: "2026-11-02T00:00:00Z", valuePolicy: "single-json-v1" };
 const readFact = result => memoryAccumulationFact(result, QUERY);
+const readReadFact = fact => readMemoryAccumulationFact(fact);
 const fixture = () => readJson(import.meta.dirname, "fixtures", "memory-claims", "accumulation.json");
 async function claims() {
   const earlier = await distillFixtureSitting(0);
@@ -337,7 +338,7 @@ test("the verifier checks a claim against the claim an identity mapping joins to
   assert.equal(quiet.length, 0);
 });
 
-test("a projection result is bound to the query it answered: another slot's answer is refused", () => {
+test("a projection result is read together with its query, and a query for another slot than the claim's is refused", () => {
   const { a, b, query, fact } = identityCase("differentValues");
   const other = memoryClaim({ ...a, property: "founded", value: "1999" });
   assert.throws(() => routeWith(other, [b], { accumulation: fact, accumulationQuery: query }), /another slot/, "a result for headquarters cannot answer for founded");
@@ -383,4 +384,114 @@ test("a claim type is compared exactly, as Surface does: fact and FACT are two s
   const decision = routeWith(a, [upper, b], {});
   assert.deepEqual(decision.input.current, [], "neither a differently typed claim nor a differently subjected one is in the slot without the projection");
   assert.equal(decision.reasons.some(reason => reason.rule === "visibility-widening"), false);
+});
+
+// --- review round 8 -------------------------------------------------------------------------------------------------------
+
+test("the query's slot is compared as Surface compares slots: spelling of the field and an empty qualifier set do not make another slot", () => {
+  const { a, b, query, fact } = identityCase("equalValues");
+  const respelled = { ...query, slot: { ...query.slot, fieldOrBehavior: "HEADQUARTERS", qualifiers: {} } };
+  const decision = routeWith(a, [b], { accumulation: fact, accumulationQuery: respelled });
+  assert.equal(decision.input.accumulation.outcome, "current");
+  assert.equal(recomputeMemoryRouting(decision).ok, true);
+  // The claim type is the exception: Surface compares it exactly.
+  assert.throws(() => routeWith(a, [b], { accumulation: fact, accumulationQuery: { ...query, slot: { ...query.slot, claimType: "FACT" } } }), /another slot/);
+  assert.throws(() => routeWith(a, [b], { accumulation: fact, accumulationQuery: { ...query, slot: { ...query.slot, subjectId: "other" } } }), /another slot/);
+});
+
+test("every claim a projection names must be a stated claim of the property, including one in the claim's own raw slot", () => {
+  const { a, query, fact } = identityCase("equalValues");
+  const samesSlot = posture => memoryClaim({ ...a, posture, value: "Hamburg", source: { ...a.source, ref: `elsewhere-${posture}` }, supersedes: undefined });
+  for (const posture of ["hypothetical", "proposed", "retracted"]) {
+    const peer = samesSlot(posture);
+    const forged = { ...fact, supportingClaimIds: [a.id, peer.id].sort() };
+    assert.throws(() => routeWith(a, [peer], { accumulation: forged, accumulationQuery: query }), /not a stated claim/, `${posture}, named as support`);
+    assert.throws(() => memorySlotPeers(a, [peer], memoryAccumulationFact(forged, query)), MemoryClaimError, `${posture}, directly`);
+    // Unnamed, the same claim is simply a (conservative) peer in the raw slot, as before.
+    assert.deepEqual(routeWith(a, [peer], {}).input.current.map(c => c.id), [peer.id], `${posture}, unnamed`);
+  }
+  // A stored decision cannot add one and recompute.
+  const ok = routeWith(a, [identityCase("equalValues").b], { accumulation: fact, accumulationQuery: query });
+  const peer = samesSlot("hypothetical");
+  const stored = JSON.parse(JSON.stringify(ok));
+  stored.input.current.push(JSON.parse(JSON.stringify(peer))); stored.input.current.sort((x, y) => x.id.localeCompare(y.id));
+  stored.input.baselines = [stored.input.baselines[0], ...stored.input.current.map(other => ({ ref: other.id, visibility: other.visibility ?? null }))];
+  stored.input.accumulation.supportingClaimIds = [...stored.input.accumulation.supportingClaimIds, peer.id].sort();
+  stored.id = `sha256:${createHash("sha256").update(canonicalJson({ input: stored.input, policy: stored.policy })).digest("hex")}`;
+  const check = recomputeMemoryRouting(stored);
+  assert.equal(check.ok, false);
+  assert.match(check.mismatches.join("\n"), /not a stated claim/);
+});
+
+test("a projection result, its query and its lists are plain data: a Proxy is refused wherever it is", () => {
+  const { a, query, fact } = identityCase("differentValues");
+  const result = { outcome: "contested", candidateClaimIds: [...fact.candidateClaimIds], supportingClaimIds: [], gapCodes: ["contested-value"] };
+  assert.doesNotThrow(() => memoryAccumulationFact(result, query));
+  const lies = new Proxy(result, { getOwnPropertyDescriptor: (target, key) => key === "outcome" ? { value: "current", enumerable: true, configurable: true, writable: true } : Reflect.getOwnPropertyDescriptor(target, key) });
+  assert.throws(() => memoryAccumulationFact(lies, query), MemoryClaimError, "a result whose descriptor trap turns a contest into current");
+  assert.throws(() => memoryAccumulationFact(new Proxy(result, {}), query), MemoryClaimError, "a pass-through result Proxy");
+  assert.throws(() => memoryAccumulationFact({ ...result, candidateClaimIds: new Proxy([...result.candidateClaimIds], {}) }, query), MemoryClaimError, "a Proxy list");
+  assert.throws(() => memoryAccumulationFact(result, new Proxy(query, {})), MemoryClaimError, "a Proxy query");
+  assert.throws(() => memoryAccumulationFact(result, { ...query, slot: new Proxy(query.slot, {}) }), MemoryClaimError, "a Proxy slot");
+  assert.throws(() => routeWith(a, [], { accumulation: lies, accumulationQuery: query }), MemoryClaimError, "and routing refuses it, rather than omitting the contest");
+});
+
+test("the mapper copies the claim once: a source that answers differently the second time is refused, and a Proxy claim is refused", async () => {
+  const { c0 } = await claims();
+  const a = c0[0];
+  let reads = 0;
+  const flipping = { ...a };
+  Object.defineProperty(flipping, "source", { enumerable: true, get() { reads++; return reads % 2 ? a.source : { ...a.source, observedAt: "2030-01-01T00:00:00Z" }; } });
+  assert.throws(() => memoryClaimToAccumulationClaim(flipping), MemoryClaimError);
+  assert.equal(reads, 0, "the getter never ran");
+  assert.throws(() => memoryClaimToAccumulationClaim(new Proxy(a, {})), MemoryClaimError);
+  assert.throws(() => memoryAccumulationClaims([new Proxy(a, {})]), MemoryClaimError);
+  assert.throws(() => memoryAccumulationClaims(new Proxy([a], {})), MemoryClaimError);
+  const mapped = memoryClaimToAccumulationClaim(a);
+  assert.equal(mapped.metadata.memory.source.observedAt, a.source.observedAt, "the source in the mapped claim is the one its createdAt came from");
+  assert.equal(new Date(mapped.createdAt).toISOString(), new Date(a.source.observedAt).toISOString());
+});
+
+test("the fact reader and the query reader refuse what is not a projection result or a query", () => {
+  const ok = { outcome: "current", candidateClaimIds: [], supportingClaimIds: ["b", "a", "b"], gapCodes: [] };
+  assert.deepEqual(readFact(ok).supportingClaimIds, ["a", "b"], "support is sorted and de-duplicated, like candidates");
+  const { supportingClaimIds, ...without } = ok;
+  assert.throws(() => readFact(without), MemoryClaimError, "a result without supportingClaimIds is not one Surface produced");
+  for (const bad of [null, undefined, "x", 7]) assert.throws(() => readReadFact(bad), MemoryClaimError, `a stored fact that is ${bad}`);
+  const storedUnsorted = { ...readFact(ok), supportingClaimIds: ["b", "a"] };
+  assert.notDeepEqual(readReadFact(storedUnsorted), storedUnsorted, "reading puts a stored fact in canonical form; the caller compares to detect an edit");
+  for (const slot of ["x", null, 7, { ...QUERY.slot, qualifiers: ["a"] }, { ...QUERY.slot, qualifiers: { env: 1 } }, { ...QUERY.slot, qualifiers: null }, { ...QUERY.slot, subjectId: "" }, Object.defineProperty({ ...QUERY.slot }, "subjectId", { enumerable: true, get: () => "x" })]) {
+    assert.throws(() => memoryAccumulationFact(ok, { slot, valuePolicy: "single-json-v1" }), MemoryClaimError, JSON.stringify(slot));
+  }
+  assert.deepEqual(memoryAccumulationFact(ok, { slot: { ...QUERY.slot, qualifiers: { env: "prod" } }, valuePolicy: "single-json-v1" }).slot.qualifiers, { env: "prod" });
+});
+
+test("a claim passed as current is checked as a claim: an edited one is refused at the door and in a stored decision", () => {
+  const { a, b, query, fact } = identityCase("differentValues");
+  const edited = { ...b, value: "Cologne" };
+  assert.throws(() => routeWith(a, [edited], { accumulation: fact, accumulationQuery: query }), MemoryClaimError, "its id no longer matches its content");
+  assert.throws(() => routeWith(a, [{ ...edited, id: "sha256:" + "0".repeat(64) }], {}), MemoryClaimError);
+  const ok = routeWith(a, [b], { accumulation: fact, accumulationQuery: query });
+  const stored = JSON.parse(JSON.stringify(ok));
+  stored.input.current[0].value = "Cologne";
+  stored.id = `sha256:${createHash("sha256").update(canonicalJson({ input: stored.input, policy: stored.policy })).digest("hex")}`;
+  assert.equal(recomputeMemoryRouting(stored).ok, false);
+});
+
+test("a named member's claim type is compared exactly: fact and FACT are not the same property of a slot", () => {
+  const { a, b, query, fact } = identityCase("differentValues");
+  const upper = memoryClaim({ ...b, claimType: "FACT", supersedes: undefined });
+  const forged = { ...fact, candidateClaimIds: [a.id, upper.id].sort() };
+  assert.throws(() => routeWith(a, [upper], { accumulation: forged, accumulationQuery: query }), /not a stated claim of this claim type/);
+});
+
+test("the verifier reads its claims as plain data: a Proxy claim or list is refused and the verifier is never called", async () => {
+  const { a, b, fact } = identityCase("differentValues");
+  const calls = [];
+  await assert.rejects(verifyMemoryClaimAgainstCurrent(new Proxy(a, {}), [b], stubVerifier(calls), undefined, fact), MemoryClaimError);
+  await assert.rejects(verifyMemoryClaimAgainstCurrent(a, new Proxy([b], {}), stubVerifier(calls), undefined, fact), MemoryClaimError);
+  await assert.rejects(verifyMemoryClaimAgainstCurrent(a, [new Proxy(b, {})], stubVerifier(calls), undefined, fact), MemoryClaimError);
+  assert.equal(calls.length, 0);
+  assert.equal((await verifyMemoryClaimAgainstCurrent(a, [b], stubVerifier(calls), undefined, fact))?.result, "contradicted");
+  assert.equal(calls.length, 1);
 });

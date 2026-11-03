@@ -17,7 +17,7 @@ import path from "node:path";
 import { attachEvidence, loadRun, type FlowEvidenceEntry } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
 import { MemoryClaimError } from "./memory-claims.js";
-import { jsonSnapshotList } from "./memory-json.js";
+import { jsonSnapshot, jsonSnapshotList, ownEntries, ownField } from "./memory-json.js";
 import type { ReviewDecision, ReviewItem, ReviewSessionEvent } from "@kontourai/survey";
 import {
   MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
@@ -45,6 +45,22 @@ export interface MemoryReviewRecord {
 }
 
 interface Location { runId: string; gate: string; cwd?: string }
+
+/**
+ * The run, gate and directory of a request, each read once with nothing the caller defined running (a Proxy or a getter
+ * is refused). Every public entry point reads its request through this and `ownField`, then works on what it read, so a
+ * request that answers differently the second time cannot pass a check and then record something else.
+ */
+function locationOf(input: unknown): Location {
+  const text = (key: string, required: boolean): string | undefined => {
+    const value = ownField(input, key, `memory routing request ${key}`);
+    if (value === undefined && !required) return undefined;
+    if (typeof value !== "string" || !value.trim()) throw new MemoryClaimError("invalid", `a memory routing request needs a ${key}`);
+    return value;
+  };
+  const cwd = text("cwd", false);
+  return { runId: text("runId", true)!, gate: text("gate", true)!, ...(cwd !== undefined ? { cwd } : {}) };
+}
 
 // Flow's run lock is not re-entrant, so check-then-attach cannot run inside it. Within one process the two steps are
 // serialised here, which makes them exact. Across processes a lost race can leave a duplicate of an identical routing
@@ -99,7 +115,8 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
  * batch again returns the entry already there, so a retry after a lost reply
  * does not double-record.
  */
-export async function recordMemoryRoutingEvidence(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+export async function recordMemoryRoutingEvidence(request: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+  const input = { ...locationOf(request), decisions: jsonSnapshotList(ownField(request, "decisions", "memory routing request decisions"), "routing decisions") as unknown as MemoryRoutingDecision[] };
   return (await serialized(input, async () => {
     const recorded = await recordRouting(input);
     // Metrics are derived from what is recorded, so recording refreshes them in the same unit. It does so even when the
@@ -127,7 +144,8 @@ async function recordRouting(input: Location & { decisions: readonly MemoryRouti
  * entry so the latest figures are the live ones and earlier figures stay in the
  * manifest. Identical metrics are not attached twice.
  */
-export function recordMemoryMetricsEvidence(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
+export async function recordMemoryMetricsEvidence(request: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
+  const input = { ...locationOf(request), metrics: jsonSnapshot(ownField(request, "metrics", "memory routing request metrics"), "run metrics") as MemoryRunMetrics };
   return serialized(input, () => recordMetrics(input));
 }
 async function recordMetrics(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
@@ -212,16 +230,21 @@ export interface MemoryRoutingRun {
  * and event handed in so far. Review state passed in is recorded first, so a later call that passes none (an identical
  * retry, or a new batch) still counts the review already recorded instead of overwriting it with a run that has none.
  */
-export async function runMemoryRouting(input: Location & {
+export async function runMemoryRouting(request: Location & {
   changes: readonly MemoryChange[];
   policy?: Partial<MemoryRoutingPolicy>;
   queue?: MemoryReviewQueue;
   reviewDecisions?: readonly ReviewDecision[];
   reviewEvents?: readonly ReviewSessionEvent[];
 }): Promise<MemoryRoutingRun> {
-  const decisions = routeMemoryChanges(input.changes, input.policy);
+  const where = locationOf(request);
+  const changes = ownEntries(ownField(request, "changes", "memory routing request changes"), "memory routing request changes") as MemoryChange[];
+  const policyInput = ownField(request, "policy", "memory routing request policy");
+  const queue = ownField(request, "queue", "memory routing request queue") as MemoryReviewQueue | undefined;
+  const input = { ...where, changes, queue };
+  const decisions = routeMemoryChanges(changes, policyInput === undefined ? undefined : jsonSnapshot(policyInput, "routing policy") as Partial<MemoryRoutingPolicy>);
   // Review input is validated before the first write: a bad one must not leave routing recorded behind a refusal.
-  const review = prepareReview(input);
+  const review = prepareReview(request);
   const { routing, metrics } = await serialized(input, async () => {
     const recorded = await recordRouting({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
     return { routing: recorded.entry, metrics: await refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }) };
@@ -247,9 +270,10 @@ type ReviewInput = { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?:
  * value that changes between reads cannot pass validation and then poison the evidence.
  */
 function prepareReview(input: ReviewInput): PreparedReview {
-  // The whole list is snapshotted by index: a caller-supplied `.map` or a hole in the list cannot change what is recorded.
-  const decisions = jsonSnapshotList(input.reviewDecisions, "review input") as ReviewDecision[];
-  const events = jsonSnapshotList(input.reviewEvents, "review input") as ReviewSessionEvent[];
+  // The request's own fields are read first without running anything it defines, then each whole list is snapshotted by
+  // index: a Proxy request, a getter, a caller-supplied `.map` or a hole cannot change what is recorded.
+  const decisions = jsonSnapshotList(ownField(input, "reviewDecisions", "review input"), "review input") as ReviewDecision[];
+  const events = jsonSnapshotList(ownField(input, "reviewEvents", "review input"), "review input") as ReviewSessionEvent[];
   decisions.forEach(assertReviewDecision);
   events.forEach(assertReviewEvent);
   return { decisions, events };
@@ -315,7 +339,8 @@ async function refreshMetrics(input: Location & { review?: PreparedReview }): Pr
  * describing fewer decisions than are recorded. Call it as reviewers decide, passing what is new (or everything: what
  * is already recorded is not recorded twice).
  */
-export async function refreshMemoryRunMetrics(input: Location & ReviewInput): Promise<FlowEvidenceEntry> {
-  const review = prepareReview(input); // before anything is written, and before waiting for the run
+export async function refreshMemoryRunMetrics(request: Location & ReviewInput): Promise<FlowEvidenceEntry> {
+  const input = locationOf(request);
+  const review = prepareReview(request); // before anything is written, and before waiting for the run
   return serialized(input, () => refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }));
 }

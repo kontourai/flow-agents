@@ -101,3 +101,8 @@ export function jsonSnapshotList(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new MemoryClaimError("invalid", `${label}: expected a list`);
   return jsonSnapshot(value, label) as unknown[];
 }
+
+/** A list of independent items, each copied on its own (so the size bound is per item, not per list), read by index. */
+export function jsonSnapshotEach(value: unknown, label: string): unknown[] {
+  return ownEntries(value, label).map((item, index) => jsonSnapshot(item, `${label}[${index}]`));
+}

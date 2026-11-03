@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { jsonSnapshot, jsonSnapshotList, ownEntries, ownField, MAX_SNAPSHOT_DEPTH, MAX_SNAPSHOT_NODES } from "@kontourai/flow-agents/memory-json";
+import { jsonSnapshot, jsonSnapshotEach, jsonSnapshotList, ownEntries, ownField, MAX_SNAPSHOT_DEPTH, MAX_SNAPSHOT_NODES } from "@kontourai/flow-agents/memory-json";
 import { MemoryClaimError } from "@kontourai/flow-agents/memory-claims";
 
 const refuses = (value, pattern, name) => assert.throws(() => jsonSnapshot(value, "t"), error => error instanceof MemoryClaimError && pattern.test(error.message), name);
@@ -113,4 +113,17 @@ test("ownField and ownEntries run nothing the caller defined: a getter, a Proxy 
 test("null is not an empty list: only an absent list is", () => {
   assert.deepEqual(jsonSnapshotList(undefined, "t"), []);
   assert.throws(() => jsonSnapshotList(null, "t"), /expected a list/);
+});
+
+test("ownEntries refuses an array subclass, a symbol key and a list over the bound; jsonSnapshotEach bounds each item, not the list", () => {
+  class Sub extends Array {}
+  assert.throws(() => ownEntries(Sub.from([1]), "t"), /plain list/, "a subclass");
+  const symbolic = [1]; symbolic[Symbol("k")] = 2;
+  assert.throws(() => ownEntries(symbolic, "t"), /extra keys, symbols or holes/, "a symbol key");
+  assert.throws(() => ownEntries(new Array(MAX_SNAPSHOT_NODES + 1).fill(0), "t"), /too long/, "over the bound is refused, not cut short");
+  assert.equal(ownEntries(new Array(MAX_SNAPSHOT_NODES).fill(0), "t").length, MAX_SNAPSHOT_NODES, "at the bound is read");
+  const wide = Array.from({ length: 3 }, (_, i) => ({ k: new Array(MAX_SNAPSHOT_NODES - 10).fill(i) }));
+  assert.equal(jsonSnapshotEach(wide, "t").length, 3, "each item is under the bound although the list is not");
+  assert.throws(() => jsonSnapshotList(wide, "t"), /too large/, "the whole list is not");
+  assert.throws(() => jsonSnapshotEach([{ a: 1 }, new Proxy({}, {})], "t"), /Proxy/);
 });

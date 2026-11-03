@@ -489,3 +489,36 @@ test("null is not an empty review list, and review events are snapshotted like d
   await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: [hostile] }), /__proto__/);
   assert.equal((await reviewEvidence(cwd)).length, 0);
 });
+
+// --- review round 8: the request itself is read without running anything the caller defined -------------------------------------
+
+test("a request that is a Proxy, has a getter, or lists its changes through an overridden map is refused before anything is recorded", async t => {
+  const cwd = await workspace(t);
+  const first = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const review = rejection(first.items[0], 10);
+  const hide = new Proxy({ ...where(cwd), ...review }, { get: (target, key) => key === "reviewDecisions" ? [] : target[key] });
+  await assert.rejects(refreshMemoryRunMetrics(hide), /Proxy/, "a request Proxy that answers [] for the supplied rejection");
+  await assert.rejects(runMemoryRouting(hide), /Proxy/);
+  const getter = { ...where(cwd), reviewEvents: review.reviewEvents };
+  Object.defineProperty(getter, "reviewDecisions", { enumerable: true, get: () => [] });
+  await assert.rejects(refreshMemoryRunMetrics(getter), /accessor/, "a getter on the request");
+  const changes = [...CHANGES()]; changes.map = () => [];
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes }), /extra keys/, "an own map on the changes list");
+  await assert.rejects(recordMemoryRoutingEvidence({ ...where(cwd), decisions: new Proxy(runOf().decisions, {}) }), /Proxy/);
+  await assert.rejects(recordMemoryMetricsEvidence({ ...where(cwd), metrics: new Proxy(runOf().metrics, {}) }), /Proxy/);
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).decisions.length, 0, "no refused request left a review decision behind");
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.reviewer.decisions, 0);
+  // The honest request still works and counts the rejection.
+  await refreshMemoryRunMetrics({ ...where(cwd), ...review });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.reviewer.rejected, 1);
+});
+
+test("decisions are copied once: a decision that answers differently the second time is refused, not recorded as the checked one", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  let reads = 0;
+  const shifty = { ...decisions[0] };
+  Object.defineProperty(shifty, "changeId", { enumerable: true, get: () => (++reads === 1 ? decisions[0].changeId : "someone else") });
+  await assert.rejects(recordMemoryRoutingEvidence({ ...where(cwd), decisions: [shifty, decisions[1]] }), /accessor/);
+  assert.deepEqual(await readMemoryRoutingDecisions("run-1", cwd), []);
+});
