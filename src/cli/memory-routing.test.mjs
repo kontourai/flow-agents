@@ -249,7 +249,14 @@ test("an entity change takes Survey's EntityProposal by structure and refuses an
   assert.deepEqual(decision.input.operations, ["merge", "same-as"]);
   assert.deepEqual(decision.input.subjects, ["person:m. chen", "person:maya c.", "person:maya chen"]);
   assert.deepEqual(routeMemoryChange({ type: "entity", proposal: merge }).input.operations, ["merge"]);
-  for (const bad of [null, {}, { id: "x" }, { id: "x", spec: { alternatives: [] } }, { id: "", spec: { alternatives: [{ operation: "merge", subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ operation: "merge", subjects: [] }] } }]) {
+  for (const operation of ["same-as", "related-to", "domain:billing"]) {
+    assert.deepEqual(routeMemoryChange({ type: "entity", proposal: { id: merge.id, spec: { alternatives: [{ operation, subjects: merge.spec.alternatives[0].subjects }] } } }).input.operations, [operation]);
+  }
+  for (const bad of [null, {}, { id: "x" }, { id: "x", spec: { alternatives: [] } }, { id: "", spec: { alternatives: [{ operation: "merge", subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ operation: "merge", subjects: [] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "erase", subjects: [{}] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "merge", subjects: [{}] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "merge", subjects: [{ subjectType: "person", subjectId: " " }] }] } },
+    { id: merge.id, spec: { alternatives: [{ operation: "domain:", subjects: [{ subjectType: "person", subjectId: "a" }] }] } }]) {
     assert.throws(() => routeMemoryChange({ type: "entity", proposal: bad }), /entity/, JSON.stringify(bad));
   }
 });

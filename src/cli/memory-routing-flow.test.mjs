@@ -7,7 +7,7 @@ import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
 import { deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import {
   MEMORY_METRICS_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence,
-  readLatestMemoryMetrics, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
+  readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from "@kontourai/flow-agents/memory-routing-flow";
 import { attachEvidence } from "@kontourai/flow";
 import { buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
@@ -226,6 +226,19 @@ test("retrying a run that already completed review does not erase the review fig
   await runMemoryRouting({ ...where(cwd), changes: MORE(), ...review });
   const withMore = (await readLatestMemoryMetrics("run-1", cwd)).value;
   assert.deepEqual([withMore.decisions, withMore.reviewer.rejected, withMore.reviewSeconds], [4, 1, 10]);
+});
+
+test("review state is recorded once: passing what is already recorded adds no evidence", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const review = rejection(run.items[0], 5);
+  const count = async () => (await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === "memory.review-record").length;
+  await refreshMemoryRunMetrics({ ...where(cwd), ...review });
+  await refreshMemoryRunMetrics({ ...where(cwd), ...review });
+  await runMemoryRouting({ ...where(cwd), changes: CHANGES(), ...review });
+  assert.equal(await count(), 1);
+  assert.deepEqual((await readMemoryReviewRecords("run-1", cwd)).decisions.length, review.reviewDecisions.length);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [{ kind: "Something" }] }), /not a Survey ReviewDecision/);
 });
 
 test("refreshing metrics uses the review state it is given", async t => {
