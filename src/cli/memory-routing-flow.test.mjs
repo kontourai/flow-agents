@@ -825,6 +825,12 @@ test("a recovery that already happened is replayable: the same request returns t
   assert.equal(again.id, first.id);
   assert.equal(await attachedCount(cwd), count, "the lost-reply retry attached nothing");
   await assert.rejects(supersedeMemoryRoutingEvidence({ ...request, decisions: [decisions[0]] }), /not live routing records/, "a different request naming records that are no longer live is still refused");
+  // A replay reports on the state as it is now: if a record has gone bad since, it is refused rather than reported as done.
+  await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [{ ...decisions[1], outcome: "proposed", reasons: [] }] }, "later-bad.json");
+  await assert.rejects(supersedeMemoryRoutingEvidence(request), /does not recompute/);
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [first.id, first.id], decisions: [] }), /name the live routing records/);
+  const batch = [decisions[2], decisions[2]];
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: ["x"], decisions: batch }), /names the same routing decision twice/);
 });
 
 test("recovery holds the history limit, and what recall reads after it is the corrected routing", async t => {
@@ -895,4 +901,14 @@ test("a routing decision count past the stored limit is refused by name: held de
   await recordMemoryRoutingEvidence({ ...where(cwd), decisions, maxHistoryEntries: 3 });
   await recordMemoryRoutingEvidence({ ...where(cwd), decisions: [decisions[0]], maxHistoryEntries: 3 });
   await assert.rejects(runMemoryRouting({ ...where(cwd), changes: MORE(), maxHistoryEntries: 3 }), /would hold 4 routing decisions, over its limit of 3/);
+});
+
+test("a recovery that changes what the run holds brings the live figures up to date in the same request", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  const first = await recordMemoryRoutingEvidence({ ...where(cwd), decisions: [decisions[0]] });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 1);
+  await supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [first.id], decisions: [decisions[1], decisions[2]] });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 2, "replaced one decision with two, and the figures say so now");
+  assert.deepEqual((await readMemoryRoutingDecisions("run-1", cwd)).map(d => d.id), [decisions[1].id, decisions[2].id]);
 });

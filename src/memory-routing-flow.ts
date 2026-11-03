@@ -214,7 +214,7 @@ export async function supersedeMemoryRoutingEvidence(request: Location & History
     const digest = sha256(bytesOf({ schema_version: MEMORY_ROUTING_VERSION, runId: where.runId, decisions }));
     const entries = await recordedEntries(where, MEMORY_ROUTING_EVIDENCE_KIND);
     const made = entries.find(entry => isLive(entry) && entry.sha256 === digest && supersedes.every(id => entries.some(other => other.id === id && other.superseded_by === entry.id)));
-    if (made) { await refreshMetrics(where); return { entry: made, created: false }; } // a lost-reply retry of a recovery that already happened
+    if (made) { await preflight(where, limit, {}); await refreshMetrics(where); return { entry: made, created: false }; } // a lost-reply retry of a recovery that already happened
     const live = new Set(entries.filter(isLive).map(entry => entry.id));
     const missing = supersedes.filter(id => !live.has(id));
     if (missing.length) throw new MemoryClaimError("invalid", `not live routing records of this run on gate ${where.gate}: ${missing.join(", ")}`);
@@ -240,7 +240,7 @@ export async function recordMemoryMetricsEvidence(request: Location & HistoryLim
     // recorded evidence derives are recorded; `refreshMemoryRunMetrics` is the way to bring them up to date.
     await preflight(input, limit, {});
     const review = await readReview(input.runId, input.cwd);
-    const derived = deriveMemoryRunMetrics({ runId: input.runId, decisions: await readDerivableDecisions(input.runId, input.cwd), reviewDecisions: review.decisions, reviewEvents: review.events });
+    const derived = deriveMemoryRunMetrics({ runId: input.runId, decisions: await readMemoryRoutingDecisions(input.runId, input.cwd), reviewDecisions: review.decisions, reviewEvents: review.events });
     if (canonicalJson(derived) === canonicalJson(input.metrics)) return recordMetrics(input);
     // A retry after a lost reply: these exact figures were recorded earlier and have since been superseded by newer review state.
     // The entry that holds them is the answer (nothing is written, so nothing stale becomes live); anything else is refused. One gate
@@ -320,15 +320,6 @@ function validateRoutingRecords(runId: string, records: readonly { value: Memory
     }
   }
   return ids;
-}
-
-/** The run's live routing decisions, for deriving figures from. */
-async function readDerivableDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
-  const live = (await readMemoryRoutingEvidence(runId, cwd)).filter(record => !record.superseded);
-  validateRoutingRecords(runId, live);
-  const seen = new Set<string>(), decisions: MemoryRoutingDecision[] = [];
-  for (const { value } of live) for (const decision of value.decisions) if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
-  return decisions;
 }
 
 /**
@@ -484,9 +475,10 @@ async function readReview(runId: string, cwd?: string): Promise<{ decisions: Rev
 export const readMemoryReviewRecords = (runId: string, cwd?: string) => readReview(runId, cwd);
 
 async function refreshMetrics(input: Location & { review?: PreparedReview }): Promise<FlowEvidenceEntry> {
-  // `preflight` has already checked the state this leaves, so the derivation below cannot fail for a reason decided there.
+  // `preflight` has already checked the state this leaves (every live routing record validated, review state valid, limits held),
+  // so the derivation below cannot fail for a reason decided there, and the reads below can trust what they read.
   if (input.review) await recordReview({ runId: input.runId, gate: input.gate, cwd: input.cwd, review: input.review });
-  const decisions = await readDerivableDecisions(input.runId, input.cwd);
+  const decisions = await readMemoryRoutingDecisions(input.runId, input.cwd);
   const review = await readReview(input.runId, input.cwd);
   const metrics = deriveMemoryRunMetrics({ runId: input.runId, decisions, reviewDecisions: review.decisions, reviewEvents: review.events });
   return recordMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, metrics });
