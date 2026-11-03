@@ -20,9 +20,9 @@ function required(value, label) {
  *
  * @param {{residue: {source: string, complete: boolean, sittingId: string, provenance: {sessionId: string, transcriptRef: string}}, candidates: {title: string, body: string, category: string}[], proposerId: string,
  *   store: CreateProposalStore, registerRoot: (name: string, root: string) => unknown, root: string,
- *   rootName?: string, write?: boolean}} options
+ *   rootName: string, write?: boolean}} options
  */
-export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName = 'memory', write = true }) {
+export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName, write = true }) {
   if (residue?.source !== 'runtime-session' || residue.complete !== true) throw new Error('store target requires a complete runtime-session residue');
   const sessionId = required(residue.provenance?.sessionId, 'sessionId');
   const transcriptRef = required(residue.provenance?.transcriptRef, 'transcriptRef');
@@ -42,7 +42,8 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
     category: required(item?.category, 'candidate category'),
     provenance: { agent: proposerId, session_id: sessionId, note: JSON.stringify(provenance) },
   }));
-  if (!write) return { root: rootName, posture: 'proposed', proposals: [], candidates: prepared };
+  if (!write) return { root: rootName, posture: 'preview', proposals: [], candidates: prepared };
+  if (prepared.length === 0) return { root: rootName, posture: 'noop', proposals: [] };
   await registerRoot(rootName, root);
   const proposals = [];
   for (const candidate of prepared) {

@@ -1,12 +1,12 @@
 {
   "source": "runtime-session",
   "sittingId": "codex:019a0000-0000-7000-8000-00000000c0de:0",
-  "contentHash": "sha256:8ee629cdca1c0cd9ebee0597e60120069c9315615b2a364e346d3d6a0aa66402",
+  "contentHash": "sha256:6bf5e2b09d6bba1ad9f6ab99c6e2861c7eb43e786643712452e20209f53a4382",
   "complete": true,
   "provenance": {
     "harness": "codex",
     "sessionId": "019a0000-0000-7000-8000-00000000c0de",
-    "transcriptRef": "rollout.jsonl",
+    "transcriptRef": "2026/10/31/rollout-2026-10-31T14-00-00-019a0000-0000-7000-8000-00000000c0de.jsonl",
     "cwd": "~/dev/ledger",
     "gitBranch": "fix/ledger-rounding",
     "startedAt": "2026-10-31T14:00:01.100Z",
@@ -20,7 +20,7 @@
     },
     {
       "role": "assistant",
-      "text": "Rounding happens per line item; I switched to banker's rounding on the total. Key __CANARY_AWS__ was in your shell history.",
+      "text": "Rounding happens per line item; I switched to banker's rounding on the total. Key <SECRET> was in your shell history.",
       "at": "2026-10-31T14:00:06.000Z"
     }
   ]

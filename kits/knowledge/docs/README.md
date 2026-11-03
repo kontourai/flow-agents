@@ -700,19 +700,26 @@ The explicit `runPromote({ target: "store", ... })` path accepts a complete
 `runtime-session` residue from #669 and already-distilled candidates with
 `title`, `body`, and `category`. The host supplies its authorized absolute
 `root`, a `registerRoot(name, root)` function, and a Corpus store constructed
-for that same root with host-owned locking and coordination. The default root
-name is `memory`; this path does not discover or authorize paths or edit an MCP
-registry itself. The host's registration implementation determines whether its
+for that same root with host-owned locking and coordination. The host supplies
+the root name explicitly. This path does not discover or authorize paths or
+edit an MCP registry itself. The host's registration implementation determines whether its
 MCP server lists the root.
 
 Each candidate is sent through `proposeCreate(candidate, proposerId, evidence)`.
 The candidate provenance note encodes the session ID, transcript reference,
-and sitting ID. This is a proposal request, not an approval or an applied
+and sitting ID pending the structured provenance contract in
+[Corpus #46](https://github.com/kontourai/corpus/issues/46). This is a proposal request, not an approval or an applied
 record; the Corpus #40 contract owns persistence, review, and exclusion from
-ordinary reads. Extraction, retries, and scheduling are not provided here. An
+ordinary reads. Extraction, retries, and scheduling are not provided here. Identical calls
+can create duplicate proposals until [Corpus #45](https://github.com/kontourai/corpus/issues/45)
+provides a durable idempotency key. The host must reconcile outcomes before
+retrying. The adapter/root binding is a host obligation pending
+[Corpus #47](https://github.com/kontourai/corpus/issues/47); the registry
+protocol remains subject to [#753](https://github.com/kontourai/flow-agents/issues/753). An
 error from `proposeCreate` is indeterminate: the error carries already returned
 proposal IDs and the failed candidate index so the caller can reconcile before
-any retry. `write: false` prepares candidates without registering or writing.
+any retry. `write: false` returns `preview` without registering or writing; an empty
+candidate list returns `noop`.
 The create-proposal API and its package release are upstream dependencies.
 
 Until the Corpus package is published, the packed-branch integration test is
@@ -720,5 +727,5 @@ opt-in: install the packed `@kontourai/corpus-store` in a scratch directory and
 set `CORPUS_STORE_ENTRY` to its absolute `dist/index.js` before running
 `node --test kits/knowledge/promote/store-target.corpus.test.js`. Without that
 variable the test reports skipped; it does not claim Corpus interoperability.
-Set `KNOWLEDGE_OPS_ROOT` to a checkout of the Ops host as well to exercise
+Set `KNOWLEDGE_HOST_ROOT` to a checkout of the host as well to exercise
 its registry and MCP server in an isolated temporary XDG home.

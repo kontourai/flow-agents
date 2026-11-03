@@ -16,7 +16,7 @@ test('Corpus stages an unreviewed proposal without a working-set record', { skip
   const root = path.join(base, 'memory');
   const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(base, 'coordination'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
   const roots = new Map();
-  const result = await runPromote({ target: 'store', residue, candidates: [{ title: 'Learning', body: 'Distilled fixture', category: 'memory.learning' }], proposerId: 'distiller', root, store, registerRoot: async (name, value) => roots.set(name, value) });
+  const result = await runPromote({ target: 'store', residue, candidates: [{ title: 'Learning', body: 'Distilled fixture', category: 'memory.learning' }], proposerId: 'distiller', root, rootName: 'memory', store, registerRoot: async (name, value) => roots.set(name, value) });
   const proposal = await store.getProposal(result.proposals[0]);
   assert.equal(proposal.state, 'pending');
   assert.equal(roots.get('memory'), root);
@@ -29,11 +29,11 @@ test('Corpus stages an unreviewed proposal without a working-set record', { skip
   assert.equal((await store.get(recordId)).body, 'Distilled fixture');
 });
 
-test('the host registry exposes the authorized root through the real MCP server', { skip: !process.env.CORPUS_STORE_ENTRY || !process.env.KNOWLEDGE_OPS_ROOT }, async (t) => {
+test('the host registry exposes the authorized root through the real MCP server', { skip: !process.env.CORPUS_STORE_ENTRY || !process.env.KNOWLEDGE_HOST_ROOT }, async (t) => {
   const { spawn } = await import('node:child_process');
   const { once } = await import('node:events');
-  const ops = process.env.KNOWLEDGE_OPS_ROOT;
-  const { scaffoldStore, registerRoot } = await import(pathToFileURL(path.join(ops, 'scripts/lib/store-resolve.mjs')).href);
+  const host = process.env.KNOWLEDGE_HOST_ROOT;
+  const { scaffoldStore, registerRoot } = await import(pathToFileURL(path.join(host, 'scripts/lib/store-resolve.mjs')).href);
   const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import(pathToFileURL(process.env.CORPUS_STORE_ENTRY).href);
   const residue = JSON.parse(fs.readFileSync(new URL('./fixtures/runtime-residue-669.json', import.meta.url), 'utf8'));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wi2-mcp-'));
@@ -43,11 +43,11 @@ test('the host registry exposes the authorized root through the real MCP server'
   const curated = scaffoldStore(path.join(tmp, 'curated'));
   const sentinel = path.join(curated, 'records', 'sentinel.txt');
   fs.writeFileSync(sentinel, 'curated unchanged');
-  registerRoot('ops', curated, env);
+  registerRoot('curated', curated, env);
   const curatedBefore = snapshotDir(curated);
   const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(tmp, 'coord'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
-  await runPromote({ target: 'store', residue, candidates: [{ title: 'Memory', body: 'Fixture', category: 'memory.learning' }], root, store, proposerId: 'fixture-agent', registerRoot: (name, value) => registerRoot(name, value, env) });
-  const child = spawn(process.execPath, [path.join(ops, 'scripts/knowledge-mcp/index.mjs')], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  await runPromote({ target: 'store', residue, candidates: [{ title: 'Memory', body: 'Fixture', category: 'memory.learning' }], root, rootName: 'memory', store, proposerId: 'fixture-agent', registerRoot: (name, value) => registerRoot(name, value, env) });
+  const child = spawn(process.execPath, [path.join(host, 'scripts/knowledge-mcp/index.mjs')], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = once(child, 'exit');
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -72,7 +72,7 @@ test('the host registry exposes the authorized root through the real MCP server'
     const roots = JSON.parse(message.result.content[0].text).roots;
     assert.equal(roots.find((entry) => entry.name === 'memory')?.path, root);
     assert.equal(roots.find((entry) => entry.name === 'memory')?.exists, true);
-    assert.equal(roots.find((entry) => entry.name === 'ops')?.path, curated);
+    assert.equal(roots.find((entry) => entry.name === 'curated')?.path, curated);
     assert.deepEqual(snapshotDir(curated), curatedBefore);
   } finally {
     child.stdin.end();
