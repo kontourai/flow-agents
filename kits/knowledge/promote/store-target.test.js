@@ -80,7 +80,8 @@ test('empty candidates are a no-op without registration', async () => {
 
 test('unknown targets and store output directories are refused before effects', async () => {
   const { calls, opts } = setup();
-  await assert.rejects(runPromote({ ...opts, target: 'unexpected' }), /unknown promote target/);
+  const fixture = fileURLToPath(new URL('./fixtures/', import.meta.url));
+  await assert.rejects(runPromote({ ...opts, target: 'unexpected', sessionDir: path.join(fixture, 'session'), repoRoot: path.join(fixture, 'repo'), write: false }), /unknown promote target/);
   await assert.rejects(runPromote({ ...opts, outDir: '/somewhere' }), /outDir.*repo-docs/);
   await assert.rejects(runPromote({ ...opts, rootName: undefined }), /rootName/);
   assert.deepEqual(calls, []);
