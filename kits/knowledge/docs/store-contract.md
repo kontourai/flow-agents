@@ -1945,7 +1945,7 @@ violate that requirement).
 ## Addendum M: Privileged purge (issue #1570)
 
 The owner approved an explicit erasure exception on 2026-11-02. The operation is
-owned by [Corpus Store](https://github.com/kontourai/corpus/blob/3ab96002c76078ad3116dd56972a1e08e52a49d7/packages/store/README.md#owner-decisions).
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/250138191da992f7aae928c9cf638fbf2b36cfe5/packages/store/README.md#owner-decisions).
 Both bundled adapter entry points can explicitly select a host-supplied Corpus
 module. In that mode the returned store delegates **all** operations to the
 corresponding Corpus adapter; the kit does not implement a second cascade.
@@ -2027,7 +2027,7 @@ before-images until recovery; purge is not a secure-erasure guarantee. A complet
 integration must test each adapter and each actual read path, including a fault
 that skips the cascade and makes conformance fail.
 Create proposals can contain complete candidate records outside the working set.
-The Corpus purge branch has incorporated create proposals: a pending proposal
+Corpus Store's purge includes create proposals: a pending proposal
 that rests only on erased sources is rejected and its candidate scrubbed; one
 with remaining support is blocked from application and returned for review. A
 blocked proposal retains its candidate, which may itself reproduce erased

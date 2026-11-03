@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build the unpublished Corpus branch at a pinned commit, install its tarball
+# Build unpublished Corpus main at its pinned merge commit, install its tarball
 # outside the repository, and prove the kit adapter seam catches a lost cascade.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/knowledge-purge-gate.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
-CORPUS_REV=3ab96002c76078ad3116dd56972a1e08e52a49d7
+CORPUS_REV=250138191da992f7aae928c9cf638fbf2b36cfe5
 
 git clone --quiet --no-checkout https://github.com/kontourai/corpus.git "$WORK_DIR/corpus"
 git -C "$WORK_DIR/corpus" checkout --quiet --detach "$CORPUS_REV"
