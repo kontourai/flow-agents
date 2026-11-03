@@ -13,3 +13,4 @@ export {
   canonicalRunPath, readLatestMemoryMetrics, readMemoryMetricsEvidence, readMemoryReviewRecords, readMemoryRoutingDecisions, readMemoryRoutingEvidence, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from '@kontourai/flow-agents/memory-routing-flow';
 export { memoryEntityProposalInput } from '@kontourai/flow-agents/memory-entity';
+export { memoryAccumulationClaims, memoryAccumulationFact, memoryAccumulationQuery, memoryClaimToAccumulationClaim } from '@kontourai/flow-agents/memory-accumulation';

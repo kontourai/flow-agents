@@ -53,7 +53,7 @@
           "rule": {
             "enum": [
               "contradicted-by-verification",
-              "conflicting-current-values",
+              "contested-by-accumulation",
               "consequential-supersession",
               "entity-identity-change",
               "low-extraction-agreement",
@@ -86,7 +86,8 @@
             "current",
             "verifications",
             "agreement",
-            "baselines"
+            "baselines",
+            "accumulation"
           ],
           "properties": {
             "type": {
@@ -201,6 +202,48 @@
                 }
               },
               "description": "What the claim's visibility must stay within: its source, and every current claim in its slot."
+            },
+            "accumulation": {
+              "description": "What Surface's projection (`projectAccumulation`, run by the host) says about the claim's slot: the outcome, which claims are candidates, and the gap codes. Null when it was not run. Only a stated claim is projected.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "outcome",
+                    "candidateClaimIds",
+                    "gapCodes"
+                  ],
+                  "properties": {
+                    "outcome": {
+                      "enum": [
+                        "current",
+                        "contested",
+                        "invalid",
+                        "none"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "candidateClaimIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "gapCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         },
@@ -283,14 +326,6 @@
           "maximum": 1,
           "description": "Smallest share of passes that must produce an equivalent claim."
         },
-        "multiValued": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "description": "Properties that may hold several values at once, so differing values are not a conflict. Every other property is single-valued."
-        },
         "consequential": {
           "type": "object",
           "additionalProperties": false,
@@ -315,6 +350,14 @@
             }
           },
           "description": "Superseding a claim on one of these properties or subject types goes to review."
+        },
+        "multiValued": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Properties that may hold several values at once. Surface's projection has one value policy, so they are not projected and never contested."
         }
       }
     }
