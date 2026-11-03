@@ -203,6 +203,10 @@
       "types": "./build/src/memory-entity.d.ts",
       "import": "./build/src/memory-entity.js"
     },
+    "./memory-json": {
+      "types": "./build/src/memory-json.d.ts",
+      "import": "./build/src/memory-json.js"
+    },
     "./memory-accumulation": {
       "types": "./build/src/memory-accumulation.d.ts",
       "import": "./build/src/memory-accumulation.js"

@@ -44,6 +44,10 @@ export const GRID = [
   ["a list with an overridden iterator", withIterator],
   ["an array subclass", subclass],
   ["kind inherited from a prototype", inheritedKind],
+  ["a function carrying kind public", () => Object.assign(() => 0, { kind: "public" })],
+  ["a function carrying a restricted list", () => Object.assign(() => 0, { kind: "restricted", audiences: ["a"] })],
+  ["a boxed string", () => new String("public")],
+  ["audiences holding a duplicate and an empty string", () => only("a", "a", "")],
   ["1024 audiences", () => many(1024)],
   ["1025 audiences", () => many(1025)],
 ];

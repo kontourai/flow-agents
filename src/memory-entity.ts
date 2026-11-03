@@ -9,6 +9,7 @@
  * anything. This module returns plain data, so it needs no Survey import; pass its result to Survey.
  */
 import { MemoryClaimError, type MemoryClaim } from "./memory-claims.js";
+import { jsonSnapshot } from "./memory-json.js";
 
 const isOperation = (value: unknown): boolean => typeof value === "string" && (["merge", "split", "alias", "same-as", "related-to"].includes(value) || /^domain:\S+$/.test(value));
 
@@ -56,13 +57,16 @@ export interface MemoryEntityCandidate {
  * hash (`contentHash` of the #669 residue): Survey requires an exact source checksum on every piece of evidence, and
  * the claim does not carry one. A missing checksum is an error, never a guess.
  */
-export function memoryEntityProposalInput(input: {
+export function memoryEntityProposalInput(request: {
   revision: string;
   proposer: MemoryEntityProposalInput["proposer"];
   policy: MemoryEntityProposalInput["policy"];
   candidates: readonly MemoryEntityCandidate[];
   checksums: Readonly<Record<string, string>>;
 }): MemoryEntityProposalInput {
+  // Survey's createEntityProposal needs lossless JSON (no NaN, undefined, accessors or cycles); take it once, here, so the
+  // Kit validates exactly what it hands over.
+  const input = jsonSnapshot(request, "entity proposal input") as typeof request;
   // Survey makes the same demands; refuse here so the Kit never hands it (or records) what it would reject.
   for (const [label, value] of [["revision", input.revision], ["proposer id", input.proposer?.id], ["policy id", input.policy?.id], ["policy revision", input.policy?.revision]] as const) {
     if (typeof value !== "string" || !value.trim()) throw new MemoryClaimError("invalid", `an entity proposal needs a ${label}`);
@@ -73,7 +77,11 @@ export function memoryEntityProposalInput(input: {
     proposer: input.proposer,
     policy: input.policy,
     alternatives: input.candidates.map(candidate => {
+      if (!Array.isArray(candidate.subjects) || candidate.subjects.length !== 2) throw new MemoryClaimError("invalid", "an entity candidate names exactly two subjects");
       const [a, b] = candidate.subjects;
+      for (const subject of [a, b]) {
+        if (typeof subject?.type !== "string" || !subject.type.trim() || typeof subject.id !== "string" || !subject.id.trim()) throw new MemoryClaimError("invalid", "an entity subject needs a type and an id");
+      }
       if (a.type === b.type && a.id === b.id) throw new MemoryClaimError("invalid", "an entity candidate needs two different subjects");
       if (candidate.claims.length === 0) throw new MemoryClaimError("invalid", "an entity candidate needs the claims that ground it");
       if (!isOperation(candidate.operation)) throw new MemoryClaimError("invalid", "an entity candidate needs one of Survey's operations");
@@ -84,7 +92,7 @@ export function memoryEntityProposalInput(input: {
         if (!["supports", "contradicts", "context"].includes(stance)) throw new MemoryClaimError("invalid", "an evidence stance is supports, contradicts or context");
         if (!Number.isFinite(Date.parse(claim.source.observedAt))) throw new MemoryClaimError("invalid", "evidence needs an observedAt that is a date-time");
         const checksum = input.checksums[claim.source.ref];
-        if (!checksum) throw new MemoryClaimError("invalid", `no checksum for source ${claim.source.ref}`);
+        if (typeof checksum !== "string" || !checksum.trim()) throw new MemoryClaimError("invalid", `no checksum for source ${claim.source.ref}`);
         return {
           id: claim.id, sourceRef: claim.source.ref, sourceId: claim.source.ref, checksum,
           observedAt: claim.source.observedAt, locatorScheme: "text-span" as const, locator: claim.source.locator, excerpt: claim.source.excerpt, stance,
