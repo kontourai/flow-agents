@@ -186,7 +186,7 @@ that routing or recall would refuse, and every other part of a decision is bound
 decision bound; a test pins that the parts sum to less than it, and `routeMemoryChange` still checks the decision it produced against the bound as a net, refusing one that does not fit with the reason. `recomputeMemoryRouting` applies the same per-item budgets to what a
 decision embeds, so a hand-built decision with a claim or verification record the Kit could not have produced is not recomputable. A request that would take a run past its history limit is refused before anything is written (see Flow evidence).
 Each bound is per item: there is no aggregate budget for a whole request or a whole batch, and no byte budget for strings. A host
-that accepts untrusted workloads needs those limits itself. The decision in the worst-case test (65 claims at the claim bound, 1,024-audience visibilities, a full projection fact and a policy near its bound; about 1.6 million values) is produced, recomputed, turned into a review item and presented in about a second on a development laptop.
+that accepts untrusted workloads needs those limits itself. The decision in the worst-case test (65 claims at the claim bound, 1,024-audience visibilities, a full projection fact and a policy near its bound; 1,389,585 values against the bound of 1,628,000, of which the policy is 19,508 of its own 20,000) is produced, recomputed, turned into a review item and presented in about a second on a development laptop.
 
 ## Flow evidence
 

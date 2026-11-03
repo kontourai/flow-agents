@@ -913,12 +913,13 @@ test("a near-maximal decision is one the Kit can read: claims at the bound, 1,02
   const records = Array.from({ length: 64 }, (_, i) => verification(claim, "supported", claim.value, `verifier-${i}`));
   const everyone = [claim, ...peers].map(item => item.id).sort();
   const accumulation = { outcome: "contested", candidateClaimIds: everyone, supportingClaimIds: everyone, gapCodes: Array.from({ length: 1000 }, (_, i) => `gap-${i}`) };
-  const names = prefix => Array.from({ length: 256 }, (_, i) => `${prefix}-${i}`);
+  const names = prefix => Array.from({ length: 6_500 }, (_, i) => `${prefix}-${i}`); // three lists: ~19,500 names, near the 20,000-value policy bound
   const policy = { multiValued: names("mv"), consequential: { properties: names("cp"), subjectTypes: names("cs") } };
   const decision = routeMemoryChange(change(claim, { current: peers, verifications: records, accumulation, accumulationQuery: queryFor(claim), sourceVisibility: { kind: "restricted", audiences } }), policy);
   assert.equal(decision.input.current.length, 64);
-  const nodes = countNodes(decision);
-  assert.ok(nodes > 1_300_000, `the premise: well over a million values (${nodes})`);
+  const nodes = countNodes(decision), policyNodes = countNodes(decision.policy);
+  assert.ok(policyNodes > 19_000 && policyNodes <= MAX_POLICY_NODES, `the premise: the policy is near its own bound (${policyNodes} of ${MAX_POLICY_NODES})`);
+  assert.ok(nodes > 1_350_000, `the premise: well over a million values (${nodes})`);
   assert.ok(nodes <= MAX_DECISION_NODES, `and inside the decision bound (${nodes} <= ${MAX_DECISION_NODES})`);
   assert.equal(MAX_DECISION_NODES, 1_628_000, "the bound is pinned: 65 claims x 20,000, 64 records x 2,000, 200,000 for the envelope");
   assert.equal(recomputeMemoryRouting(decision).ok, true);
@@ -978,6 +979,9 @@ test("a routing policy is a policy: its lists are lists, its budget counts the d
   assert.doesNotThrow(() => route({ multiValued: new Array(19_900).fill("x") }));
   // A string is not a list of names: it used to be spread into characters and could outgrow every bound.
   for (const field of ["multiValued"]) assert.throws(() => route({ [field]: "x".repeat(1_700_000) }), /must be a list of names|too large/, field);
+  for (const [what, policy] of [["multiValued", { multiValued: "price" }], ["consequential.properties", { consequential: { properties: "p" } }], ["consequential.subjectTypes", { consequential: { subjectTypes: "service" } }]]) {
+    assert.throws(() => route(policy), new RegExp(`${what.replace(".", "\\.")} must be a list of names`), `a short string for ${what} is not a list of names`);
+  }
   assert.throws(() => route({ consequential: { properties: "properties" } }), /consequential\.properties must be a list of names/);
   assert.throws(() => route({ consequential: { subjectTypes: 7 } }), /consequential\.subjectTypes must be a list of names/);
   assert.throws(() => route({ consequential: [] }), /consequential must be an object/);
