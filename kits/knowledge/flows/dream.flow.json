@@ -1,7 +1,7 @@
 {
   "id": "knowledge.dream",
   "version": "1.0",
-  "description": "Knowledge Kit dream flow (issue #671): distil accumulated Claude Code and Codex sessions into proposed memory claims and re-render budgeted briefs. Callable by a host scheduler; never schedules itself and is disabled until the operator enables it. ingest (runtime-session residue, cursor read) -> distil (memory claims through a Relay model runtime) -> route (routed-review policy) -> propose (Corpus create proposals; the run cannot apply one) -> brief (global and per-project, hard byte budgets) -> report (per-run, reconciled with the store) -> cursor (committed last). Executable logic: dream/run.js.",
+  "description": "Knowledge Kit dream flow (issue #671): distil accumulated sessions from both supported runtimes into proposed memory claims and re-render budgeted briefs. Callable by a host scheduler; never schedules itself and is disabled until the operator enables it. ingest (runtime-session residue, cursor read) -> distil (memory claims through a Relay model runtime) -> route (routed-review policy) -> propose (Corpus create proposals; the run cannot apply one) -> brief (global and per-project, hard byte budgets) -> report (per-run, reconciled with the store) -> cursor (committed last). Executable logic: dream/run.js.",
   "steps": [
     { "id": "ingest", "next": "distill" },
     { "id": "distill", "next": "route" },

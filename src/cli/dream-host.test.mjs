@@ -393,6 +393,13 @@ test("this repo's own scheduler wiring: no boo recipe, launchd job, cron entry o
   assert.ok(fileURLToPath(import.meta.url));
 });
 
+test("the dream flow definition is unchanged by the Codex bundle's runtime-name rewrite", () => {
+  // `init --runtime codex` rewrites "Claude Code" to "Codex" in shipped text and `workflow doctor` hashes the installed
+  // files against the package, so a shipped definition that names the other runtime reads as drifted on every Codex install.
+  const flow = fs.readFileSync(path.join(KIT, "flows", "dream.flow.json"), "utf8");
+  assert.equal(flow.includes("Claude Code"), false);
+});
+
 test("the invocation contract a host scheduler binds to is pinned: ids, exports, report fields, statuses", async (t) => {
   const index = await import("../../kits/knowledge/dream/index.js");
   for (const name of ["runDream", "defaultDreamDir", "loadDreamConfig", "handleTrigger", "createRoleRuntime", "extractForRuntime"]) assert.equal(typeof index[name], "function", name);

@@ -77,7 +77,7 @@
     {
       "id": "knowledge.dream",
       "path": "flows/dream.flow.json",
-      "description": "Knowledge dream flow (issue #671): distil accumulated Claude Code and Codex sessions into proposed memory claims and re-render budgeted briefs. A host scheduler calls it; it never schedules itself and is disabled until the operator enables it. ingest -> distill (Relay model runtime) -> route (routed-review policy) -> propose (Corpus create proposals; the run cannot apply one) -> brief (global and per-project, hard byte budgets) -> report -> cursor (committed last). Executable logic: dream/run.js."
+      "description": "Knowledge dream flow (issue #671): distil accumulated sessions from both supported runtimes into proposed memory claims and re-render budgeted briefs. A host scheduler calls it; it never schedules itself and is disabled until the operator enables it. ingest -> distill (Relay model runtime) -> route (routed-review policy) -> propose (Corpus create proposals; the run cannot apply one) -> brief (global and per-project, hard byte budgets) -> report -> cursor (committed last). Executable logic: dream/run.js."
     }
   ],
   "workflow_triggers": [
