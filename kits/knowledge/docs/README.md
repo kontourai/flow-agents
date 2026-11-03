@@ -333,14 +333,14 @@ not-yet-known claims return the same plain `no_answer`, so a reader cannot learn
 exists. Reconciliation and proposals cover only claims the reader may see.
 
 **As-of on two time axes**, with the semantics of Surface's knowledge-accumulation decision
-(kontourai/surface#204): `known_at` is knowledge time, filtered on the manifest's
+(kontourai/surface#204, merged as Surface `7486c6d`): `known_at` is knowledge time, filtered on the manifest's
 `recorded_at` (the receiver-recorded instant, never a claim's own authored time), and `valid_at`
 is valid time, a half-open `[from, until)` interval from `valid_time` (an absent bound is
 unbounded and asserts nothing about perpetual truth). A supersession edge counts only once its
 successor is recorded at or before `known_at`; a `succession` takes effect at the successor's
 `valid_time.from`, while a `correction` (the default) supersedes the claim throughout. A missing
 or untimed input makes the answer `unverifiable`, never guessed. No wall clock is read: `now` is
-explicit and also the instant freshness is judged at. `status` is the status **as of the stated
+explicit and also the instant freshness is judged at; `expires_at`/`ttl_seconds` govern freshness only, never world validity. Slot identity, cardinality, and the admission policy for who may supersede whom are not modelled (see the decision record). `status` is the status **as of the stated
 instants** and the result echoes them, so a predecessor read at a `valid_at` before its
 succession, or a `known_at` before its successor was recorded, is `current` with a reason saying
 exactly why. A superseded claim is never `current` at a successor that is known and in effect, and

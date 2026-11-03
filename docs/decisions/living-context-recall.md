@@ -10,7 +10,7 @@ evidence:
   - kind: doc
     ref: kits/knowledge/context-check/living-context.test.js
   - kind: url
-    ref: https://github.com/kontourai/surface/blob/f8106dd44af9ebceee87227b5edfc4352f16ed46/docs/decisions/knowledge-accumulation.md
+    ref: https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md
 ---
 
 # Living Context recall contract
@@ -34,16 +34,22 @@ exact `1.0` behavior and loading the `1.0` module still needs no Surface or Surv
   per-viewer supersession proposed in kontourai/surface#350 ("a viewer without access sees the
   prior current value"), which is not yet accepted: serving the predecessor as `current` would
   present a claim the corpus has superseded as current. Revisit when #350 is decided.
-- **As-of follows the Surface accumulation decision** (kontourai/surface#204, pinned at
-  `f8106dd4`). Knowledge time filters on a receiver-recorded `recorded_at` and never on an authored
-  time; valid time is a half-open `[from, until)` interval; a `succession` takes effect at the
-  successor's valid `from`, a `correction` supersedes throughout; missing or untrustworthy times
-  are indeterminate, never guessed; the explicit `now` defaults both instants and is the instant
-  freshness is judged at. Not modelled here: slot identity (a supersession edge is not checked to
-  join one property slot), custody of the recording time (the pinned Git commit is the only
-  custody), and replacement-edge authority. Surface's shapes are design vectors until Hachure
-  accepts them (hachure-org/spec#34); the manifest fields are this kit's, not a portable bundle
-  extension.
+- **As-of follows the merged Surface accumulation decision** (kontourai/surface#204, Surface main
+  `7486c6d`, `docs/decisions/knowledge-accumulation.md`). Knowledge time filters on a
+  receiver-recorded `recorded_at` and never on an authored time; valid time is a half-open
+  `[from, until)` interval (not the inclusive `validUntil` of an authority trace); a `succession`
+  takes effect at the successor's valid `from`, a `correction` supersedes throughout; missing or
+  untrustworthy times are indeterminate, never guessed; the explicit `now` defaults both instants
+  and is the instant freshness is judged at. `expiresAt`/TTL govern freshness only and are never
+  used as world validity. `status` is a contextual disposition as of the stated instants, like
+  Surface's projection-local `superseded`; it is not a Surface trust status and does not mutate
+  one. Not modelled, and so not claimed: slot identity (property slot, canonical qualifiers and
+  claimType; a supersession edge is not checked to join one slot), cardinality and value
+  equality, the admission policy (publisher and claim-owner binding, authority for a third-party
+  replacement), retraction-versus-expiry, and equal-value support aggregation. The pinned Git
+  commit is the only custody of the recording time and of the edge, which the manifest owner
+  authors. Surface's shapes are design vectors until Hachure accepts them (hachure-org/spec#34);
+  the manifest fields are this kit's, not a portable bundle extension.
 - **Freshness is Surface's.** Expiry resolves through `claimIntrinsicExpiry` (`expiresAt` wins;
   `ttlSeconds` anchors on verification, else recording) and a claim is stale when `now > expiry`,
   checked against Surface's own `reapplyVerifiedFreshness` at the boundary. A stale claim is
