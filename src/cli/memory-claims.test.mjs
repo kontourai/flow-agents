@@ -165,6 +165,19 @@ test("agreement counts passes that found the same claim; a pass that did not is 
   assert.deepEqual(later.result.agreement[db.id], { passes: 2, agreeing: 2 });
 });
 
+test("passes that spell one finding differently still agree, while identity stays exact", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const finding = value => ({ quote, subject: "widget service", subjectType: "service", property: "primary database", value, posture: "stated" });
+  const result = await distillMemoryClaims({ sitting, passes: 2, extract: traverseExtract(scriptedProvider([[finding("PostgreSQL 15")], [finding("postgresql 15")]])) });
+  assert.equal(result.claims.length, 1, "one finding, reported once, as the first pass spelled it");
+  assert.equal(result.claims[0].value, "PostgreSQL 15");
+  assert.deepEqual(result.agreement[result.claims[0].id], { passes: 2, agreeing: 2 });
+  // A different value is a different finding.
+  const other = await distillMemoryClaims({ sitting, passes: 2, extract: traverseExtract(scriptedProvider([[finding("PostgreSQL 15")], [finding("PostgreSQL 16")]])) });
+  assert.deepEqual(other.claims.map(claim => other.agreement[claim.id].agreeing), [1, 1]);
+});
+
 test("a failed pass is reported and counts against agreement instead of vanishing", async () => {
   const sitting = loadSittings()[0];
   const real = traverseExtract(scriptedProvider([[{ quote: "The widget service uses PostgreSQL 15 as its primary database.", subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated" }]]));
