@@ -98,6 +98,33 @@ export function fitPlan(entries) {
   return { plan, dropped: entries.length - plan.length };
 }
 
+/** The most claim ids and gap codes a stored projection fact carries. A slot can hold thousands of candidates. */
+export const MAX_FACT_IDS = 17;
+export const MAX_FACT_GAPS = 16;
+
+/**
+ * A projection fact small enough to store in a decision: the claim itself, then `prefer` (its rivals) first, then the
+ * rest, up to MAX_FACT_IDS; gap codes capped, with the cut recorded in one code. For a contested claim the outcome is
+ * unchanged (it is still a candidate), so routing is the same; the cut is visible in the fact and counted by the caller.
+ */
+export function boundFact(fact, claimId, prefer = []) {
+  if (!fact) return { fact, cut: 0 };
+  const ids = [...new Set(fact.candidateClaimIds)];
+  const named = new Set(ids);
+  const picked = new Set();
+  for (const id of [claimId, ...prefer, ...ids]) {
+    if (picked.size >= MAX_FACT_IDS) break;
+    if (named.has(id)) picked.add(id);
+  }
+  const chosen = [...picked];
+  const idsCut = ids.length - chosen.length;
+  const gaps = [...new Set(fact.gapCodes)].sort();
+  const gapCut = Math.max(0, gaps.length - MAX_FACT_GAPS);
+  const gapCodes = gaps.slice(0, MAX_FACT_GAPS - (idsCut || gapCut ? 1 : 0));
+  if (idsCut || gapCut) gapCodes.push(`truncated:${idsCut}ids:${gapCut}gaps`);
+  return { fact: { ...fact, candidateClaimIds: chosen.sort(), gapCodes: gapCodes.sort() }, cut: idsCut + gapCut };
+}
+
 export function titleFor(claim) {
   const subject = claim.subject.label ?? claim.subject.id;
   return truncateUtf8(`${subject}: ${claim.property}`.replace(/\s+/g, " ").trim() || claim.id, 160);

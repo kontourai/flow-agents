@@ -168,8 +168,8 @@ id is the sitting's working-directory name. Nothing else decides scope.
   later runs, which is why it must be idempotent. A claim replaced by a *reviewed* (applied) stated claim
   of the same speaker in the same slot (a `succession` edge), or withdrawn by that speaker's own
   retraction of the same value (a `correction` edge), is superseded: an edge from an unreviewed
-  claim replaces nothing and does not make a contest, so the reviewed claim stays in the brief
-  until the replacement is reviewed; another speaker's edge, or an edge into another slot,
+  claim replaces nothing, and as in Surface an unreviewed succession leaves both candidates contested until a
+  reviewer verifies the successor, so neither is in the brief meanwhile; another speaker's edge, or an edge into another slot,
   replaces nothing. Values are read as review left them: a Survey correction presents the
   reviewer's value, and a claim rejected in review contests nothing; a hypothetical or retracted claim asserts nothing about the present.
   A plan (`proposed` posture) neither contests nor is contested. This is a local stand-in for
@@ -183,9 +183,14 @@ id is the sitting's working-directory name. Nothing else decides scope.
   reads the result with `memoryAccumulationFact`, and routes on it. A projection that throws,
   or returns something that is not a fact, is recorded as an `invalid` fact, which routes:
   a slot that cannot be answered is not read as uncontested. Without `host.project` the fact
-  comes from the local stand-in (`gapCodes: ["dream-stand-in"]`), which is also what the brief
-  uses, so the review queue and the brief agree. The brief itself still uses the stand-in;
-  consuming the projection there is #1584.
+  comes from the local stand-in (`gapCodes: ["dream-stand-in"]`). **One verdict per slot**: the
+  host's fact (else the stand-in's, computed over the values review left) is what routing is
+  given, what the review-queue backfill is given, and what the brief honours, so the queue and the
+  brief cannot disagree. With `host.project` the host is asked once per slot that holds more than
+  one stated claim on every run (a no-op run included), so the host should cache. An `invalid` fact
+  holds back every stated claim in its slot. A fact stored in a decision is bounded to the claim, its
+  rivals and 17 ids, with 16 gap codes and a `truncated:` code saying what was cut
+  (`claims.facts_truncated`); the claim stays a candidate, so the outcome is the same.
 - **Eligibility (the quarantine).** An `applied` proposal is eligible when its record is
   active and is the record Corpus made from it: the record's `apply-create` entry names the
   proposal and the record body is the proposal's. A settlement that points at some other

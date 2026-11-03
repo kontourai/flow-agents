@@ -40,7 +40,7 @@ import { memorySlotKey } from "@kontourai/flow-agents/memory-claims";
 import { canonicalJson } from "@kontourai/relay";
 import { memoryAccumulationClaims, memoryAccumulationFact, memoryAccumulationQuery } from "../adapters/memory-claims/index.mjs";
 
-import { MAX_CLAIM_BYTES, fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
+import { MAX_CLAIM_BYTES, boundFact, fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
 import { acquireDreamLock } from "./lock.js";
 import { proposeSitting } from "./propose.js";
 import { assertAbsolute, dreamError, projectFromCwd, sha256, writePrivateAtomic } from "./util.js";
@@ -204,7 +204,7 @@ export async function runDream(host, options = {}) {
     started_at: startedAt,
     ingest: null,
     sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
-    claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, rerouted: 0, contested_routed: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
+    claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, facts_truncated: 0, rerouted: 0, contested_routed: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
     review_items: 0,
     unreadable_proposals: 0,
@@ -268,61 +268,61 @@ export async function runDream(host, options = {}) {
     // each decision cost the size of the store. `siblings` are the other claims of the same plan, which are peers too:
     // two claims from one sitting that disagree are a contest like any other.
     let slotPeers = new Map();
-    let slotFacts = new Map();
+    let knownClaims = [];
     const reslot = () => {
       slotPeers = new Map();
-      slotFacts = new Map();
+      knownClaims = [];
       for (const { proposal, envelope } of index.byClaim.values()) {
         if (proposal.state === "rejected") continue;
         const key = memorySlotKey(envelope.claim);
         slotPeers.set(key, [...(slotPeers.get(key) ?? []), { claim: envelope.claim, state: proposal.state, project: envelope.project, agreement: envelope.agreement }]);
+        knownClaims.push(envelope.claim);
       }
     };
     reslot();
 
-    // The contest fact for a claim's slot. Surface's accumulation projection owns it (#1571 routes on it and compares no
-    // values itself), and the HOST runs it, because it needs observations with custody and an authority snapshot this
-    // run does not hold: `host.project({ query, claims })` returns `projectAccumulation`'s result for the slot. Without a
-    // host projection the fact comes from `classifyCurrent`, the stand-in that applies the same slot rules locally
-    // (kontourai/flow-agents#1584). Either way routing sees one fact, so the review queue and the brief agree.
+    // The contest fact for a slot. Surface's accumulation projection owns it (#1571 routes on it and compares no values
+    // itself), and the HOST runs it, because it needs observations with custody and an authority snapshot this run does
+    // not hold: `host.project({ query, claims })` returns `projectAccumulation`'s result. A projection that throws, or
+    // returns something that is not a fact, becomes an `invalid` fact, which routes: a slot that cannot be answered is
+    // not read as uncontested. Without `host.project` the fact comes from `classifyCurrent`, the stand-in that applies
+    // the same slot rules locally (kontourai/flow-agents#1584).
+    const askHost = async (claim, slotClaims) => {
+      const stated = slotClaims.filter((c) => c.posture === "stated");
+      try {
+        return memoryAccumulationFact(await host.project({ query: memoryAccumulationQuery(claim, now()), claims: memoryAccumulationClaims(stated, knownClaims.concat(stated)) }));
+      } catch (error) {
+        return { outcome: "invalid", reason: String(error?.message ?? error).slice(0, 200), candidateClaimIds: slotClaims.map((c) => c.id).sort(), gapCodes: ["projection-failed"] };
+      }
+    };
     const factFor = async (claim, siblings) => {
       if (claim.posture !== "stated") return null;
       const slot = memorySlotKey(claim);
       const items = [...(slotPeers.get(slot) ?? []), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot).map((other) => ({ claim: other, state: "pending" }))];
       const together = [...items.filter((item) => item.claim.id !== claim.id), { claim, state: "pending" }];
-      if (typeof host.project === "function") {
-        const key = `${slot}|${together.map((item) => item.claim.id).sort().join(",")}`;
-        if (!slotFacts.has(key)) {
-          let fact;
-          try {
-            const stated = together.map((item) => item.claim);
-            fact = memoryAccumulationFact(await host.project({ query: memoryAccumulationQuery(claim, now()), claims: memoryAccumulationClaims(stated.filter((c) => c.posture === "stated"), stated) }));
-          } catch (error) {
-            // A projection that cannot answer gives no unique answer for the slot: fail closed, route it.
-            fact = { outcome: "invalid", reason: String(error?.message ?? error).slice(0, 200), candidateClaimIds: together.map((item) => item.claim.id).sort(), gapCodes: ["projection-failed"] };
-          }
-          slotFacts.set(key, fact);
-        }
-        return slotFacts.get(key);
-      }
+      if (typeof host.project === "function") return askHost(claim, together.map((item) => item.claim));
       const out = classifyCurrent(together, policy);
-      const ids = out.contested.map((item) => item.claim.id).sort();
       return out.contested.some((item) => item.claim.id === claim.id)
-        ? { outcome: "contested", candidateClaimIds: ids, gapCodes: ["dream-stand-in"] }
+        ? { outcome: "contested", candidateClaimIds: out.contested.map((item) => item.claim.id).sort(), gapCodes: ["dream-stand-in"] }
         : { outcome: "current", candidateClaimIds: [claim.id], gapCodes: ["dream-stand-in"] };
     };
 
     // Which peers belong in a decision: the rivals the fact names (the review item shows the pair) and any peer the claim
     // would be wider than. Others add nothing, and routing validates and stores every peer it is given, while a slot can
-    // hold thousands. Beyond the cap the outcome is unchanged (one rival is enough to route); the cut is counted.
+    // hold thousands. The fact is bounded the same way (`boundFact`). Beyond the caps the outcome is unchanged (one rival
+    // is enough to route, and the claim stays a candidate); the cut is counted so it is never silent.
     const MAX_RELEVANT_PEERS = 16;
-    const route = async (claim, agreement, siblings = []) => {
+    const route = async (claim, agreement, siblings = [], given = null) => {
       const slot = memorySlotKey(claim);
       const candidates = [...(slotPeers.get(slot) ?? []).map((item) => item.claim), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot)]
         // A peer over the claim size bound cannot be this run's, and would make the stored decision too large.
         .filter((peer) => peer.id !== claim.id && Buffer.byteLength(JSON.stringify(peer)) <= MAX_CLAIM_BYTES)
         .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      const accumulation = await factFor(claim, siblings);
+      const mine = canonicalJson(claim.value);
+      const rivalIds = candidates.filter((peer) => canonicalJson(peer.value) !== mine).map((peer) => peer.id);
+      const full = given ?? (await factFor(claim, siblings));
+      const { fact: accumulation, cut } = boundFact(full, claim.id, rivalIds);
+      if (cut > 0) report.claims.facts_truncated += 1;
       const base = { type: "claim", claim, agreement, accumulation, sourceVisibility: options.visibility ?? null };
       const alone = routeMemoryChange({ ...base, current: [] }, policy);
       const named = new Set(accumulation?.candidateClaimIds ?? []);
@@ -333,7 +333,6 @@ export async function runDream(host, options = {}) {
       });
       if (relevant.length > MAX_RELEVANT_PEERS) report.claims.peers_capped += 1; // reported, never silent
       // Rivals first: a peer that holds a different value is what the review item exists to show.
-      const mine = canonicalJson(claim.value);
       const ordered = [...relevant].sort((a, b) => (canonicalJson(a.value) !== mine) === (canonicalJson(b.value) !== mine) ? 0 : canonicalJson(a.value) !== mine ? -1 : 1);
       return routeMemoryChange({ ...base, current: ordered.slice(0, MAX_RELEVANT_PEERS) }, policy);
     };
@@ -405,31 +404,53 @@ export async function runDream(host, options = {}) {
       reslot();
     }
 
-    // Briefs derive from the store every run, because review changes them without any new telemetry. The briefs
-    // are written below; what they hold back as contested is decided here, because a contested claim belongs in the
-    // review queue: a pending claim the brief held back for a rival, whose own decision never said so (a rival from
-    // another writer, or one that arrived later), is routed now and handed to the same publish as everything else.
+    // Briefs derive from the store every run, because review changes them without any new telemetry. The briefs are
+    // written below; what they hold back as contested is decided here, once, and both the brief and the review queue
+    // use that verdict: a contested claim belongs in the review queue, not the brief.
     const latest = indexProposals(await store.listProposals(), proposerId);
     const { items, excluded } = await briefItems(store, latest, proposerId);
+    const bySlot = new Map();
+    for (const item of items) bySlot.set(memorySlotKey(item.claim), [...(bySlot.get(memorySlotKey(item.claim)) ?? []), item]);
+    // With a host projection, the host decides every slot that has more than one stated claim; the stand-in only fills
+    // in where the host was not asked (a slot with a single claim cannot be contested).
+    const hostFacts = new Map();
+    if (typeof host.project === "function") {
+      for (const [slot, group] of bySlot) {
+        const stated = group.filter((item) => item.claim.posture === "stated");
+        if (stated.length < 2) continue;
+        const fact = await askHost(stated[0].claim, stated.map((item) => item.claim));
+        hostFacts.set(slot, fact);
+        const named = new Set(fact.candidateClaimIds);
+        for (const item of stated) item.contested = fact.outcome === "invalid" ? true : fact.outcome === "contested" && named.has(item.claim.id);
+      }
+    }
     const { views, byView } = effectiveItems(items, reviewDecisions);
     const contestedNow = classifyCurrent(views, policy).contested.map((view) => byView.get(view));
+    const contestedBySlot = new Map();
+    for (const item of contestedNow) contestedBySlot.set(memorySlotKey(item.claim), [...(contestedBySlot.get(memorySlotKey(item.claim)) ?? []), item.claim.id]);
     const alreadyRouted = new Set(decisions.filter((decision) => decision.outcome === "routed").map((decision) => decision.changeId));
     for (const item of contestedNow) {
       if (item.state !== "pending" || alreadyRouted.has(item.claim.id)) continue;
-      const decision = await route(item.claim, item.agreement);
+      const slot = memorySlotKey(item.claim);
+      // The fact is the verdict the brief used, so a contest the reviewer's edits created (which no stored value shows)
+      // is routed as the contest it is.
+      const given = hostFacts.get(slot) ?? { outcome: "contested", candidateClaimIds: [...contestedBySlot.get(slot)].sort(), gapCodes: ["dream-stand-in"] };
+      const decision = await route(item.claim, item.agreement, [], given);
       if (decision.outcome === "routed") {
         decisions.push(decision);
         report.claims.contested_routed += 1;
       }
     }
 
-    for (const decision of decisions) report.claims[decision.outcome === "routed" ? "routed" : "uncontested"] += 1;
-    const reviewItems = decisions.filter((decision) => decision.outcome === "routed").map((decision) => buildMemoryReviewItem(decision)).filter(Boolean);
+    // Per claim, the last decision stands (a claim proposed as uncontested and routed on a later look is one routed claim).
+    const finalDecisions = [...new Map(decisions.map((decision) => [decision.changeId, decision])).values()];
+    for (const decision of finalDecisions) report.claims[decision.outcome === "routed" ? "routed" : "uncontested"] += 1;
+    const reviewItems = finalDecisions.filter((decision) => decision.outcome === "routed").map((decision) => buildMemoryReviewItem(decision)).filter(Boolean);
     report.review_items = reviewItems.length;
-    report.metrics = decisions.length ? deriveMemoryRunMetrics({ runId, decisions, reviewDecisions }) : null;
-    if (!dryRun && decisions.length) {
+    report.metrics = finalDecisions.length ? deriveMemoryRunMetrics({ runId, decisions: finalDecisions, reviewDecisions }) : null;
+    if (!dryRun && finalDecisions.length) {
       await stage("publish");
-      await host.publish({ runId, decisions, reviewItems, metrics: report.metrics });
+      await host.publish({ runId, decisions: finalDecisions, reviewItems, metrics: report.metrics });
     }
 
     await stage("brief");

@@ -944,3 +944,115 @@ test("the host's Surface projection, when it provides one, decides the contest: 
   const garbage = await run("not-a-fact", () => ({ hello: "world" }));
   assert.equal(garbage.report.claims.routed, 2, "a result that is not a projection fact fails closed too");
 });
+
+// ── review round 4 ────────────────────────────────────────────────────────────────────────────────────────────
+
+import { boundFact, MAX_FACT_IDS, MAX_FACT_GAPS } from "../../kits/knowledge/dream/envelope.js";
+
+test("a projection fact is bounded before it is stored: thousands of candidates keep the claim and its rivals, and say so", () => {
+  const ids = Array.from({ length: 30000 }, (_, i) => `sha256:${String(i).padStart(64, "0")}`);
+  const mine = ids[12345];
+  const rival = ids[29999];
+  const { fact, cut } = boundFact({ outcome: "contested", candidateClaimIds: ids, gapCodes: Array.from({ length: 40 }, (_, i) => `gap-${i}`) }, mine, [rival]);
+  assert.equal(fact.candidateClaimIds.length, MAX_FACT_IDS);
+  assert.ok(fact.candidateClaimIds.includes(mine) && fact.candidateClaimIds.includes(rival));
+  assert.ok(fact.gapCodes.length <= MAX_FACT_GAPS);
+  assert.ok(fact.gapCodes.some((code) => code.startsWith("truncated:")), "the cut is recorded in the fact itself");
+  assert.equal(cut, (30000 - MAX_FACT_IDS) + (40 - MAX_FACT_GAPS), "ids and gap codes cut, as counted");
+  assert.ok(Buffer.byteLength(JSON.stringify(fact)) < 4096);
+  const started = Date.now();
+  boundFact({ outcome: "contested", candidateClaimIds: ids, gapCodes: [] }, mine, [rival]);
+  assert.ok(Date.now() - started < 500, "bounding is linear in the candidates");
+  const small = boundFact({ outcome: "current", candidateClaimIds: [mine], gapCodes: [] }, mine);
+  assert.equal(small.cut, 0);
+  assert.deepEqual(small.fact.gapCodes, []);
+});
+
+test("a slot with thousands of candidates still produces a storable decision, through the whole run", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const one = (content) => (content.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value: "banker's", posture: "stated" }] : []);
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: one }), {
+    project: async (request) => ({ outcome: "contested", candidateClaimIds: Array.from({ length: 30000 }, (_, i) => `sha256:${String(i).padStart(64, "0")}`).concat(request.claims.map((c) => c.id)).sort(), gapCodes: [] }),
+  });
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.status, "success");
+  assert.ok(report.claims.facts_truncated >= 1);
+  const stored = JSON.parse((await store.listProposals())[0].candidate.body);
+  assert.ok(Buffer.byteLength(JSON.stringify(stored.decision)) < 64 * 1024);
+});
+
+test("a contest that a Survey edit created reaches the review queue: the verdict the brief used is the one routing is given", async (t) => {
+  const { buildReviewDecisionsFromSession, initialReviewQueueSessionState } = await import("@kontourai/survey/review-workbench");
+  const { buildMemoryReviewItem, memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const vis = { kind: "restricted", audiences: ["user:owner"] };
+  const claimOf = (n) => memoryClaim({ subject: { type: "service", id: "ledger", label: "ledger" }, claimType: "knowledge.memory-claim", property: "rounding mode", value: "banker's rounding", speaker: "user", source: { ref: `sitting:seed${n}`, locator: `chars:0-${n}`, excerpt: `e${n}`, observedAt: "2026-10-01T00:00:00.000Z" }, posture: "stated", visibility: vis });
+  const [a, b] = [claimOf(1), claimOf(2)]; // they agree
+  const ids = [];
+  for (const [i, claim] of [a, b].entries()) {
+    const entry = { claim, agreement: { passes: 2, agreeing: 2 }, project: null };
+    const decision = routeMemoryChange({ type: "claim", claim, current: [], agreement: entry.agreement, sourceVisibility: vis });
+    ids.push(await store.proposeCreate({ title: `seed ${i}`, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `seed:${i}`, contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" }));
+  }
+  await store.applyCreate(ids[0], "a-human-reviewer"); // a is applied; b stays pending
+  // Survey's reviewer corrects b to a different value: they now disagree, though no stored value says so.
+  const item = buildMemoryReviewItem(routeMemoryChange({ type: "claim", claim: b, agreement: { passes: 2, agreeing: 1 }, sourceVisibility: vis }));
+  const reviewDecisions = buildReviewDecisionsFromSession({ ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "accept-proposed" }, editedValuesByItemName: { [item.metadata.name]: "half up" } });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: () => [] }), { reviewDecisions: () => reviewDecisions });
+  for (let i = 0; i < 3; i += 1) {
+    host.published.length = 0;
+    const report = await runDream(host, runOptions(ws));
+    assert.equal(report.brief_excluded.contested, 2, `run ${i}: the brief holds both back`);
+    assert.equal(report.claims.contested_routed, 1, `run ${i}: and the pending one is in the review queue`);
+    assert.equal(host.published.at(-1).reviewItems.length, 1);
+  }
+});
+
+test("the brief honours the host's projection: a slot the host calls invalid leaves its claims out, and one it calls current stays in", async (t) => {
+  const { briefOf } = { briefOf: (ws) => JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries };
+  const mk = async (project) => {
+    const f = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: (c) => (c.includes("banker's rounding") ? ["a", "b"].map((v) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value: v, posture: "stated" })) : []) } });
+    t.after(f.ws.cleanup);
+    f.host.project = project;
+    await runDream(f.host, runOptions(f.ws));
+    for (const proposal of await f.store.listProposals()) await f.store.applyCreate(proposal.id, "a-human-reviewer");
+    {
+      const report = await runDream(f.host, runOptions(f.ws));
+      return { report, entries: briefOf(f.ws) };
+    }
+  };
+  // The host says the two differing values are not a contest (say its authority admitted one over the other).
+  const calm = await mk(async (request) => ({ outcome: "current", candidateClaimIds: [request.claims[0].id], gapCodes: [] }));
+  assert.equal(calm.report.brief_excluded.contested, 0, "the host's verdict overrides the stand-in's");
+  assert.equal(calm.entries.length, 2);
+  // The host cannot answer for the slot: neither claim is current.
+  const invalid = await mk(async () => ({ outcome: "invalid", reason: "identity unresolved", candidateClaimIds: [], gapCodes: ["identity"] }));
+  assert.equal(invalid.report.brief_excluded.contested, 2);
+  assert.deepEqual(invalid.entries, []);
+});
+
+test("report counters are per claim: a claim proposed uncontested and routed on a later look counts once, as routed", async (t) => {
+  const clash = (content) => (content.includes("banker's rounding")
+    ? ["half up", "half even"].map((value) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value, posture: "stated" }))
+    : []);
+  const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: clash } });
+  t.after(ws.cleanup);
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.claims.routed + report.claims.uncontested, report.claims.created, "one outcome per proposed claim");
+  assert.equal(host.published.at(-1).decisions.length, report.claims.created, "and one decision per claim goes to publish");
+});
+
+test("the mapper is given every claim a replacement points at, not only the slot's", async (t) => {
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  t.after(ws.cleanup);
+  const seen = [];
+  await runDream({ ...host, project: async (request) => { seen.push(request); return { outcome: "current", candidateClaimIds: request.claims.map((c) => c.id), gapCodes: [] }; } }, runOptions(ws, { onStage: () => {} }));
+  assert.ok(seen.length > 0);
+  for (const request of seen) assert.ok(request.claims.every((claim) => claim.metadata.memory));
+  assert.equal((await store.listProposals()).length, 2);
+});

@@ -38,7 +38,7 @@ test("a claim that contradicts a current one is routed to review, published once
   assert.equal(published.length, 1);
   const [batch] = published;
   assert.equal(batch.runId, report.run_id);
-  assert.equal(batch.decisions.length, 3, "two proposed, plus the earlier claim routed now");
+  assert.equal(batch.decisions.length, 2, "one decision per claim: the earlier claim's is the one made when the contest was found");
   assert.deepEqual(batch.decisions.filter((d) => d.outcome === "routed")[0].reasons.map((r) => r.rule), ["contested-by-accumulation"]);
   assert.equal(batch.reviewItems.length, 2);
   assert.equal(batch.reviewItems[0].spec.candidates.length, 2, "a current/proposed pair for the reviewer");
@@ -412,7 +412,7 @@ test("the invocation contract a host scheduler binds to is pinned: ids, exports,
   assert.equal(report.schema_version, "1.0");
   assert.equal(report.trigger, "station-scheduler");
   assert.deepEqual(Object.keys(report.sittings).sort(), ["deferred_incomplete", "deferred_over_cap", "distilled", "resumed", "reused", "seen"]);
-  assert.deepEqual(Object.keys(report.claims).sort(), ["contested_routed", "created", "distilled", "peers_capped", "rejected", "rerouted", "reused", "routed", "truncated", "uncontested"]);
+  assert.deepEqual(Object.keys(report.claims).sort(), ["contested_routed", "created", "distilled", "facts_truncated", "peers_capped", "rejected", "rerouted", "reused", "routed", "truncated", "uncontested"]);
   assert.ok(["success", "noop", "dry-run", "blocked", "failed"].includes(report.status));
   assert.ok(fs.existsSync(path.join(ws.dreamDir, "reports", `${report.run_id}.json`)));
 });
