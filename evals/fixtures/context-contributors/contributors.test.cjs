@@ -140,11 +140,13 @@ test('context mirror imports its package marker without parent search', async t 
 
 test('bundled marker has an explicit ESM package boundary', t => {
  const {temp}=setup(t);const install=path.join(temp,'standalone');
+ // A parent module scope could mask a missing package boundary in the bundle.
+ for (let parent=path.dirname(fs.realpathSync(temp));;) { const file=path.join(parent,'package.json'); if (fs.existsSync(file)) assert.notEqual(JSON.parse(fs.readFileSync(file,'utf8')).type,'module',`unexpected parent module scope: ${file}`); const next=path.dirname(parent);if(next===parent) break;parent=next; }
  for (const dir of ['scripts/hooks','scripts/lib']) { const dest=path.join(install,dir);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.cpSync(path.join(root,dir),dest,{recursive:true}); }
  for (const file of ['scripts/package.json','kits/knowledge/package.json','kits/knowledge/memory-marker.js']) { const dest=path.join(install,file);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,file),dest); }
  assert.equal(JSON.parse(fs.readFileSync(path.join(install,'kits/knowledge/package.json'),'utf8')).type,'module');
  const cwd=tempDir(t); const raw=JSON.stringify({hook_event_name:'SessionStart',cwd});
- for (const adapter of ['claude','codex']) { const args=adapter==='codex'?['workflow-steering','workflow-steering.js','default']:['SessionStart','workflow-steering','workflow-steering.js','default'];const p=spawnSync(process.execPath,[path.join(install,'scripts/hooks',`${adapter}-hook-adapter.js`),...args],{input:raw,encoding:'utf8',env:process.env});assert.equal(p.status,0,p.stderr);assert.match(JSON.parse(p.stdout).hookSpecificOutput.additionalContext,/violet kestrel/); }
+ for (const adapter of ['claude','codex']) { const args=adapter==='codex'?['workflow-steering','workflow-steering.js','default']:['SessionStart','workflow-steering','workflow-steering.js','default'];const p=spawnSync(process.execPath,[path.join(install,'scripts/hooks',`${adapter}-hook-adapter.js`),...args],{input:raw,encoding:'utf8',env:{...process.env,NODE_OPTIONS:`${process.env.NODE_OPTIONS || ''} --no-experimental-detect-module`}});assert.equal(p.status,0,p.stderr);assert.match(JSON.parse(p.stdout).hookSpecificOutput.additionalContext,/violet kestrel/); }
 });
 
 test('non-atomic fallback rejects links and identity changes before reading', t => {
