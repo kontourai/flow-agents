@@ -4,9 +4,7 @@
  * CORPUS_STORE_ENTRY must point at the ESM entry of an installed packed
  * @kontourai/corpus-store (never a source deep import). SURFACE_ENTRY must name
  * an installed or built Surface public entry containing the erasure cascade.
- * This separate test is
- * explicit while the purge package is awaiting publication; it fails closed
- * when the packed entry is not supplied.
+ * The test fails closed when the installed package entry is not supplied.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -23,6 +21,33 @@ if (!process.env.CORPUS_STORE_ENTRY) throw new Error("CORPUS_STORE_ENTRY must na
 if (!process.env.SURFACE_ENTRY) throw new Error("SURFACE_ENTRY must name the Surface entry with erasure support");
 const corpus = await import(pathToFileURL(resolve(process.env.CORPUS_STORE_ENTRY)).href);
 const surface = await import(pathToFileURL(resolve(process.env.SURFACE_ENTRY)).href);
+// Exercise the installed writer's bounded shapes directly: the public purge
+// selects them only at the vault's size limit. Production consumes the public API.
+const { tombstoneOf } = await import(new URL('./shared/purge.js', pathToFileURL(resolve(process.env.CORPUS_STORE_ENTRY))));
+test('published writer bounded tombstones project as deleted claims', async () => {
+  const at = '2026-11-02T12:00:00.000Z';
+  for (const shape of ['compact', 'minimal']) {
+    const record = { id: `bounded-${shape}`, type: shape === 'minimal' ? 'x'.repeat(1024) : 'raw',
+      title: 'BOUNDED_SECRET', body: 'BOUNDED_SECRET', category: 'private', status: 'active',
+      created_at: at, updated_at: at, provenance: { agent: 'creator' }, links: [], mutation_log: [] };
+    const stone = tombstoneOf(record, at, { agent: 'owner', rationale: `   ${'request '.repeat(100)}` }, undefined, shape);
+    assert.equal(stone.mutation_log.at(-1).evidence.cause, 'requested');
+    if (shape === 'minimal') assert.equal(stone.type, '[omitted]');
+    const store = {
+      async listByType(type) { return type === stone.type ? [stone] : []; },
+      async listByCategory(category) { return category === 'purged' ? [stone] : []; },
+      async getLinks() { return { forward: [], reverse: [] }; },
+    };
+    const bundle = await buildKnowledgeTrustBundle({ store: new MarkdownVaultProvider({ store }) });
+    const claim = bundle.claims.find((item) => item.subjectId === stone.id);
+    assert.ok(claim, `${shape} tombstone must be projected`);
+    assert.equal(surface.isDeletedClaim(claim), true);
+    assert.equal(claim.value, null);
+    assert.match(claim.metadata.surfaceRetention.rationale, /^request/);
+    assert.ok(!JSON.stringify(bundle).includes('BOUNDED_SECRET'));
+    surface.validateTrustBundle(bundle);
+  }
+});
 for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault", ObsidianKnowledgeStore]]) {
   test(`${profile}: purge is denied until Corpus and host authorization are selected`, async () => {
     const root = mkdtempSync(join(tmpdir(), "knowledge-purge-deny-"));

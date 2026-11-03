@@ -1945,7 +1945,7 @@ violate that requirement).
 ## Addendum M: Privileged purge (issue #1570)
 
 The owner approved an explicit erasure exception on 2026-11-02. The operation is
-owned by [Corpus Store](https://github.com/kontourai/corpus/blob/250138191da992f7aae928c9cf638fbf2b36cfe5/packages/store/README.md#owner-decisions).
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/1cb793f9b13408256536ebb97a15a3dcf98a0b23/packages/store/README.md#owner-decisions).
 Both bundled adapter entry points can explicitly select a host-supplied Corpus
 module. In that mode the returned store delegates **all** operations to the
 corresponding Corpus adapter; the kit does not implement a second cascade.
@@ -2045,7 +2045,8 @@ and does not quote a tombstoned linking record as evidence for a live target. Mi
 purge audit evidence fails the projection; no erasure actor or rationale is
 invented. A shortened vault tombstone keeps a bounded, non-blank rationale; a
 malformed tombstone with an empty or whitespace-only rationale fails closed.
-The bounded-rationale resolution is tracked in corpus#57.
+Corpus #57 remains open for upstream tracking; the published package retains
+the bounded rationale and the kit conformance gate checks both bounded shapes.
 If a minimal tombstone's oversized type is replaced with `[omitted]`, the
 default provider and Surface projection still include the deletion fact via the
 purged-category history. An explicit record-type filter can exclude it.
