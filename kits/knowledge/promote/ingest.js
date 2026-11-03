@@ -12,6 +12,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readIfExists, markdownSection, parseDecisionList } from "./lib.js";
+import { ingestRuntimeSessions } from "./runtime-session.js";
+
+/** Residue sources accepted by `ingestFromSource` (schemas/knowledge/residue.schema.json). */
+export const SESSION_SOURCE_IDS = Object.freeze(["workflow-sidecar", "runtime-session"]);
 
 function readJson(file) {
   const raw = readIfExists(file);
@@ -100,4 +104,19 @@ export function ingestSession(sessionDir, options = {}) {
     transcriptRefs: collectTranscriptRefs(sessionDir),
     touchedFiles: [...touchedFiles].sort(),
   };
+}
+
+/**
+ * Pluggable residue source dispatch (#669 R1).
+ *
+ * - `workflow-sidecar`: `input` is a completed session directory; returns
+ *   `{ residues: [ingestSession(input, options)] }` — the existing residue,
+ *   unchanged.
+ * - `runtime-session`: `input` is the options object for
+ *   `ingestRuntimeSessions`; returns `{ residues, report, candidateCursor }`.
+ */
+export function ingestFromSource(source, input, options = {}) {
+  if (source === "workflow-sidecar") return { residues: [ingestSession(input, options)] };
+  if (source === "runtime-session") return ingestRuntimeSessions({ ...input, ...options });
+  throw new Error(`unknown residue source '${source}'; expected one of ${SESSION_SOURCE_IDS.join(", ")}`);
 }

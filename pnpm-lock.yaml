@@ -17,6 +17,9 @@ importers:
       '@kontourai/dispatch':
         specifier: 0.8.0
         version: 0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.0(playwright@1.61.0))
+      '@kontourai/ferry':
+        specifier: 0.6.0
+        version: 0.6.0
       '@kontourai/flow':
         specifier: 5.4.0
         version: 5.4.0
@@ -32,6 +35,9 @@ importers:
       '@kontourai/survey':
         specifier: 8.2.0
         version: 8.2.0(typescript@7.0.2)
+      '@kontourai/thread':
+        specifier: 0.5.0
+        version: 0.5.0
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
@@ -1161,6 +1167,11 @@ packages:
       '@kontourai/datum':
         optional: true
 
+  '@kontourai/ferry@0.6.0':
+    resolution: {integrity: sha512-es7LSrxpKGHCMWBIwj+5RYE6Bx7FQymPgty1xktsleeb2nqBZ6u0UrNeP/4jyPtG2FjDvjQPxZbPmdkzHiZEZQ==}
+    engines: {node: '>=22'}
+    hasBin: true
+
   '@kontourai/flow@5.4.0':
     resolution: {integrity: sha512-jGimrSdVxzEuI2NvQ++t2xmEEAXoXCXtHat2pfBTSsOAdXzn2OQbHO9WskpmuE6F7zvPrJrky7GUAVOtixDFRg==}
     engines: {node: '>=22'}
@@ -1233,6 +1244,10 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  '@kontourai/thread@0.5.0':
+    resolution: {integrity: sha512-MhHKngKoKAWIEkvANx4YMrdYgBH5pRAGU3ocMiKRW1qcw6eluUyDB659vEgxFFcYy+FUXUrWb2EGt/7cI0WgIg==}
+    engines: {node: '>=22'}
 
   '@kontourai/traverse@0.18.0':
     resolution: {integrity: sha512-B7E5LfPcVNEOV0U4VDgf94C/sB/3DepJmld+rSYDOdaxB525wBKA8hmnX8Cfh2ML2/u07T+8T6IWy8PLj83wvw==}
@@ -1737,10 +1752,12 @@ packages:
   '@smithy/core@3.25.0':
     resolution: {integrity: sha512-TTD6el7tvKyafkXBf7XO3jLOE+qVxOTrLjp/fEGiV3BMfUHK/LfdYlQO9YgZvzxC7kqA3H/IhJXNqQgnbgjb7A==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/core@3.36.0':
     resolution: {integrity: sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.4.0':
     resolution: {integrity: sha512-pPQmNdEvMJttv9z2kdYxoui83p/nr32zjMf0aMfmzmGmFEgKXUfy0vXiNg0fx4R5XLQzmJBLM9Wg0guEq2/q8A==}
@@ -5504,6 +5521,12 @@ snapshots:
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
 
+  '@kontourai/ferry@0.6.0':
+    dependencies:
+      '@kontourai/thread': 0.5.0
+      commander: 15.0.0
+      zod: 4.4.3
+
   '@kontourai/flow@5.4.0':
     dependencies:
       '@kontourai/surface': 2.14.0
@@ -5587,6 +5610,10 @@ snapshots:
     transitivePeerDependencies:
       - kerberos
       - supports-color
+
+  '@kontourai/thread@0.5.0':
+    dependencies:
+      zod: 4.4.3
 
   '@kontourai/traverse@0.18.0(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)':
     dependencies:
