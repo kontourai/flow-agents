@@ -1075,3 +1075,24 @@ test("the mapper is given every claim a replacement points at, not only the slot
   assert.ok(withEdge, "the host was asked about the slot that holds the replacement; the mapper was not starved of its target");
   assert.ok(withEdge.claims.some((claim) => claim.id === target.id), "and the replaced claim travelled with its successor");
 });
+
+test("a decision embeds only the peers that matter: agreeing peers that are no narrower are left out", async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const vis = { kind: "restricted", audiences: ["user:owner"] };
+  for (let n = 0; n < 3; n += 1) {
+    const claim = memoryClaim({ subject: { type: "service", id: "ledger service", label: "ledger service" }, claimType: "knowledge.memory-claim", property: "rounding mode", value: "banker's rounding", speaker: "user", source: { ref: `sitting:seed${n}`, locator: `chars:0-${n}`, excerpt: `e${n}`, observedAt: "2026-10-01T00:00:00.000Z" }, posture: "stated", visibility: vis });
+    const entry = { claim, agreement: { passes: 2, agreeing: 2 }, project: null };
+    const decision = routeMemoryChange({ type: "claim", claim, current: [], agreement: entry.agreement, sourceVisibility: vis });
+    await store.proposeCreate({ title: `seed ${n}`, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `seed:${n}`, contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+  }
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract());
+  await runDream(host, runOptions(ws, { visibility: vis }));
+  const mine = (await store.listProposals()).map((p) => JSON.parse(p.candidate.body)).find((e) => e.sitting.id.startsWith("codex:") && e.claim.property === "rounding mode");
+  assert.ok(mine, "this run proposed a claim in the same slot as the three seeds");
+  assert.deepEqual(mine.decision.input.current, [], "three peers that agree and are no narrower add nothing to the decision");
+  assert.equal(mine.decision.outcome, "proposed");
+});
