@@ -427,8 +427,13 @@ an entity reference, a double-backtick span, an image, HTML, an intraword `*`, G
 the whole paragraph exactly as written, so it matches only a claim that is a verbatim sentence of its source and otherwise the
 verifier abstains. Nothing is rescanned, so removing one marker never turns another
 into formatting. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot read
-negation, so production callers inject a model or human verifier. Only paragraphs, list items and headings (an ATX heading, or a setext heading without its underline) are prose; fenced and
-indented code (also inside a quote), tables, HTML blocks, thematic breaks and link definitions are not. Stated limits: the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted
+negation, so production callers inject a model or human verifier. Block structure is read only for a **flat** document: paragraphs, ATX headings, top-level list items with
+continuation lines, tables and fenced code at column 0 (both skipped) and thematic breaks. A document that has anything whose
+meaning depends on a container or on context further up (a quote, an indented fence, an HTML block, a reference definition, a
+nested list item or a list item whose content is a block, indented code, a setext underline, a lone CR, a NUL) is read one
+physical line per unit, which is exactly the version 2 rule: the sentence reading switches off for that document rather than guess
+at CommonMark's container, laziness and interruption rules. Measured on the real ops Knowledge store at the dogfood pin, 177 of
+205 records are flat; in this repository's `docs/`, 34 of 44. Stated limits: the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted
 initialisms and a short abbreviation list exempt), so an abbreviation it does not know can cut a sentence early and a sentence
 tail would then be supported; the checks are one pass over a paragraph and one prefix test per sentence start, because the
 verifier is synchronous and a timeout cannot interrupt it; a statement is judged the same in a short paragraph and a long

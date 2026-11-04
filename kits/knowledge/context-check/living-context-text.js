@@ -23,13 +23,12 @@
  * and fenced code (also inside a quote), tables, HTML blocks, thematic breaks, setext underlines and link definitions are not. Nothing is ever rescanned, so removing one marker cannot turn another into formatting. A lone `_` inside
  * a word (`snake_case`) and a lone `*` between spaces are text, as in CommonMark. The scan is one pass over the paragraph.
  *
- * Block structure follows CommonMark's rules for the constructs below and treats everything else as not prose: quote prefixes are a
- * container (consecutive quoted lines are one paragraph; an unprefixed line continues a quoted paragraph unless it starts a block), a fence
- * closes only in the container that opened it, a fence inside a list item may be indented, an ordered marker other than `1.` cannot
- * interrupt a paragraph, HTML blocks, tables and link definitions are skipped to the end of their block, lone CR is a line ending and NUL
- * becomes U+FFFD. Not modelled, so not claimed: nested lists beyond a continuation line, a list item's own container indentation, setext
- * headings of several lines inside a quote, and block constructs this module does not list. This is a floor; production callers inject a
- * model or human verifier.
+ * Block structure is read only for flat documents (see `documentUnits`): paragraphs, ATX headings, top-level list items with continuation
+ * lines, tables and fenced code at column 0 (skipped) and thematic breaks. A document that has anything whose meaning depends on a container
+ * or on context further up (a quote, an indented fence, an HTML block, a reference definition, a nested list item, indented code, a setext underline, a lone CR, a NUL) is read
+ * one physical line per unit: the version 2 rule and nothing more. The hard cases of CommonMark (laziness, container-relative fences,
+ * interrupting rules) are never modelled; they switch the sentence reading off. This is a floor; production callers inject a model or
+ * human verifier.
  *
  * Stated limits: a passage taken from a paragraph is normally found again by the verifier, but not always (a list nested in a list,
  * a code literal that begins with `-`, `>` or `*`); `bestPassage` checks it and `ask` abstains when it is not. The sentence cut is a heuristic (a full stop, space, then a capital, digit or opening quote). An abbreviation
@@ -38,17 +37,23 @@
  * @module living-context-text
  */
 
-// Block syntax, read from CommonMark and kept deliberately narrower than it: whatever is not recognised as prose is not prose.
-const QUOTE_PREFIX = /^(?:[ ]{0,3}>[ ]?)+/;
-const LIST_MARKER = /^[ \t]*(?:[-*+]|(\d{1,9})[.)])(?:[ \t]+|$)/;
+// Block syntax. Only the flat, common subset is read; a document that uses anything whose meaning depends on a container or on context
+// further up (see POISON) is not read as prose at all, line by line only. That is the whole safety argument for the block layer.
+const LIST_MARKER = /^[ ]?(?:[-*+]|(\d{1,9})[.)])(?:[ \t]+|$)/; // top level only: at most one space of indentation
 const ATX = /^[ ]{0,3}#{1,6}(?:[ \t]|$)/;
 const THEMATIC = /^[ ]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const FENCE_OPEN = /^(`{3,}|~{3,})/; // a fence at column 0 only; it swallows lines up to its closing fence (or the end of the document)
+const fenceCloses = (line, fence) => { const match = /^(`{3,}|~{3,})[ \t]*$/.exec(line); return Boolean(match) && match[1][0] === fence.char && match[1].length >= fence.length; };
 const SETEXT = /^[ ]{0,3}(?:=+|-+)[ \t]*$/;
-const FENCE = /^[ ]{0,3}(`{3,}|~{3,})/;
-const HTML_START = /^[ ]{0,3}<[!/?A-Za-z]/;
-const DEFINITION = /^[ ]{0,3}\[[^\]]+\]:/;
-// How an HTML block ends: a comment, a processing instruction, CDATA, a declaration and pre/script/style/textarea have their own closer; any other tag ends at a blank line.
-const HTML_CLOSERS = [[/^[ ]{0,3}<!--/, /-->/], [/^[ ]{0,3}<\?/, /\?>/], [/^[ ]{0,3}<!\[CDATA\[/, /\]\]>/], [/^[ ]{0,3}<![A-Za-z]/, />/], [/^[ ]{0,3}<(?:pre|script|style|textarea)\b/i, /<\/(?:pre|script|style|textarea)>/i]];
+const POISON = [
+  /^[ \t]*>/,                               // a quote: containers, laziness
+  /^[ \t]+(?:`{3,}|~{3,})/,                 // an indented fence: its closer is relative to a container
+  /^[ \t]*<[!/?A-Za-z]/,                    // an HTML block (or a tag that starts one)
+  /^[ ]{0,3}\[[^\]]+\]:/,                   // a link reference or footnote definition, with continuation lines
+  /^[ \t]{2,}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/, // a nested list item
+  // A list item whose content is itself a block: a quote, a fence, a heading, HTML, another item, or indented code (five spaces after the marker).
+  /^[ ]?(?:[-*+]|\d{1,9}[.)])(?:[ \t]+(?:>|`{3,}|~{3,}|#{1,6}(?:[ \t]|$)|<[!/?A-Za-z]|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))|[ ]{5,}\S|\t)/,
+];
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`); tested on the last word only.
 const ABBREVIATION = /^(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
 
@@ -132,80 +137,91 @@ function splitSentences(text) {
 }
 
 /**
- * The statements a document makes, as complete sentences. A document is read the way a person reads it: a blank line, a list
- * item, a quote or a heading starts a new unit, and a line without one continues the unit above, so a hard-wrapped paragraph is
- * one unit; a heading is one line. A unit is rendered (`renderInline`) and then cut into sentences at `. `, `! ` or `? ` before a
- * capital, digit or opening quote (case is kept until after the cut so the capital can be seen). Fenced code and front matter are
- * not prose and yield no unit.
+ * The statements a document makes, as complete sentences. A document is read the way a person reads it: a blank line, a list item or
+ * a heading starts a new unit, and a line without one continues the unit above, so a hard-wrapped paragraph is one unit; a heading is
+ * one line. A unit is rendered (`renderInline`) and then cut into sentences at `. `, `! ` or `? ` before a capital, digit or opening
+ * quote (case is kept until after the cut so the capital can be seen). Tables are skipped to their blank line.
+ *
+ * Only a flat document is read this way: paragraphs, ATX headings, top-level list items with continuation lines, tables, thematic
+ * breaks and fenced code at column 0 (skipped). If the document has anything else whose meaning depends on a container or on context further up (a quote, an indented fence, an HTML
+ * block, a reference definition, a nested list item, indented code, a setext underline, a lone CR or a NUL), it is read one physical
+ * line per unit, which is the version 2 rule and nothing more.
  *
  * @returns {{kind: "heading"|"item"|"paragraph", sentences: string[]}[]}
  */
 export function documentUnits(text) {
-  const units = [];
-  let current; // the open paragraph, item or heading: { kind, parts, container }
-  let fence;   // { char, length, container }
-  let skip;    // a table, an HTML block or a link definition: not prose up to its end { until?, closed, container }
-  const lines = text.replace(/\u0000/g, "\uFFFD").split(/\r\n|\r|\n/);
-  let index = 0;
+  const lines = text.split(/\r\n|\n/);
+  let start = 0;
   if (lines[0] === "---") {
     const end = lines.indexOf("---", 1);
-    if (end > 0) index = end + 1;
+    if (end > 0) start = end + 1;
   }
-  const blank = (line, container, core) => line.trim() === "" || (container === skip?.container && core.trim() === "");
-  for (; index < lines.length; index++) {
+  if (/[\r\u0000]/.test(text) || isContextual(lines, start)) return lineUnits(lines.slice(start));
+  const units = [];
+  let current;
+  let fence;
+  let skipping = false; // a table: not prose up to the blank line
+  for (let index = start; index < lines.length; index++) {
     const line = lines[index];
-    const prefix = QUOTE_PREFIX.exec(line)?.[0] ?? "";
-    const container = prefix.replace(/[^>]/g, ""); // the quote nesting this line is in: "", ">", ">>"
-    const core = line.slice(prefix.length);
-    if (fence) {
-      // A fence opened in a container closes only on a line of that container: a `>` in code is code.
-      const closing = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(core);
-      if (container === fence.container && closing && closing[1][0] === fence.char && closing[1].length >= fence.length) fence = undefined;
-      continue;
-    }
-    if (skip) {
-      if (skip.until && !skip.closed) { if (skip.until.test(core)) skip.closed = true; continue; }
-      if (blank(line, container, core)) { skip = undefined; current = undefined; }
-      continue;
-    }
-    if (core.trim() === "") { current = undefined; continue; }
-    const list = LIST_MARKER.exec(core);
-    const orderedStart = list && list[1] !== undefined;
-    const listStart = list && core.slice(list[0].length).trim() !== "" && !(orderedStart && current?.kind === "paragraph" && Number(list[1]) !== 1);
-    const opensFence = FENCE.exec(core) ?? (current?.kind === "item" ? /^[ \t]+(`{3,}|~{3,})/.exec(core) : null);
-    const html = HTML_START.test(core);
-    const table = core.includes("|");
-    const startsBlock = ATX.test(core) || THEMATIC.test(core) || opensFence || html || table || listStart;
-    // A line that drops a quote prefix continues the quote's paragraph (laziness); anything that starts a block, or a different quote depth, does not.
-    if (current && current.container !== container) {
-      if (container === "" && !startsBlock && current.kind !== "heading") { current.parts.push(core.replace(/\s+/g, " ").trim()); continue; }
-      current = undefined;
-    }
-    if (opensFence) { fence = { char: opensFence[1][0], length: opensFence[1].length, container }; current = undefined; continue; }
-    if (current && (current.kind === "paragraph" || (current.kind === "item" && /^[ \t]{2,}/.test(core))) && SETEXT.test(core)) { current.kind = "heading"; current = undefined; continue; } // a setext underline
-    if (THEMATIC.test(core)) { current = undefined; continue; }
-    // Not prose, and not allowed to leave half a paragraph behind. A table runs to the next blank line; an HTML block to its end and then to
-    // the next blank line; a link definition (only at a block start: it cannot interrupt a paragraph) with whatever continues it.
-    if (table || html || (current === undefined && DEFINITION.test(core))) {
+    if (fence) { if (fenceCloses(line, fence)) fence = undefined; continue; }
+    const opening = FENCE_OPEN.exec(line);
+    if (opening) { fence = { char: opening[1][0], length: opening[1].length }; current = undefined; skipping = false; continue; }
+    if (line.trim() === "") { current = undefined; skipping = false; continue; }
+    if (skipping) continue;
+    if (THEMATIC.test(line)) { current = undefined; continue; }
+    if (line.includes("|")) {
       if (current && units.at(-1) === current) units.pop();
       current = undefined;
-      const kind = html ? HTML_CLOSERS.find(([opener]) => opener.test(core)) : undefined;
-      // An HTML block that closes on its own opening line still skips to the next blank line: what follows a tag is not read as prose.
-      skip = { until: kind?.[1], closed: kind ? kind[1].test(core.replace(kind[0], "")) : true, container };
+      skipping = true;
       continue;
     }
-    if (current === undefined && /^(?: {4}|\t)/.test(core)) continue; // an indented code block
-    const heading = ATX.test(core);
-    let body = core.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : list && listStart ? LIST_MARKER : /^$/, "").replace(/\s+/g, " ").trim();
+    const list = LIST_MARKER.exec(line);
+    const listStart = list && line.slice(list[0].length).trim() !== "" && !(list[1] !== undefined && current?.kind === "paragraph" && Number(list[1]) !== 1);
+    const heading = ATX.test(line);
+    let body = line.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : listStart ? LIST_MARKER : /^$/, "").replace(/\s+/g, " ").trim();
     if (heading) body = body.replace(/\s+#+$/, ""); // an ATX heading's optional closing sequence is not displayed
     if (heading || listStart || current === undefined) {
-      const kind = heading ? "heading" : listStart ? "item" : "paragraph";
-      current = { kind, parts: [body], container };
+      current = { kind: heading ? "heading" : listStart ? "item" : "paragraph", parts: [body] };
       units.push(current);
-      if (kind === "heading") current = undefined;
+      if (heading) current = undefined;
     } else current.parts.push(body);
   }
   return units.map(({ kind, parts }) => ({ kind, sentences: splitSentences(renderInline(parts.join(" "))).map((sentence) => sentence.trim()).filter(Boolean) }));
+}
+
+/** Whether `documentUnits` reads this document as prose (the flat reading) rather than one line per unit. */
+export function isFlatDocument(text) {
+  const lines = text.split(/\r\n|\n/);
+  const start = lines[0] === "---" && lines.indexOf("---", 1) > 0 ? lines.indexOf("---", 1) + 1 : 0;
+  return !/[\r\u0000]/.test(text) && !isContextual(lines, start);
+}
+
+/** Whether the document uses anything the flat reading cannot place: see `documentUnits`. */
+function isContextual(lines, start) {
+  let previous = ""; // the previous line, "" at the start, after a blank line and around a fence
+  let previousIsHeading = false;
+  let fence;
+  for (let index = start; index < lines.length; index++) {
+    const line = lines[index];
+    if (fence) { if (fenceCloses(line, fence)) { fence = undefined; previous = ""; } continue; }
+    const opening = FENCE_OPEN.exec(line);
+    if (opening) { fence = { char: opening[1][0], length: opening[1].length }; previous = ""; previousIsHeading = false; continue; }
+    if (POISON.some((pattern) => pattern.test(line))) return true;
+    if (SETEXT.test(line) && previous.trim() !== "") return true; // an underline turns the line above into a heading
+    if (/^(?: {4}|\t)/.test(line) && (previous.trim() === "" || previousIsHeading)) return true; // indented code (or a loose item's content)
+    previousIsHeading = ATX.test(line);
+    previous = line;
+  }
+  return false;
+}
+
+/** One unit per physical line: the version 2 reading, with a list or heading marker and a quote marker left off the line it starts. */
+function lineUnits(lines) {
+  return lines.filter((line) => line.trim() !== "").map((line) => {
+    const heading = ATX.test(line);
+    const sentence = line.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : /^(?:\s*(?:>|[*+-](?=\s)))+/, "").replace(/\s+/g, " ").trim();
+    return { kind: heading ? "heading" : "paragraph", sentences: sentence ? [sentence] : [] };
+  });
 }
 
 /**
