@@ -421,7 +421,7 @@ physical line of its authority text, or a complete sentence (or a run of consecu
 heading after the paragraph's hard wraps are joined, ignoring case, whitespace, list and quote markers, inline Markdown and one
 trailing full stop. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot
 read negation, so production callers inject a model or human verifier. Code between backticks is compared exactly as written;
-an unpaired `*` or `_` is a character, not formatting; emphasis is stripped in one pass, one level of nesting either way (`**a *b* c**`, `*a **b** c*`), and deeper or adjacent-delimiter nesting (`***a***`) is left as written, so it can only make the verifier abstain; a heading is a unit of its own; a fenced block is not prose. Stated limits:
+an unpaired `*` or `_` is a character, not formatting; inline Markdown is removed by one scan that never rescans its own output (a marker exposed by removing another stays text), nesting to three levels is stripped (`**a *b* c**`, `*a **b** c*`), and a run of three or more markers, an intraword `_`, or a marker with no partner nearby (at most 50 later runs within 2,000 characters) is left as written, so these can only make the verifier abstain; a heading is a unit of its own; a fenced block is not prose. Stated limits:
 the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted initialisms and a short
 abbreviation list exempt), so an abbreviation it does not know can cut a sentence early and a sentence tail would then be
 supported; and every pattern is bounded and a statement is matched by one prefix test per sentence start, because the verifier is
