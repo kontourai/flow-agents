@@ -1368,6 +1368,20 @@ test("review time: two histories that reuse one session name give no time, in ei
   for (const order of [[...quick, ...later], [...later, ...quick]]) assert.equal(seconds(order), null);
 });
 
+test("review time: a name collision on an event about another item still proves the name was reused (review 19)", () => {
+  const { decision, item } = routedClaim();
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T10:00:20.000Z" } };
+  const event = (sequence, eventType, at, itemName, extra = {}) => ({ kind: "ReviewSessionEvent", metadata: { name: `e-${sequence}-${eventType}-${at}` },
+    spec: { sessionName: "review-workbench-session", sequence, eventType, occurredAt: at, actor: { id: "person:reviewer" }, reviewItemName: itemName, ...extra } });
+  // History A: selects another item (2), then this item (3), and submits this decision (4) at the decision's instant.
+  const a = [event(2, "item-selected", "2026-11-02T09:59:00.000Z", "another-item"), event(3, "item-selected", "2026-11-02T10:00:00.000Z", item.metadata.name), event(4, "decision-submitted", "2026-11-02T10:00:20.000Z", item.metadata.name, { reviewDecisionName: "decision-1" })];
+  // History B reuses the name: its sequence 2 collides with A's sequence 2, which is about another item.
+  const b = [event(2, "item-selected", "2026-11-02T09:00:00.000Z", item.metadata.name)];
+  const seconds = reviewEvents => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents }).reviewSeconds;
+  assert.equal(seconds(a), 20, "alone, the history is one session");
+  for (const order of [[...a, ...b], [...b, ...a]]) assert.equal(seconds(order), null, "the collision is on another item's event, and it is still two histories");
+});
+
 test("review time: a replayed review (snapshot instant kept) never takes another session's matching submission (review 18)", () => {
   const { decision, item } = routedClaim();
   // Replay kept the snapshot's 08:00 as the decision's reviewedAt although the review was submitted at 10:00:20.

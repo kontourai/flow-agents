@@ -70,6 +70,6 @@ memory; every other piece stays with its owner.
 - Review time is selection-to-submission dwell of the session that submitted the decision, from Survey
   session events, and is absent, not estimated, when there are none or when the history can be read two ways
   (Survey's decision does not name its session: more than one session submitting the decision, or one session
-  name carrying a sequence twice, gives no time). It is an upper bound on attention.
+  name carrying a sequence twice, gives no time; the checks narrow and do not prove ownership). It is an upper bound on attention.
 - Every recall path must present claims through `presentMemoryClaims` or enforce the
   same rule: no claim without its posture and review label.
