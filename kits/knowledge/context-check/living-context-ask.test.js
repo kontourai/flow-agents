@@ -936,7 +936,7 @@ describe("the block layer: a flat document is read as prose, anything contextual
     for (const claim of ["Compute", "The key is reserved.", "Next one follows on a second line.", "First item with a wrapped line.", "Second item.", "Ordered item wrapped.", "After the fence ends.", "Do not 2) enable signing."]) {
       assert.equal(await verdict(claim, doc), "supported", claim);
     }
-    for (const claim of ["not prose cell", "a quote in code a list in code", "enable signing.", "Compute ##", "reserved. Next one follows"]) {
+    for (const claim of ["not prose cell", "| a | b | |---|---| | not prose | cell |", "a quote in code a list in code", "enable signing.", "Compute ##", "reserved. Next one follows"]) {
       assert.equal(await verdict(claim, doc), "not-addressed", claim);
     }
   });
