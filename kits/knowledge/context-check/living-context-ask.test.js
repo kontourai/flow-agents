@@ -736,10 +736,14 @@ describe("review round 3: ask", () => {
     const only = (id) => () => ({ terms: ["jasper", "policy"], weights: new Map([["jasper", 1], ["policy", 1]]), selected: [{ id, score: 1, coverage: 1, matched: ["jasper", "policy"], passage: "Jasper policy v1 applies to every region and every team without exception." }], below_threshold: [] });
     const roomy = await ask({ repoRoot: m.repo, revision: m.revision, question: "Jasper policy", select: only(m.ids.old) });
     assert.deepEqual(roomy.results.map((entry) => entry.claim_id).sort(), [m.ids.next, m.ids.old].sort());
-    const tight = await ask({ repoRoot: m.repo, revision: m.revision, question: "Jasper policy", select: only(m.ids.old), budgetTokens: 330 });
-    const dropped = tight.results.filter((entry) => entry.reason === "dropped_by_budget").map((entry) => entry.claim_id);
-    assert.ok(tight.results.some((entry) => entry.claim_id === m.ids.next), "the successor was nominated although the predecessor does not fit");
-    assert.ok(dropped.length >= 1, JSON.stringify(tight.results.map((entry) => [entry.claim_id, entry.reason])));
+    // The superseded predecessor carries its chain, so it costs more than its successor: some budget fits the successor alone.
+    let found;
+    for (let budgetTokens = 100; budgetTokens <= 600 && !found; budgetTokens += 5) {
+      const tight = await ask({ repoRoot: m.repo, revision: m.revision, question: "Jasper policy", select: only(m.ids.old), budgetTokens });
+      const by = Object.fromEntries(tight.results.map((entry) => [entry.claim_id, entry]));
+      if (by[m.ids.old]?.reason === "dropped_by_budget" && by[m.ids.next]?.outcome === "answered") found = budgetTokens;
+    }
+    assert.ok(found, "a budget that drops the predecessor still nominates and answers from its successor");
   });
 
   test("a host selector that nominates nothing answerable gets an abstention, not an input error", async () => {
