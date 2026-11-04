@@ -27,12 +27,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: flow-agents-kit-gates-demo-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release-evidence-gate-demo:
-    concurrency:
-      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Release Evidence gate — verified passes, rejected is refused
     runs-on: ubuntu-latest
     timeout-minutes: 10
