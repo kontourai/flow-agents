@@ -38,6 +38,8 @@ if npm run knowledge:yaml:check && node --test \
   kits/knowledge/providers/health/health-pass.test.js \
   kits/knowledge/promote/promote.test.js \
   kits/knowledge/promote/runtime-session.test.js \
+  kits/knowledge/promote/store-target.test.js \
+  kits/knowledge/promote/store-target.corpus.test.js \
   kits/knowledge/providers/neo4j/neo4j.test.js \
   kits/knowledge/providers/surface-adapter/surface-adapter.test.js \
   kits/knowledge/adapters/default-store/cache-version.test.js \

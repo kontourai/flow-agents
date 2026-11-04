@@ -152,7 +152,7 @@
     {
       "id": "knowledge.promote-runner",
       "path": "promote/index.js",
-      "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote({sessionDir, repoRoot, provenance}) runs ingest -> distill -> link -> health and writes DRAFT proposals ONLY under <session>/proposals/. Builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against the Corpus decision-record format before proposing. Proposals-only by construction; never mutates docs/, CONTEXT.md, or any path outside the session dir. Also exports ingestFromSource with the workflow-sidecar and runtime-session residue sources (#669, schemas/knowledge/residue.schema.json); runtime-session returns scrubbed sitting residues plus a candidate cursor and writes nothing."
+      "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote with the default repo-docs target runs ingest -> distill -> link -> health and writes DRAFT proposals under a new session descendant (default <session>/proposals/). It builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against the Corpus decision-record format before proposing. The default repo-docs target never mutates docs/, CONTEXT.md, or any path outside the session dir. Also exports ingestFromSource with the workflow-sidecar and runtime-session residue sources (#669, schemas/knowledge/residue.schema.json); runtime-session returns scrubbed sitting residues plus a candidate cursor and writes nothing. The explicit store target sends distilled runtime-sitting candidates to a host-composed Corpus create-proposal store."
     },
     {
       "id": "knowledge.context-check-runner",
@@ -215,6 +215,11 @@
       "id": "knowledge.living-context-ask-cli",
       "path": "context-check/ask-cli.js",
       "description": "Read-only CLI: ask a Knowledge store a question at a pinned commit through Living Context recall; --manifest prints the derived claims manifest and exclusions."
+    },
+    {
+      "id": "knowledge.memory-proposal-target",
+      "path": "promote/store-target.js",
+      "description": "Host-composed Corpus create-proposal bridge for distilled runtime-sitting memory; preserves session, transcript, and sitting provenance without applying records."
     }
   ],
   "evals": [
