@@ -20,12 +20,12 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: flow-agents-runtime-compat-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   harness-canary:
-    concurrency:
-      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Harness canary (${{ matrix.runtime }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -69,10 +69,6 @@ jobs:
         run: bash evals/acceptance/test_${{ matrix.runtime }}_harness.sh
 
   framework-sdk-canary:
-    concurrency:
-      group: flow-agents-compute-v2-2-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Framework SDK canary
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -114,10 +110,6 @@ jobs:
           /tmp/sdk-canary/bin/python -m unittest discover
 
   report:
-    concurrency:
-      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Open tracking issue on failure
     runs-on: ubuntu-latest
     needs: [harness-canary, framework-sdk-canary]

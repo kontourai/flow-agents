@@ -1,5 +1,5 @@
 // Admission policy is checked on ORIGINAL YAML, before any lint compatibility copy.
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,23 +7,30 @@ import { parse } from 'yaml';
 import assert from 'node:assert/strict';
 
 export const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
-export const assignments = {
-  'ci.yml': { 'secret-scan': 1, 'source-and-static': 2, 'workflow-contracts': 1,
-    'runtime-and-kit': 2, 'integration-coverage': 1, 'usage-feedback': 2, 'windows-hook-smoke': 1 },
-  'runtime-compat.yml': { 'harness-canary': 1, 'framework-sdk-canary': 2, report: 1 },
-  'veritas-advisory.yml': { readiness: 2 },
-  'docs.yml': { gate: 1, pages: 2 },
-  'kit-gates-demo.yml': { 'release-evidence-gate-demo': 1 },
+// Participating workflows and their jobs. There is NO repo-wide job-level compute
+// cap: GitHub's job-level `queue: max` admission stalled repeatedly on
+// 2026-11-03/04 (runs sat pending with every group empty), and the repository is
+// public, so hosted minutes are free. The only concurrency control is each
+// workflow's own per-ref group with cancel-in-progress, so a new push supersedes
+// that branch's older run.
+export const participants = {
+  'ci.yml': ['secret-scan', 'source-and-static', 'workflow-contracts',
+    'runtime-and-kit', 'integration-coverage', 'usage-feedback', 'windows-hook-smoke'],
+  'runtime-compat.yml': ['harness-canary', 'framework-sdk-canary', 'report'],
+  'veritas-advisory.yml': ['readiness'],
+  'docs.yml': ['gate', 'pages'],
+  'kit-gates-demo.yml': ['release-evidence-gate-demo'],
 };
-// Each slot splits into two lanes (4 native groups repo-wide, peak 4 runners).
-// The lane is run-ID parity, chosen without arithmetic: all jobs of one run share
-// a lane per slot, and the expression embeds no PR, ref, head or attempt identity.
-// The base name is `-v2-` so it cannot collide with the retired
-// `flow-agents-compute-1`/`-2` groups, whose queue head stalled on 2026-11-03.
-export const laneExpression = [0, 2, 4, 6, 8].map(d => `endsWith(github.run_id, '${d}')`).join(' || ');
-export const lanes = ['a', 'b'];
-export const admissionGroup = slot => `flow-agents-compute-v2-${slot}-\${{ (${laneExpression}) && 'a' || 'b' }}`;
-export const slots = [1, 2];
+// Exact per-ref supersession group of each participating workflow. The only
+// identity in a name is the workflow's own ref, so a push cancels that branch's
+// previous run and never another branch's.
+export const refGroups = {
+  'ci.yml': 'flow-agents-ci-${{ github.ref }}',
+  'runtime-compat.yml': 'flow-agents-runtime-compat-${{ github.ref }}',
+  'veritas-advisory.yml': 'veritas-advisory-${{ github.ref }}',
+  'docs.yml': 'flow-agents-docs-${{ github.ref }}',
+  'kit-gates-demo.yml': 'flow-agents-kit-gates-demo-${{ github.ref }}',
+};
 // These controllers are outside the participating budget. New workflows/jobs must
 // receive an explicit classification, rather than silently escaping the bound.
 export const exclusions = {
@@ -48,25 +55,20 @@ export function matrixChildren(job) {
   return matrix.include;
 }
 export function validate(workflows = loadWorkflows(), fixtureDirectory = join(root, 'evals/fixtures/ci-compute')) {
-  assert.deepEqual(sorted(Object.keys(workflows)), sorted([...Object.keys(assignments), ...Object.keys(exclusions)]), 'unclassified workflow');
+  assert.deepEqual(sorted(Object.keys(workflows)), sorted([...Object.keys(participants), ...Object.keys(exclusions)]), 'unclassified workflow');
   const lock = JSON.parse(readFileSync(join(fixtureDirectory, 'lock.json')));
   const expanded = [];
   for (const [file, workflow] of Object.entries(workflows)) {
-    assert.deepEqual(sorted(Object.keys(workflow.jobs)), sorted(Object.keys(assignments[file] ?? Object.fromEntries(exclusions[file].map(x => [x, true])))), `${file}: omitted/unclassified job`);
-    if (!assignments[file]) {
+    assert.deepEqual(sorted(Object.keys(workflow.jobs)), sorted(participants[file] ?? exclusions[file]), `${file}: omitted/unclassified job`);
+    if (!participants[file]) {
       // Exclusions cannot turn into PR compute without an explicit policy revision.
       assert.ok(!triggers(workflow.on).some(x => ['pull_request', 'pull_request_target', 'merge_group'].includes(x)), `${file}: PR bypass`);
       continue;
     }
-    assert.deepEqual(workflow.concurrency, file === 'ci.yml'
-      ? { group: 'flow-agents-ci-${{ github.ref }}', 'cancel-in-progress': true } : undefined,
-    `${file}: workflow cancellation changed`);
+    assert.deepEqual(workflow.concurrency, { group: refGroups[file], 'cancel-in-progress': true },
+      `${file}: per-ref cancel-in-progress group required`);
     for (const [id, job] of Object.entries(workflow.jobs)) {
-      const slot = assignments[file][id];
-      assert.ok(slots.includes(slot), `${file}/${id}: unknown slot`);
-      // Exact string equality: any other group name, a third slot, a different
-      // lane expression or an embedded PR/ref/head identifier is refused.
-      assert.deepEqual(job.concurrency, { group: admissionGroup(slot), queue: 'max', 'cancel-in-progress': false }, `${file}/${id}: admission shape`);
+      assert.equal(job.concurrency, undefined, `${file}/${id}: job-level concurrency is not allowed (no repo-wide compute cap)`);
       const children = matrixChildren(job);
       if (file === 'runtime-compat.yml' && id === 'harness-canary') {
         assert.deepEqual(children.map(x => x.runtime), ['opencode', 'pi'], 'review matrix child budget');
@@ -93,19 +95,24 @@ export function validate(workflows = loadWorkflows(), fixtureDirectory = join(ro
           // they could resolve to a caller group (GitHub is case-insensitive).
           assert.deepEqual(child.concurrency, entry.file === 'docs-pages.yml' && key === 'deploy'
             ? { group: 'docs-pages-${{ github.repository }}', 'cancel-in-progress': false } : undefined,
-          'unreviewed callee concurrency / caller-slot deadlock');
+          'unreviewed callee concurrency (a callee group would reintroduce a shared queue)');
           const before = ancestors(key);
           for (const other of runners) {
             assert.ok(other === key || before.includes(other) || ancestors(other).includes(key), 'callee concurrent runner expansion exceeds one');
           }
         }
       } else assert.ok(job['runs-on'] && job.steps, 'runner job missing');
-      for (const child of children) expanded.push({ file, id, child, slot, runners, needs: needs(job) });
+      for (const child of children) expanded.push({ file, id, child, runners, needs: needs(job) });
     }
   }
   return expanded;
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Real paths: a symlinked invocation path must not make the CLI silently skip
+// validation. A non-file argv[1] (stdin `-`, `-e`) is an import, not an invocation.
+const isEntryPoint = () => {
+  try { return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+};
+if (process.argv[1] && isEntryPoint()) {
   const expanded = validate();
-  console.log(JSON.stringify({ admissionUnits: expanded.length, expandedRunnerJobs: expanded.reduce((n, x) => n + x.runners.length, 0), slots: slots.length, lanes: lanes.length, groups: slots.length * lanes.length, expanded }, null, 2));
+  console.log(JSON.stringify({ participatingJobs: expanded.length, expandedRunnerJobs: expanded.reduce((n, x) => n + x.runners.length, 0), expanded }, null, 2));
 }
