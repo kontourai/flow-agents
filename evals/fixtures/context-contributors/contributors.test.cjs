@@ -73,9 +73,10 @@ test('registry and memory contributor perform no network or child process calls'
 
 test('marker resolves when the bundle root itself is named context', async t => {
  const { temp } = setup(t); const bundle=path.join(temp,'context');
- for (const file of ['scripts/package.json','scripts/hooks/lib/hook-flags.js','scripts/hooks/lib/context-contributors/profile-memory.js','kits/knowledge/memory-marker.js','kits/knowledge/package.json']) {
+ for (const file of ['scripts/package.json','scripts/hooks/lib/hook-flags.js','scripts/hooks/lib/context-contributors/profile-memory.js','kits/knowledge/memory-marker.js']) {
   const dest=path.join(bundle,file); fs.mkdirSync(path.dirname(dest),{recursive:true}); fs.copyFileSync(path.join(root,file),dest);
  }
+ fs.writeFileSync(path.join(bundle,'kits/knowledge/package.json'),'{"type":"module"}\n');
  let profile;
  assert.doesNotThrow(() => { profile=require(path.join(bundle,'scripts/hooks/lib/context-contributors/profile-memory.js')); }, 'marker must resolve inside the bundle');
  const marker=await profile.loadMemoryMarker(); assert.match(profile.profileMemoryContributor('SessionStart',{},8192,marker).text,/violet kestrel/);
@@ -143,7 +144,8 @@ test('bundled marker has an explicit ESM package boundary', t => {
  // A parent module scope could mask a missing package boundary in the bundle.
  for (let parent=path.dirname(fs.realpathSync(temp));;) { const file=path.join(parent,'package.json'); if (fs.existsSync(file)) assert.notEqual(JSON.parse(fs.readFileSync(file,'utf8')).type,'module',`unexpected parent module scope: ${file}`); const next=path.dirname(parent);if(next===parent) break;parent=next; }
  for (const dir of ['scripts/hooks','scripts/lib']) { const dest=path.join(install,dir);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.cpSync(path.join(root,dir),dest,{recursive:true}); }
- for (const file of ['scripts/package.json','kits/knowledge/package.json','kits/knowledge/memory-marker.js']) { const dest=path.join(install,file);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,file),dest); }
+ for (const file of ['scripts/package.json','kits/knowledge/memory-marker.js']) { const dest=path.join(install,file);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,file),dest); }
+ fs.writeFileSync(path.join(install,'kits/knowledge/package.json'),'{"type":"module"}\n');
  assert.equal(JSON.parse(fs.readFileSync(path.join(install,'kits/knowledge/package.json'),'utf8')).type,'module');
  const cwd=tempDir(t); const raw=JSON.stringify({hook_event_name:'SessionStart',cwd});
  for (const adapter of ['claude','codex']) { const args=adapter==='codex'?['workflow-steering','workflow-steering.js','default']:['SessionStart','workflow-steering','workflow-steering.js','default'];const p=spawnSync(process.execPath,[path.join(install,'scripts/hooks',`${adapter}-hook-adapter.js`),...args],{input:raw,encoding:'utf8',env:{...process.env,NODE_OPTIONS:`${process.env.NODE_OPTIONS || ''} --no-experimental-detect-module`}});assert.equal(p.status,0,p.stderr);assert.match(JSON.parse(p.stdout).hookSpecificOutput.additionalContext,/violet kestrel/); }
