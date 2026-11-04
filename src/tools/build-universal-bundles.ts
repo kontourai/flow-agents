@@ -678,6 +678,10 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   const dirs = [...manifest.canonical_copy_dirs];
   if (fs.existsSync(path.join(root, "kits")) && !dirs.includes("kits")) dirs.push("kits");
   for (const dir of dirs) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
+  // The standalone bundle has no enclosing package scope on early Node 22.
+  // Keep this boundary out of the source kit, where it would shadow package
+  // self-references used by kit adapters.
+  writeText(path.join(targetRoot, "kits/knowledge/package.json"), '{"type":"module"}\n');
   for (const file of manifest.root_copy_files ?? []) {
     const source = path.join(root, file);
     if (!fs.existsSync(source)) throw new Error(`manifest root_copy_files entry missing: ${file}`);
