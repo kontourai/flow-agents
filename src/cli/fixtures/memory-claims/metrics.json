@@ -6,6 +6,7 @@
     "reviewSecondsPerCaughtDefect": 90,
     "reviewTimedDecisions": 3,
     "reviewer": {
+      "annotated": 0,
       "confirmed": 1,
       "corrected": 1,
       "decisions": 3,
@@ -33,6 +34,7 @@
     "reviewSecondsPerCaughtDefect": null,
     "reviewTimedDecisions": 0,
     "reviewer": {
+      "annotated": 0,
       "confirmed": 0,
       "corrected": 0,
       "decisions": 0,

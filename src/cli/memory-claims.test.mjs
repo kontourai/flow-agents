@@ -387,3 +387,155 @@ test("qualifiers map names to strings, and anything else is refused", async () =
     assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, qualifiers: bad })), { code: "invalid" }, JSON.stringify(bad));
   }
 });
+
+// --- review round 9 -------------------------------------------------------------------------------------------------------
+
+test("distill reads the sitting once, before extraction: changing it while the model runs changes nothing in the claims", async () => {
+  const sitting = structuredClone(loadSittings()[0]);
+  const original = { id: sitting.sittingId, at: sitting.turns[0].at };
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const finding = { quote, subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated" };
+  const inner = traverseExtract(scriptedProvider([[finding]]));
+  const seen = [];
+  const extract = async request => { seen.push(request.sourceRef); sitting.sittingId = "someone else"; for (const turn of sitting.turns) turn.at = "2031-01-01T00:00:00Z"; return inner(request); };
+  const result = await distillMemoryClaims({ sitting, passes: 1, extract });
+  assert.equal(result.claims.length, 1);
+  assert.deepEqual(seen, [original.id], "the model was given the original source reference");
+  assert.equal(result.claims[0].source.ref, original.id, "and the claim names that same one");
+  assert.notEqual(result.claims[0].source.observedAt, "2031-01-01T00:00:00Z");
+});
+
+test("a distill request is read without running caller code: a getter, a Proxy or an overridden turns list is refused", async () => {
+  const sitting = loadSittings()[0], extract = traverseExtract(scriptedProvider([[]]));
+  const getter = Object.defineProperty({ passes: 1, extract }, "sitting", { enumerable: true, get: () => sitting });
+  await assert.rejects(distillMemoryClaims(getter), MemoryClaimError, "a getter for the sitting");
+  await assert.rejects(distillMemoryClaims(new Proxy({ sitting, passes: 1, extract }, {})), MemoryClaimError, "a Proxy request");
+  await assert.rejects(distillMemoryClaims({ sitting: new Proxy(sitting, {}), passes: 1, extract }), MemoryClaimError, "a Proxy sitting");
+  const turns = [...sitting.turns]; turns.map = () => [];
+  await assert.rejects(distillMemoryClaims({ sitting: { ...sitting, turns }, passes: 1, extract }), MemoryClaimError, "an own map on the turns");
+  await assert.rejects(distillMemoryClaims({ sitting: { ...sitting, sittingId: " " }, passes: 1, extract }), /sittingId/);
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, current: new Proxy([], {}) }), MemoryClaimError, "a Proxy list of current claims");
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, visibility: new Proxy({ kind: "public" }, {}) }), MemoryClaimError, "a Proxy visibility");
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, visibility: Object.defineProperty({ kind: "restricted" }, "audiences", { enumerable: true, get: () => ["a"] }) }), MemoryClaimError, "a visibility with a getter");
+});
+
+// --- review round 10 -------------------------------------------------------------------------------------------------------
+
+test("an extractor that reuses and edits what it returned cannot change a claim after it was checked: each pass's response is copied on arrival", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const shared = { fieldPath: "claims[].value", candidateValue: { engine: "PostgreSQL", version: 15 }, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" };
+  const others = [["subject", "widget service"], ["subjectType", "service"], ["property", "primary database"], ["posture", "stated"]]
+    .map(([name, candidateValue]) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" }));
+  const response = { proposals: [shared, ...others] };
+  let pass = 0;
+  const extract = async () => { if (pass++ === 1) shared.candidateValue.version = 16; return response; };
+  const result = await distillMemoryClaims({ sitting, passes: 2, extract });
+  for (const claim of result.claims) assert.doesNotThrow(() => assertMemoryClaim(claim), "every returned claim still matches its id");
+  assert.equal(result.claims.length, 2, "the two passes now disagree, and say so, instead of one claim changing under its id");
+  assert.deepEqual(result.claims.map(claim => claim.value.version).sort(), [15, 16]);
+});
+
+test("an extraction response that is not plain data is a failed pass, reported, not a crash or a trusted claim", async () => {
+  const sitting = loadSittings()[0];
+  const getter = { proposals: [] }; Object.defineProperty(getter, "error", { enumerable: true, get: () => "x" });
+  for (const response of [getter, new Proxy({ proposals: [] }, {})]) {
+    const result = await distillMemoryClaims({ sitting, passes: 1, extract: async () => response });
+    assert.deepEqual(result.claims, []);
+    assert.match(result.warnings.join("\n"), /pass 1 failed/);
+  }
+});
+
+test("an extraction response larger than one claim's bound is accepted: a long sitting yields many claims in one response", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue, index) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [index], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const proposals = Array.from({ length: 700 }, (_, i) => [at("subject", `service ${i}`, i), at("subjectType", "service", i), at("property", "primary database", i), at("value", `PostgreSQL ${i}`, i), at("posture", "stated", i)]).flat();
+  assert.ok(JSON.stringify(proposals).length > 200_000, "the premise: well over 20,000 JSON values");
+  const result = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals }) });
+  assert.deepEqual(result.warnings, []);
+  assert.equal(result.claims.length, 700);
+});
+
+// --- review round 11 --------------------------------------------------------------------------------------------------------
+
+test("a proposal the Kit could not route or present is rejected where it is assembled, with the reason, not returned as a claim", () => {
+  const quote = "x";
+  const group = fields => Object.entries({ subject: "widget service", subjectType: "service", property: "primary database", posture: "stated", ...fields })
+    .map(([name, candidateValue]) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" }));
+  const assemble = fields => assembleMemoryClaims({ proposals: group(fields) }, { sourceRef: "s", locate: () => ({ observedAt: "2026-11-01T00:00:00.000Z", role: "user" }) });
+  const ok = assemble({ value: Array.from({ length: 19000 }, (_, i) => i) });
+  assert.equal(ok.claims.length, 1, "a large value within the bound is a claim");
+  const huge = assemble({ value: Array.from({ length: 21000 }, (_, i) => i) });
+  assert.deepEqual(huge.claims, []);
+  assert.match(huge.rejected[0].reason, /cannot be routed or presented.*too large/);
+  let deep = "leaf"; for (let i = 0; i < 40; i++) deep = { a: deep };
+  const tooDeep = assemble({ value: deep });
+  assert.deepEqual(tooDeep.claims, []);
+  assert.match(tooDeep.rejected[0].reason, /cannot be routed or presented.*too deep/);
+});
+
+test("a long sitting's extraction can return a claim the Kit then refuses: distill reports it as rejected, with no warnings hidden", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const proposals = [at("subject", "widget service"), at("subjectType", "service"), at("property", "primary database"), at("posture", "stated"), at("value", Array.from({ length: 21000 }, (_, i) => i))];
+  const result = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals }) });
+  assert.deepEqual(result.claims, []);
+  assert.equal(result.rejected.length, 1);
+  assert.match(result.rejected[0].reason, /too large/);
+});
+
+test("a value nested as deep as a claim may be survives the extraction response that carries it, which nests a few levels deeper", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const nest = n => { let v = "leaf"; for (let i = 0; i < n; i++) v = { a: v }; return v; };
+  const at = (name, candidateValue) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const fields = value => [at("subject", "widget service"), at("subjectType", "service"), at("property", "primary database"), at("posture", "stated"), at("value", value)];
+  const ok = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals: fields(nest(30)) }) });
+  assert.deepEqual(ok.warnings, [], "no pass failed");
+  assert.equal(ok.claims.length, 1, "30 levels is within a claim's bound");
+  const over = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals: fields(nest(33)) }) });
+  assert.deepEqual(over.claims, []);
+  assert.match(over.rejected[0].reason, /too deep/);
+});
+
+test("a sitting that yields more claims than one request carries is refused whole, with the way out, not returned as a list nothing downstream accepts", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue, index) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [index], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  let pass = 0;
+  const extract = async () => {
+    const current = pass++;
+    return { proposals: Array.from({ length: 2_700 }, (_, i) => [at("subject", `service ${current}-${i}`, i), at("subjectType", "service", i), at("property", "primary database", i), at("value", `v${current}-${i}`, i), at("posture", "stated", i)]).flat() };
+  };
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 8, extract }), /yielded 21600 claims over 8 passes, more than the 20000 one request carries; distill it in chunks/);
+  pass = 0;
+  const ok = await distillMemoryClaims({ sitting, passes: 7, extract });
+  assert.equal(ok.claims.length, 18_900, "and the largest the limit admits is returned");
+});
+
+test("the claim-count limit is exact: 20,000 claims are returned, 20,001 are refused", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue, index) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [index], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const batch = (pass, count) => ({ proposals: Array.from({ length: count }, (_, i) => [at("subject", `service ${pass}-${i}`, i), at("subjectType", "service", i), at("property", "primary database", i), at("value", `v${pass}-${i}`, i), at("posture", "stated", i)]).flat() });
+  const run = counts => { let pass = 0; return distillMemoryClaims({ sitting, passes: counts.length, extract: async () => batch(pass, counts[pass++]) }); };
+  assert.equal((await run([5000, 5000, 5000, 5000])).claims.length, 20_000);
+  await assert.rejects(run([5000, 5000, 5000, 5001]), /yielded 20001 claims over 4 passes/);
+});
+
+test("the memory text the Knowledge kit ships names no harness: an install for another runtime rewrites such names and then reports drift", () => {
+  // `init --runtime codex` rewrites a harness name in installed text, so a kit file that names one makes `workflow doctor` report
+  // drift on that runtime's installs. Fixtures and tests are not shipped; the contract, the adapter and the schemas are.
+  const root = path.resolve(import.meta.dirname, "..", "..");
+  const shipped = [
+    "kits/knowledge/docs/memory-claims.md",
+    ...fs.readdirSync(path.join(root, "kits/knowledge/adapters/memory-claims")).map(name => `kits/knowledge/adapters/memory-claims/${name}`),
+    ...fs.readdirSync(path.join(root, "kits/knowledge/schemas/knowledge")).filter(name => name.startsWith("memory-")).map(name => `kits/knowledge/schemas/knowledge/${name}`),
+  ];
+  assert.ok(shipped.length >= 5, "the premise: the scan sees the contract, the adapter and the three schemas");
+  const harness = /\b(claude|codex|opencode|kiro|copilot|gemini)\b/i;
+  const offenders = shipped.flatMap(file => fs.readFileSync(path.join(root, file), "utf8").split("\n").map((line, index) => ({ file, line: index + 1, text: line })).filter(item => harness.test(item.text)));
+  assert.deepEqual(offenders.map(item => `${item.file}:${item.line}`), []);
+});

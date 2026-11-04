@@ -28,6 +28,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [knowledge-promote-sub-flow](./knowledge-promote-sub-flow.md) | current | Knowledge promote sub-flow |
 | [knowledge-store-provider](./knowledge-store-provider.md) | current | Knowledge store provider |
 | [kontour-resource-contract](./kontour-resource-contract.md) | needs-decision | Kontour Resource Contract |
+| [living-context-recall](./living-context-recall.md) | current | Living Context recall contract |
 | [mcp-posture](./mcp-posture.md) | needs-decision | MCP posture |
 | [memory-claim-routing](./memory-claim-routing.md) | current | Memory claim routing |
 | [memory-dream-run](./memory-dream-run.md) | current | Memory dream run |

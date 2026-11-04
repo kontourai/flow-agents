@@ -12,7 +12,7 @@
  * replays them through the pinned release.
  */
 import type { AccumulationClaim, AccumulationQuery } from "@kontourai/surface";
-import { MemoryClaimError, memoryInstant, readMemoryVisibility, type MemoryClaim } from "./memory-claims.js";
+import { MemoryClaimError, assertMemoryClaim, memoryInstant, readMemoryVisibility, type MemoryClaim } from "./memory-claims.js";
 import { types } from "node:util";
 import { jsonSnapshot, jsonSnapshotEach } from "./memory-json.js";
 
@@ -69,6 +69,7 @@ export function memoryClaimToAccumulationClaim(input: MemoryClaim): MemoryAccumu
   // a check and another to the mapped claim. A key set to undefined is the same as no key (that is what the claim's id covers),
   // and Surface digests the object as given, so one claim gives one Surface claim.
   const claim = jsonSnapshot(input, "memory claim") as MemoryClaim;
+  assertMemoryClaim(claim); // a claim that lost a required field in the copy (a hidden accessor, say) is refused here, not mapped half-empty
   if (claim.posture !== "stated") throw new MemoryClaimError("invalid", `only a stated claim is a candidate for a slot, not a ${claim.posture} one`);
   assertSlotFields(claim);
   const { value, source, qualifiers } = claim;
@@ -137,11 +138,13 @@ const OUTCOMES = ["current", "contested", "invalid", "none"];
 function readStrings(value: unknown): string[] | undefined {
   if (!Array.isArray(value) || types.isProxy(value)) return undefined;
   const length = value.length; // once: a list whose length changes while it is read is not a list we can trust
-  if (length > 10_000) return undefined;
+  if (length > 1_000) return undefined; // far more than Surface reports; the decision bound assumes it
   const out: string[] = [];
   for (let index = 0; index < length; index++) {
-    if (!Object.hasOwn(value, index)) return undefined;
-    const item: unknown = value[index];
+    // A data descriptor, read once: an accessor would run caller code and could answer differently the next time.
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (!descriptor || !("value" in descriptor)) return undefined;
+    const item: unknown = descriptor.value;
     if (typeof item !== "string" || item === "") return undefined;
     out.push(item);
   }

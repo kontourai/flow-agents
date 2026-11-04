@@ -12,6 +12,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import { canonicalClaimKey } from "@kontourai/surface";
+import { MAX_DECISION_DEPTH, MAX_EXTRACTION_RESULT_NODES, MAX_RUN_LIST, jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
 // Type-only: proves the schema below is an ordinary Traverse TargetFieldSchema without a runtime dependency.
 import type { TargetFieldSchema } from "@kontourai/traverse";
 
@@ -215,7 +216,7 @@ function identityDigest(claim: MemoryClaim): string {
   return `sha256:${createHash("sha256").update(canonicalJson(canonical)).digest("hex")}`;
 }
 
-/** Builds a claim and assigns its id. Does not validate; use `assertMemoryClaim` for that. */
+/** Builds a claim and assigns its id. Does not validate or copy (a trusted-data constructor); use `assertMemoryClaim` for that. */
 export function memoryClaim(fields: Omit<MemoryClaim, "id" | "schema_version">): MemoryClaim {
   const claim = { schema_version: MEMORY_CLAIM_VERSION, id: "", ...fields } as MemoryClaim;
   claim.id = identityDigest(claim);
@@ -226,7 +227,7 @@ const nonEmpty = (value: unknown): value is string => typeof value === "string" 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const KNOWN_KEYS = new Set(["schema_version", "id", "subject", "claimType", "property", "qualifiers", "value", "validTime", "speaker", "source", "posture", "supersedes", "visibility"]);
 
-/** Validates a claim read from anywhere and checks that its id is the digest of its content. */
+/** Validates a claim and checks that its id is the digest of its content. Reads the claim as given: copy untrusted data first. */
 export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim {
   if (!isObject(value)) throw new MemoryClaimError("invalid", "not an object");
   for (const key of Object.keys(value)) if (!KNOWN_KEYS.has(key)) throw new MemoryClaimError("invalid", `unknown field ${key}`);
@@ -234,11 +235,14 @@ export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim 
   const { subject, source } = value;
   if (!isObject(subject) || !nonEmpty(subject.type) || !nonEmpty(subject.id)) throw new MemoryClaimError("invalid", "subject needs a type and id");
   if (!nonEmpty(value.property) || !nonEmpty(value.speaker) || !nonEmpty(value.claimType)) throw new MemoryClaimError("invalid", "claimType, property and speaker are required");
+  // Optional text fields are text when present: a label that is an object would pass every check here and then fail wherever it is printed.
+  if (subject.label !== undefined && typeof subject.label !== "string") throw new MemoryClaimError("invalid", "a subject label must be text");
   if (value.qualifiers !== undefined && (!isObject(value.qualifiers) || !Object.values(value.qualifiers).every(item => typeof item === "string"))) throw new MemoryClaimError("invalid", "qualifiers must map names to strings");
   if (!("value" in value) || value.value === undefined) throw new MemoryClaimError("invalid", "value is required");
   if (value.posture === undefined) throw new MemoryClaimError("posture-missing", "every claim carries its posture");
   if (!(MEMORY_CLAIM_POSTURES as readonly unknown[]).includes(value.posture)) throw new MemoryClaimError("invalid", "unknown posture");
   if (!isObject(source) || !["ref", "locator", "excerpt", "observedAt"].every(key => nonEmpty(source[key]))) throw new MemoryClaimError("invalid", "source needs ref, locator, excerpt and observedAt");
+  for (const key of ["extractor", "role"]) if (source[key] !== undefined && typeof source[key] !== "string") throw new MemoryClaimError("invalid", `source ${key} must be text`);
   if (value.visibility !== undefined && readMemoryVisibility(value.visibility) === undefined) throw new MemoryClaimError("invalid", "visibility must be public or restricted to named audiences");
   if (value.supersedes !== undefined && (!Array.isArray(value.supersedes) || value.supersedes.length === 0 || !value.supersedes.every(edge =>
     isObject(edge) && /^sha256:[0-9a-f]{64}$/.test(String(edge.claimId)) && (edge.kind === "correction" || edge.kind === "succession") && nonEmpty(edge.reason)))) {
@@ -277,8 +281,12 @@ const FIELD = /^claims\[\]\.(\w+)$/;
 
 /**
  * Groups one extraction's proposals into claims, one per array index. A group
- * that is incomplete, ungrounded, or malformed is rejected with its reason and
- * is never proposed; the caller sees the rejection.
+ * that is incomplete, ungrounded, malformed, or too large to route is rejected with its
+ * reason and is never proposed; the caller sees the rejection.
+ *
+ * Trusted-data precondition: this, `memoryClaim` and `assertMemoryClaim` are constructors and validators for data the caller
+ * owns; they read it as given and do not copy it. The entry points that take data from elsewhere (`distillMemoryClaims`,
+ * `routeMemoryChange`, `presentMemoryClaims`, the evidence recorders) copy it as plain JSON first.
  */
 export function assembleMemoryClaims(result: ExtractionResultLike, context: AssembleContext): { claims: MemoryClaim[]; rejected: RejectedProposalGroup[] } {
   const groups = new Map<number, Record<string, ExtractionProposalLike>>();
@@ -298,7 +306,11 @@ export function assembleMemoryClaims(result: ExtractionResultLike, context: Asse
   if (unindexed) rejected.push({ index: -1, reason: `${unindexed} claim field proposal(s) carry no claim index and cannot be grouped` });
   for (const [index, fields] of [...groups].sort((x, y) => x[0] - y[0])) {
     try {
-      claims.push(assemble(fields, context));
+      const claim = assemble(fields, context);
+      // A claim the Kit could not then copy (too large, too deep, not plain data) could not be routed or presented either; it is
+      // rejected here, with the reason, instead of being returned as a claim nothing downstream will accept.
+      try { jsonSnapshot(claim, "claim"); } catch (error) { throw new MemoryClaimError("invalid", `the claim cannot be routed or presented: ${error instanceof Error ? error.message : String(error)}`); }
+      claims.push(claim);
     } catch (error) {
       rejected.push({ index, reason: error instanceof MemoryClaimError ? error.message : String(error) });
     }
@@ -433,31 +445,45 @@ export async function distillMemoryClaims(input: {
   /** The sitting's visibility. Without it the claims are sealed (see `MemoryClaim.visibility`). */
   visibility?: MemoryVisibility;
 }): Promise<DistillResult> {
-  const passes = input.passes ?? DEFAULT_DISTILL_PASSES;
+  // Each field of the request is read once, before the first await, with nothing the caller defined running, and the
+  // sitting and the current claims are copied as plain JSON. Extraction is asynchronous: reading the sitting again after it
+  // would let the claims name a source reference and a time that are not the ones the model was given.
+  const field = (record: unknown, key: string) => ownField(record, key, `distill input ${key}`);
+  const sittingInput = field(input, "sitting");
+  const sitting: DistillSitting = { sittingId: field(sittingInput, "sittingId") as string, turns: jsonSnapshotEach(field(sittingInput, "turns"), "distill sitting turns") as DistillTurn[] };
+  const extract = field(input, "extract") as MemoryExtract;
+  const passesInput = field(input, "passes");
+  const current = jsonSnapshotEach(field(input, "current"), "distill current claims") as MemoryClaim[];
+  const visibilityInput = field(input, "visibility");
+  const visibility = visibilityInput === undefined ? undefined : jsonSnapshot(visibilityInput, "distill visibility") as MemoryVisibility;
+  const passes = (passesInput ?? DEFAULT_DISTILL_PASSES) as number;
   if (!Number.isInteger(passes) || passes < 1 || passes > 8) throw new MemoryClaimError("invalid", "passes must be an integer from 1 to 8");
-  if (input.visibility !== undefined) failIfUnreadable(input.visibility); // host configuration: refuse once, up front
-  if (input.sitting.turns.length === 0) return { claims: [], agreement: {}, rejected: [], warnings: [] };
-  const { content, spans } = formatSittingForExtraction(input.sitting.turns);
+  if (typeof sitting.sittingId !== "string" || !sitting.sittingId.trim()) throw new MemoryClaimError("invalid", "a sitting needs a sittingId");
+  if (visibility !== undefined) failIfUnreadable(visibility); // host configuration: refuse once, up front
+  if (sitting.turns.length === 0) return { claims: [], agreement: {}, rejected: [], warnings: [] };
+  const { content, spans } = formatSittingForExtraction(sitting.turns);
   const locate = (locator: string) => {
     const start = Number(/^chars:(\d+)-/.exec(locator)?.[1]);
     const span = spans.find(candidate => start >= candidate.start && start < candidate.end);
     return span ? { observedAt: span.turn.at, role: span.turn.role } : undefined;
   };
-  const request: MemoryExtractionRequest = { content, contentType: "text", sourceRef: input.sitting.sittingId, targetSchema: MEMORY_CLAIM_TARGET_SCHEMA, guidance: MEMORY_CLAIM_GUIDANCE };
+  const request: MemoryExtractionRequest = { content, contentType: "text", sourceRef: sitting.sittingId, targetSchema: MEMORY_CLAIM_TARGET_SCHEMA, guidance: MEMORY_CLAIM_GUIDANCE };
 
   const found = new Map<string, { claim: MemoryClaim; passes: Set<number> }>(); // by agreementKey
   const rejected: DistillResult["rejected"] = [], warnings: string[] = [];
   for (let pass = 0; pass < passes; pass++) {
     let result: ExtractionResultLike;
     try {
-      result = await input.extract(request);
+      // The response is copied as plain JSON the moment it arrives: an extractor that reuses and edits an object it returned
+      // (or hands back a getter) cannot change a proposal after it has been checked and while it is being stored.
+      result = jsonSnapshot(await extract(request), `pass ${pass + 1} extraction result`, { maxNodes: MAX_EXTRACTION_RESULT_NODES, maxDepth: MAX_DECISION_DEPTH }) as ExtractionResultLike;
     } catch (error) {
       warnings.push(`pass ${pass + 1} failed: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
     if (result.error) warnings.push(`pass ${pass + 1} reported: ${result.error}`);
     warnings.push(...(result.warnings ?? []).map(warning => `pass ${pass + 1}: ${warning}`));
-    const assembled = assembleMemoryClaims(result, { sourceRef: input.sitting.sittingId, locate, current: input.current, visibility: input.visibility });
+    const assembled = assembleMemoryClaims(result, { sourceRef: sitting.sittingId, locate, current, visibility });
     rejected.push(...assembled.rejected.map(item => ({ ...item, pass })));
     for (const claim of assembled.claims) {
       const key = agreementKey(claim);
@@ -467,5 +493,9 @@ export async function distillMemoryClaims(input: {
     }
   }
   const claims = [...found.values()].map(entry => entry.claim);
+  // Every pass may find different claims, so a long sitting over many passes can return more than any one request list carries
+  // (routing, recall and the evidence recorders each take at most MAX_RUN_LIST). It is refused here, whole, not cut short: split
+  // the sitting into chunks.
+  if (claims.length > MAX_RUN_LIST) throw new MemoryClaimError("invalid", `this sitting yielded ${claims.length} claims over ${passes} passes, more than the ${MAX_RUN_LIST} one request carries; distill it in chunks`);
   return { claims, agreement: Object.fromEntries([...found.values()].map(entry => [entry.claim.id, { passes, agreeing: entry.passes.size }])), rejected, warnings };
 }

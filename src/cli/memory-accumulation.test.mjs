@@ -161,7 +161,7 @@ test("a contest is between at least two candidates, and lists are read by index"
     assert.throws(() => readFact({ outcome: "current", candidateClaimIds: sparse, supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, "a hole is refused, not skipped and not filled from the prototype");
   } finally { if (proto) Object.defineProperty(Array.prototype, "1", proto); else delete Array.prototype[1]; }
   for (const bad of [[""], [1], [null], [undefined]]) assert.throws(() => readFact({ outcome: "current", candidateClaimIds: bad, supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, JSON.stringify(bad));
-  assert.throws(() => readFact({ outcome: "invalid", candidateClaimIds: new Array(10_001).fill("a"), supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, "an unbounded list is refused");
+  assert.throws(() => readFact({ outcome: "invalid", candidateClaimIds: new Array(1_001).fill("a"), supportingClaimIds: [], gapCodes: [] }), MemoryClaimError, "an unbounded list is refused");
 });
 
 test("a projection that names a rival the Kit was not given is refused: every bound and item is built from the slot's claims", async () => {
@@ -494,4 +494,28 @@ test("the verifier reads its claims as plain data: a Proxy claim or list is refu
   assert.equal(calls.length, 0);
   assert.equal((await verifyMemoryClaimAgainstCurrent(a, [b], stubVerifier(calls), undefined, fact))?.result, "contradicted");
   assert.equal(calls.length, 1);
+});
+
+// --- review round 9 -------------------------------------------------------------------------------------------------------
+
+test("an entry of a projection list is a data property: an accessor is refused and never run", () => {
+  let ran = 0;
+  for (const key of ["candidateClaimIds", "supportingClaimIds", "gapCodes"]) {
+    const list = ["a", "b"]; Object.defineProperty(list, 0, { enumerable: true, get() { ran++; return "a"; } });
+    const result = { outcome: "invalid", candidateClaimIds: ["a", "b"], supportingClaimIds: [], gapCodes: [], [key]: list };
+    assert.throws(() => readFact(result), MemoryClaimError, key);
+  }
+  assert.equal(ran, 0);
+});
+
+test("the available claims of a batch are copied too: a Proxy there is refused, and a non-enumerable accessor is never run by the mapper", async () => {
+  const { c0 } = await claims();
+  const [a] = c0.filter(claim => claim.posture === "stated");
+  assert.throws(() => memoryAccumulationClaims([a], new Proxy([a], {})), MemoryClaimError);
+  assert.throws(() => memoryAccumulationClaims([a], [new Proxy(a, {})]), MemoryClaimError);
+  let ran = 0;
+  const hidden = { ...a }; delete hidden.source;
+  Object.defineProperty(hidden, "source", { enumerable: false, get() { ran++; return a.source; } });
+  assert.throws(() => memoryClaimToAccumulationClaim(hidden), MemoryClaimError, "the copy has no source, so the claim is refused");
+  assert.equal(ran, 0, "and the hidden accessor was never run to find out");
 });

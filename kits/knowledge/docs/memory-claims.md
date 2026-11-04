@@ -15,7 +15,7 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | Claim shape, routing policy, run metrics | This Kit. |
 | Support verification, review items, reviewer decisions | Survey. |
 | Which claims are current in a slot, whether it is contested, supersession over time | Surface (`projectAccumulation`, surface@6.3.0). The host runs it (it needs observations with custody and an authority snapshot the Kit does not hold); the Kit maps its claims in (`memoryAccumulationClaims`, which carries every claim a replacement chain reaches and gives one claim one Surface claim: edges in id order, instants as the UTC date-times Surface parses for years 0000-9999, and the claim's JSON content copied so an undefined field and an absent one are the same; a subject id or claim type with surrounding whitespace, or a blank slot field, is refused because Surface refuses that slot), reads the result back together with the query it answered (`memoryAccumulationFact(result, query)`: the fact carries the query's slot, outcome, candidates and supporting claims) and routes on it. A result without its query is refused, and a fact whose query slot is not the claim's own (compared as Surface compares slots) is refused. That is a check on what the host says, not on the result: a projection result carries no query of its own, so the Kit cannot tell a genuine result for the claim's slot from a genuine result for another slot passed with the claim's query. Binding the query, the result and the projection's inputs together is the trusted host's job. The design is [Surface's knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md). The Kit still takes the current claims as input, for the visibility bounds and the review item. |
-| Entity merge, split and alias review | Survey (entity review, survey@8.3.0). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
+| Entity merge, split and alias review | Survey (entity review and the host-attested reviewer kind, survey@8.4.0). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
 | Visibility lattice | Surface ([Surface derived visibility](https://github.com/kontourai/surface/blob/18e3570636cdb5f9e73d38d9274a2bcd1dc04b9f/docs/decisions/derived-visibility.md), surface@6.3.0). A claim's `visibility` is Surface's form and the Kit's order is Surface's own `meetVisibility`, called, not restated. |
 | Gates and evidence | Flow. |
 
@@ -124,15 +124,76 @@ Pass the result to Survey's `createEntityProposal`, route the proposal with `rou
 `runMemoryRouting` returns the proposals it sent to review for the host to turn into Survey review items.
 Detecting which subjects to propose is the host's (or a later lane's) candidate generation, not this PR's.
 
+### Who may promote a routed claim
+
+**A routed claim is promoted to reviewed only by a Survey review outcome from a human reviewer** (owner decision, 2026-11-03).
+That covers every routed claim: a contradiction, a consequential supersession, an entity merge or split, a visibility widening, a
+low-agreement claim. An outcome from an `agent` or `rule` reviewer, or from a reviewer whose kind is not attested, may *annotate*
+the item and must not change it: the claim stays `proposed` and routed, whatever the outcome says (accept, correct, or reject: an
+agent cannot withhold a claim either). A claim routing did not flag stays `proposed` until reviewed, and any reviewer's decision
+applies to it, **but only if the record that says it was not flagged is one the Kit's own rules reproduce** (`recomputeMemoryRouting`):
+that record is what waives the human requirement, so it is earned. A record with an edited outcome, an outcome the Kit does not define,
+or one that does not recompute is skipped as if it had not been passed, and a claim with no usable routing record is treated as routed.
+When a claim has several records the strictest (routed) stands, whatever order they come in. A claim whose routing is not known (no routing record is passed to recall) is **treated as routed**, so unknown fails
+closed. Among the human decisions on an item the latest by instant stands; a later agent decision never displaces an earlier human
+one, and an earlier agent decision never blocks a later human one.
+
+The kind is `reviewerKind: "human" | "agent" | "rule"` on the Survey decision and on its session events, **asserted by the host that
+authenticated the reviewer, never by the reviewer** (Survey 8.4.0, kontourai/survey#360). `memoryReviewerKind(decision)` is the one
+place the Kit reads it: the decision's own `spec.reviewerKind`, as data, validated by Survey's `isReviewerKind`, failing closed. A
+missing field (a record made before Survey 8.4.0, which Survey's projection calls an *inferred* kind), an unknown value, a value that is
+not text, an inherited or getter-defined one, or one nested under `actor` reads as `unattested`, and `unattested` is not human. A kind
+Survey marks inferred is not an attestation either: a `reviewerKindInferred` that is present and not exactly `false`, on the decision's
+`spec` or under `metadata.survey` (where a projection carries it), makes the kind `unattested`; Survey's own rule for a consumer that
+requires a human is `reviewerKind === "human"` and `reviewerKindInferred === false`. The Kit does not use Survey's
+`resolveReviewerKind`, which infers a kind for a record that has none. Stored review state with a `reviewerKind` that is not one of
+the three, or a `reviewerKindInferred` that is not a boolean, is refused, as Survey refuses an unknown kind. `memoryReviewOutcome(decision, itemName)` only says what a decision *means* (confirm, correct, reject, hold) and does not look at who made it: a host that acts on it directly asks `memoryDecisionMayPromote` first. `memoryDecisionMayPromote(decision, {routed})` (exported by the adapter with `memoryReviewerKind`) is the check a host makes before passing a decision to
+Survey's `entityOutcomeFromDecision` (entity review is Survey's; the Kit does not call it). Each routed claim's review item carries the
+label `memory.reviewer: human-required`, so a workbench can show what the item needs. Review time is the deciding reviewer's own: session events tagged `agent` or `rule` (or marked inferred), or by another actor than the decision's, are not borrowed as its time, and the review time is attributed only when these checks find the history unambiguous. A decision does not name its session (nor does anything else in the data), so the submission counted is the one made at the instant the decision says it was reviewed, and the time is null rather than guessed when: no submission matches (replay keeps the snapshot's `reviewedAt`, so an honest review can match nothing); more than one session submitted this decision name for the item, at any time; or one session name carries the same sequence number twice among the deciding reviewer's events, whatever item they concern (two histories that reused a name, as Survey's default session name invites). Events that name no actor are admitted as legacy events and cannot say whose they are, so the figure is a bounded estimate and not an audit of who spent the time; a durable decision-to-session binding belongs in Survey. Recall reports the annotations it ignored
+(`review.annotations`) and metrics count them (`reviewer.annotated`); an item with only annotations is `pending`.
+
 ### Data the Kit records is plain data
 
-Everything the Kit validates and then records (review input, the entity emitter's request) is copied once, as plain JSON
-data, and the copy is what is validated and stored. It refuses what JSON would change or drop or what could answer
-differently the next time it is read: accessors, `-0`, holes, class instances and array subclasses, cycles, a `__proto__`
-key, anything over a size or depth bound, and **any Proxy** (a Proxy answers every question as it likes, so no list of checks
-makes one safe; it is refused, not defended against). The entity emitter chooses the fields it copies without running
-anything the caller defined, and requires `confidenceComponents` to be an object (or absent), as Survey does. The Kit is
-stricter than Survey in one place: `-0` is refused, because it does not survive JSON.
+Everything the Kit validates and then records or presents is read once and copied as plain JSON, and the copy is what is
+validated and used: a routing change (claim, current claims, verifications, agreement, entity proposal), a run or evidence
+request, review input, a distill request (the sitting is copied before extraction starts, so claims name the source reference
+and times the model was given), each extraction pass's response as it arrives (an extractor that reuses and edits an object it
+returned cannot change a claim after it was checked; a response that is not plain data is a failed pass, reported as a warning),
+the claims recall presents, and the claims the accumulation mapper and the verifier read. The Kit refuses what JSON would change or
+drop or what could answer differently the next time it is read: accessors, `-0`, holes, class instances and array subclasses,
+cycles, a `__proto__` key, anything over a size or depth bound, and **any Proxy** (a Proxy answers every question as it likes, so
+no list of checks makes one safe; it is refused, not defended against). Request fields are chosen with selectors that run nothing
+the caller defined (no getter, no overridden `map`, no trap). Recall reads the routing records of the claims it presents and no others, and takes the few small fields it shows from a
+decision; a record that says a claim was not routed is recomputed before it is believed, which costs as much as the decision is
+large (a legitimate decision of about 3 MB took 183 ms to recompute in review), so recall's work is bounded by the records of the
+claims it shows, each already bounded where it was taken in, and not by a separate aggregate budget. Two deliberate exceptions to refusing: a recall claim that cannot be copied is
+*withheld and reported*, and a `sourceVisibility` that cannot be copied is recorded as undeclared, which reads as sealed (it can
+only make a claim route, never widen it). The entity emitter requires `confidenceComponents` to be an object (or absent), as
+Survey does. The Kit is stricter than Survey in one place: `-0` is refused, because it does not survive JSON.
+
+`memoryClaim`, `assertMemoryClaim` and `assembleMemoryClaims` are the exception to copying: they are constructors and validators for
+data the caller owns, read as given, and need a trusted-data precondition. The entry points that take data from elsewhere copy first.
+
+**What the Kit produces, it can read back.** The bounds are written once (`src/memory-json.ts`) and the larger are derived from the
+smaller, so an artifact the Kit makes is never one its own readers refuse:
+
+| Bound | Value |
+|---|---|
+| JSON values in one claim, review decision or review event | 20,000, nested at most 32 deep |
+| Peers a claim is checked against | 64 (more is refused, not cut short) |
+| Support-verification records on one decision | 64, each up to 2,000 values (a Survey record is ids and digests, about 15 values) |
+| One routing decision | `(64 + 1) x 20,000 + 64 x 2,000 + 200,000` = 1,628,000 values, nested at most 40 deep (a claim sits a few levels down); the 200,000 is an allowance for baselines, the projection fact and the policy |
+| One extraction response | 250,000 values |
+| One request list | 20,000 entries (a sitting of more than 20,000 turns is refused) |
+| What one run holds across requests | 1,000,000 routing decisions, review decisions and review events each; a host may lower it with `maxHistoryEntries` |
+
+`assembleMemoryClaims` rejects, with the reason, a claim that exceeds the claim bounds, so `distillMemoryClaims` never returns one
+that routing or recall would refuse, and every other part of a decision is bounded where it is taken in (peers, verification records, the policy at
+20,000 values, projection lists at 1,000 entries, a visibility at 1,024 audiences), so a decision the Kit produces always fits the
+decision bound; a test pins that the parts sum to less than it, and `routeMemoryChange` still checks the decision it produced against the bound as a net, refusing one that does not fit with the reason. `recomputeMemoryRouting` applies the same per-item budgets to what a
+decision embeds, so a hand-built decision with a claim or verification record the Kit could not have produced is not recomputable. A request that would take a run past its history limit is refused before anything is written (see Flow evidence).
+Each bound is per item: there is no aggregate budget for a whole request or a whole batch, and no byte budget for strings. A host
+that accepts untrusted workloads needs those limits itself. The decision in the worst-case test (65 claims at the claim bound, 1,024-audience visibilities, a full projection fact and a policy near its bound; 1,389,585 values against the bound of 1,628,000, of which the policy is 19,508 of its own 20,000) is produced, recomputed, turned into a review item and presented in about a second on a development laptop.
 
 ## Flow evidence
 
@@ -141,16 +202,46 @@ decisions, and `recordMemoryMetricsEvidence` the run's metrics, to a gate of a F
 run the host owns, as custom-kind evidence (`memory.routing-decisions`,
 `memory.run-metrics`). A decision that does not recompute is refused before anything
 is attached. Re-attaching the same content returns the existing entry; new metrics
-supersede the earlier entry; recording routing decisions refreshes the run's metrics in the
-same serialised unit, so metrics never describe fewer decisions than the run holds. All of
-that holds within one process, for callers that reach the run through a directory that exists
-(an alias made later for a directory that did not exist yet is resolved through its nearest
-existing ancestor). Metrics are as fresh as the last write that went through these functions. Flow's run lock is not
-re-entrant, so the check and the attach cannot share it: two processes racing can leave a
-duplicate routing batch (readers dedupe by decision id) or two live metrics entries
-(`readLatestMemoryMetrics` takes the last), and metrics written by one process can be stale-last against another's decisions until the next refresh. Neither loses or corrupts evidence. An atomic
-conditional attach is a Flow feature ([kontourai/flow#295](https://github.com/kontourai/flow/issues/295)). `recomputeRecordedMemoryRouting(runId)` reads the stored
-files back (refusing any whose digest no longer matches) and recomputes every decision.
+supersede the earlier entry. **One gate holds a run's metrics** (a second is refused), so "this gate's live entry" and the run's
+latest figures cannot disagree. `recordMemoryMetricsEvidence` records only figures equal to what the run's recorded evidence derives
+(a stale snapshot, or figures computed elsewhere, is refused rather than allowed to supersede the correct ones), and
+`refreshMemoryRunMetrics` is how figures are brought up to date. Retrying figures that this gate recorded earlier and that have
+since been superseded returns the entry that holds them and writes nothing; another gate's entry is never the answer.
+
+A digest only proves a file is the one recorded, so what is read back is checked before figures are derived from it, and every
+stored payload is checked (a second record that reuses a decision's id is checked too, not collapsed away unread). A routing record
+must belong to the run and be a known version, and every decision in it must still recompute; a review decision needs its kind, a
+name, the item it decides, a status Survey defines and a time; a review event needs its kind, a session, an integer sequence, one
+of Survey's event types and a time. Those are shape checks, not a full Survey validation.
+
+**A request is refused whole or recorded.** `refreshMemoryRunMetrics`, `recordMemoryRoutingEvidence`, `runMemoryRouting` and
+`supersedeMemoryRoutingEvidence` check, before they write anything, the state the request would leave: that this gate may hold the
+run's metrics (one gate does; a request on another is refused), that every routing record that will be live is derivable, that the
+decisions being added recompute, that review state is valid, and that no kind of history passes `maxHistoryEntries` (default and
+maximum 1,000,000; a host may lower it). After that, deriving the figures cannot fail for a reason decided there. What this cannot
+rule out is an I/O failure or a crash between two writes: if the routing record is attached and the metrics are not, the figures
+describe fewer decisions than are stored until the next call, which repairs them (an identical retry does).
+
+If stored routing evidence is bad (a record that no longer recomputes, or one of another run), every request on that run is
+refused, which is the point: no figures are derived from evidence that disagrees with its own rules. The way out is
+`supersedeMemoryRoutingEvidence({supersedes, decisions})`. It attaches a corrected record that supersedes the named live routing
+records, after checking, as a whole, that the corrected decisions recompute, that the records which stay live are derivable and that
+the history limit holds; an identical retry returns the record it already made, for as long as that record is still live (once the replacement has itself been superseded, the same request is refused as naming records that are no longer live). Figures, the recomputation report, the room check and
+`readMemoryRoutingDecisions` read the live records, so after recovery recall shows the corrected routing; the superseded record stays
+in the manifest, readable with `readMemoryRoutingEvidence`, as the audit trail. A clean report over the live records is not a clean
+history, so audit the superseded entries too. Passing no `decisions` quarantines the named records without replacing them: that is a
+trusted-host administrative act, and it is not a block-list (recording the same decisions again records them again).
+`recomputeRecordedMemoryRouting(runId)` reads the stored files back (refusing any whose digest no longer matches), recomputes every
+live payload, repeats included, and names the bad ones.
+
+All of that holds within one process, for callers that reach the run through a directory that exists (an alias made later for a
+directory that did not exist yet is resolved through its nearest existing ancestor). Flow's run lock is not re-entrant, so the check
+and the attach cannot share it: two processes racing can leave a duplicate routing batch (readers dedupe by decision id) or two live
+metrics entries (`readLatestMemoryMetrics` takes the last), and metrics written by one process can be stale-last against another's
+decisions until the next refresh. Neither loses or corrupts evidence. An atomic conditional attach is a Flow feature
+([kontourai/flow#295](https://github.com/kontourai/flow/issues/295)).
+
+A routing policy with a field the policy does not define is refused (the decision schema allows none), and its lists must be lists of names; a decision recorded by an earlier build with an extra policy key therefore no longer recomputes (none of this repository's fixtures has one).
 
 One evidence entry holds a batch of decisions rather than one entry per decision,
 because a run decides hundreds of changes and each entry is a locked manifest write.
@@ -168,14 +259,15 @@ this evidence. It is recorded and recomputable, not gated.
   and `routedByRule`;
 - `reviewer`: `confirmed`, `corrected` (accepted with an edit), `rejected` (rejected,
   or the current value kept), `held` (could not confirm), `pending` (routed, no
-  decision yet), `unmatched` (a decision for something this run did not route), and
+  decision yet, or only annotations), `unmatched` (a decision for something this run did not route), `annotated` (decisions by an
+  agent, a rule or an unattested reviewer on a routed item: they promote nothing and leave it pending), and
   `defectsCaught` = `corrected + rejected`;
 - `reviewSeconds`: selection-to-submission dwell from Survey session events,
   summed over decisions that have both events, with `reviewTimedDecisions` saying how
   many. It is an upper bound on attention and is `null`, never estimated, without events;
 - `reviewSecondsPerCaughtDefect`.
 
-The latest decision for an item stands, by instant (`11:00+02:00` is before `10:00Z`; an exact tie keeps the later
+The latest *human* decision for a routed item stands (see Who may promote a routed claim), by instant (`11:00+02:00` is before `10:00Z`; an exact tie keeps the later
 entry; a decision with an unreadable time never beats one with a time), and a change routed twice in one run counts
 once, with its later decision. Only a `verified` or `assumed` decision confirms; `proposed` (the workbench's
 "could not confirm") and anything Survey does not define is held. Review time is the dwell of the session that
@@ -196,7 +288,8 @@ in front of a reader. Every presented claim carries `posture` and a review label
 (`unreviewed`, `in-review`, `confirmed`, `corrected`), and `text` begins with both:
 `[hypothetical · unreviewed] widget service: sharding technology = Citus`. A claim
 with no posture, a claim whose id no longer matches its content, and a claim review
-rejected are *withheld and reported*, never presented bare. A claim a reviewer corrected
+rejected are *withheld and reported*, never presented bare. Only a human reviewer's decision promotes, corrects or withholds a
+routed claim; an agent's or rule's is reported in `review.annotations` and changes nothing. A claim a human reviewer corrected
 is presented with the reviewer's value (`value`), the extracted one stays in
 `extractedValue`, and a reviewer's decision applies whether or not the claim's routing
 record is passed in.
@@ -229,8 +322,8 @@ consumed here, and `presentMemoryClaims` does not apply it.
   (`#671`). Claims are returned and recorded as evidence; staging into a store is the
   next lane.
 - Anything newer than the pinned releases. This package pins `@kontourai/surface` 6.3.0 and `@kontourai/survey`
-  8.3.0 (exact versions, as released on npm). The Kit calls Surface's `meetVisibility` for the widening rule, takes
-  Survey's `EntityProposal` as the type it reads, and fills Surface's own `AccumulationClaim` and
+  8.4.0 (exact versions, as released on npm). The Kit calls Surface's `meetVisibility` for the widening rule, takes
+  Survey's `EntityProposal` as the type it reads and its `isReviewerKind` for the reviewer kind, and fills Surface's own `AccumulationClaim` and
   `AccumulationQuery`. Tests replay Surface's meet vectors and a 37 x 37 grid of good and malformed visibilities
   through the pinned release, and run Survey's `createEntityProposal` over the emitter's output.
 - Running Surface's projection. It needs custody (observations with digests and authenticated publishers) and an

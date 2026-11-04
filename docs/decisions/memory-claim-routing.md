@@ -28,6 +28,15 @@ memory; every other piece stays with its owner.
 - **Uncontested changes are recorded as `proposed`; flagged ones are routed.**
   Routing never blocks recall. Survey records verification verdicts and reviewer
   decisions but routes on neither, so the policy is the Kit's.
+- **A routed claim is promoted only by a human reviewer** (owner decision, 2026-11-03). Only a Survey outcome with
+  `reviewerKind: "human"`, attested by the host that authenticated the reviewer, promotes, corrects or withholds a routed claim; an
+  `agent` or `rule` outcome annotates it, and the claim stays `proposed` and routed. The kind is the field Survey 8.4.0 added (kontourai/survey#360), read in
+  one place, `memoryReviewerKind`, which fails closed: a missing, unknown, non-text, inherited or nested value is not human, and
+  neither is a kind Survey marks inferred (`reviewerKindInferred` present and not `false`). Unknown routing is treated as routed. Two readings are mine and open to correction: an agent's rejection
+  does not withhold a claim either (the rule says an agent may not change it, and rejecting is a change), and a claim routing did not
+  flag still takes any reviewer, since it has no review item to be gated. That exception is earned, not assumed: it applies only when
+  the record saying the claim was not flagged recomputes (review 15 showed that taking the outcome from unvalidated context let a
+  forged `proposed` waive the human requirement). Review time counts only the deciding reviewer's own events.
 - **Unmeasured is not agreed, and unknown is not safe, with one deliberate exception.**
   Too few extraction passes route to review, and a visibility Surface cannot read is sealed, never open.
   Malformed agreement counts and a projection fact that is not well formed are refused at the entry points
@@ -50,7 +59,7 @@ memory; every other piece stays with its owner.
   the slot reads `current` and the replacement is recorded as `proposed` unless another rule fires. The projection decides, and it
   can decide earlier: Surface projected an equal-value replacement as `current` while its edge was still `pending`. The visibility
   lattice is Surface's (surface@6.3.0): a claim's `visibility` has Surface's form and the widening rule calls
-  Surface's `meetVisibility`. Entity merge and split review is Survey's (survey@8.3.0): the Kit emits
+  Surface's `meetVisibility`. Entity merge and split review is Survey's (survey@8.4.0): the Kit emits
   `EntityProposalInput` and routes the proposal, and Survey builds the item and records the outcome. Both packages
   are pinned to the released versions; the Kit holds no copy of either contract.
 
@@ -59,6 +68,8 @@ memory; every other piece stays with its owner.
 - Flow 5.4 gate expectations accept only `trust.bundle`, so routing evidence is
   recorded and recomputable but a gate cannot yet require it.
 - Review time is selection-to-submission dwell of the session that submitted the decision, from Survey
-  session events, and is absent, not estimated, when there are none. It is an upper bound on attention.
+  session events, and is absent, not estimated, when there are none or when the history can be read two ways
+  (Survey's decision does not name its session: more than one session submitting the decision, or one session
+  name carrying a sequence twice, gives no time; the checks narrow and do not prove ownership). It is an upper bound on attention.
 - Every recall path must present claims through `presentMemoryClaims` or enforce the
   same rule: no claim without its posture and review label.

@@ -94,7 +94,7 @@ test("the committed proposals are what the Kit's emitter produces, made by Surve
   for (const proposal of Object.values(fixtures)) assert.match(proposal.id, /^sha256:[0-9a-f]{64}$/);
 });
 
-test("the pinned Survey (survey@8.3.0) accepts the emitter's input and yields the committed proposals, ids and review items", async () => {
+test("the pinned Survey (survey@8.4.0) accepts the emitter's input and yields the committed proposals, ids and review items", async () => {
   const survey = await import("@kontourai/survey");
   assert.equal(typeof survey.createEntityProposal, "function", "the pinned Survey exports entity review");
   const { owner } = await claims();

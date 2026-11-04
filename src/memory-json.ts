@@ -11,14 +11,47 @@
 import { types } from "node:util";
 import { MemoryClaimError } from "./memory-claims.js";
 
+// The bounds are written here once and the larger ones are derived from the smaller, so that what the Kit produces is always
+// something its own readers accept: a claim is checked against the claim bounds when it is assembled, and a routing decision
+// (which embeds a claim, its peers and its verification records) is bounded by their sum, not by the claim's own bound.
+/** JSON values in one claim, one review decision or event, or one extraction-pass proposal list entry. */
 export const MAX_SNAPSHOT_NODES = 20_000;
+/** Levels of nesting in one claim. */
 export const MAX_SNAPSHOT_DEPTH = 32;
+/** Other claims one claim is checked against (and so embedded with in its routing decision). */
+export const MAX_PEERS = 64;
+/** Support-verification records one routing decision carries, and the values one may hold (a record is digests and ids: about 15 values). */
+export const MAX_VERIFICATIONS = 64;
+export const MAX_VERIFICATION_NODES = 2_000;
+/** Entries in one request list, and in the history a run keeps (decisions, review decisions, review events). */
+export const MAX_RUN_LIST = 20_000;
+/** JSON values in a routing policy (three short lists of names). */
+export const MAX_POLICY_NODES = 20_000;
+/** What one run holds across requests (routing decisions, review decisions, review events, each), and the default cap `maxHistoryEntries` lowers. */
+export const MAX_HISTORY_ENTRIES = 1_000_000;
+/**
+ * What a routing decision holds besides its claims and verification records, each part bounded on its own: a baseline per claim
+ * (65 x ~1,030 for a visibility that lists 1,024 audiences = ~67,000), the projection fact (at most 1,000 entries in each of three
+ * lists, plus a slot of at most a claim's worth), the policy (`MAX_POLICY_NODES`), and a few hundred envelope fields: ~160,000 in
+ * all, inside the allowance. Every part is bounded where the Kit takes it in, so a decision the Kit produces always fits; the test
+ * `the decision bound covers the sum of its parts` pins that sum, so a bound cannot change without it.
+ */
+export const MAX_ENVELOPE_NODES = 200_000;
+/** A routing decision: the claim and its peers, the verification records, and the envelope. */
+export const MAX_DECISION_NODES = (MAX_PEERS + 1) * MAX_SNAPSHOT_NODES + MAX_VERIFICATIONS * MAX_VERIFICATION_NODES + MAX_ENVELOPE_NODES;
+/** A claim sits a few levels down in a decision and in an extraction response, so those nest a few levels deeper than a claim. */
+export const MAX_DECISION_DEPTH = MAX_SNAPSHOT_DEPTH + 8;
+/** One extraction pass's response: many proposals, each with a value and provenance. */
+export const MAX_EXTRACTION_RESULT_NODES = 250_000;
 
-export function jsonSnapshot(value: unknown, label: string): unknown {
+export interface SnapshotOptions { maxNodes?: number; maxDepth?: number }
+
+export function jsonSnapshot(value: unknown, label: string, options: SnapshotOptions = {}): unknown {
   const bad = (what: string): never => { throw new MemoryClaimError("invalid", `${label}: ${what}`); };
+  const maxNodes = options.maxNodes ?? MAX_SNAPSHOT_NODES, maxDepth = options.maxDepth ?? MAX_SNAPSHOT_DEPTH;
   let nodes = 0;
   const walk = (item: unknown, depth: number, ancestors: Set<object>): unknown => {
-    if (++nodes > MAX_SNAPSHOT_NODES) return bad("too large to record");
+    if (++nodes > maxNodes) return bad("too large to record");
     if (item === null || typeof item === "string" || typeof item === "boolean") return item;
     if (typeof item === "number") {
       if (!Number.isFinite(item)) return bad("a number that is not finite cannot be recorded as JSON");
@@ -30,13 +63,13 @@ export function jsonSnapshot(value: unknown, label: string): unknown {
     // no list of checks makes one safe to read. It is refused, not defended against.
     if (types.isProxy(item)) return bad("a Proxy cannot be recorded");
     if (ancestors.has(item)) return bad("a cycle cannot be recorded");
-    if (depth >= MAX_SNAPSHOT_DEPTH) return bad("too deep to record"); // containers nest at most MAX_SNAPSHOT_DEPTH levels
+    if (depth >= maxDepth) return bad("too deep to record"); // containers nest at most maxDepth levels
     ancestors.add(item);
     try {
       if (Array.isArray(item)) {
         if (Object.getPrototypeOf(item) !== Array.prototype) return bad("an array subclass cannot be recorded");
         const length = item.length;
-        if (length > MAX_SNAPSHOT_NODES) return bad("too large to record");
+        if (length > maxNodes) return bad("too large to record");
         if (Object.getOwnPropertySymbols(item).length || Object.keys(item).length !== length) return bad("a list with extra keys, symbols or holes cannot be recorded");
         const out: unknown[] = [];
         for (let index = 0; index < length; index++) {
@@ -80,13 +113,13 @@ export function ownField(record: unknown, key: string, label: string): unknown {
 }
 
 /** The entries of a caller's list, read by index with the same refusals as `jsonSnapshot`, without calling any of its methods. */
-export function ownEntries(value: unknown, label: string): unknown[] {
+export function ownEntries(value: unknown, label: string, maxLength: number = MAX_RUN_LIST): unknown[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new MemoryClaimError("invalid", `${label}: expected a list`);
   if (types.isProxy(value)) throw new MemoryClaimError("invalid", `${label}: a Proxy cannot be read`);
   if (Object.getPrototypeOf(value) !== Array.prototype) throw new MemoryClaimError("invalid", `${label}: expected a plain list`);
   const length = value.length;
-  if (length > MAX_SNAPSHOT_NODES || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== length) throw new MemoryClaimError("invalid", `${label}: a list with extra keys, symbols or holes, or too long, cannot be read`);
+  if (length > maxLength || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== length) throw new MemoryClaimError("invalid", `${label}: a list with extra keys, symbols or holes, or too long, cannot be read`);
   const out: unknown[] = [];
   for (let index = 0; index < length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(value, index);
@@ -104,6 +137,6 @@ export function jsonSnapshotList(value: unknown, label: string): unknown[] {
 }
 
 /** A list of independent items, each copied on its own (so the size bound is per item, not per list), read by index. */
-export function jsonSnapshotEach(value: unknown, label: string): unknown[] {
-  return ownEntries(value, label).map((item, index) => jsonSnapshot(item, `${label}[${index}]`));
+export function jsonSnapshotEach(value: unknown, label: string, options: SnapshotOptions = {}): unknown[] {
+  return ownEntries(value, label).map((item, index) => jsonSnapshot(item, `${label}[${index}]`, options));
 }

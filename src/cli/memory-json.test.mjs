@@ -127,3 +127,11 @@ test("ownEntries refuses an array subclass, a symbol key and a list over the bou
   assert.throws(() => jsonSnapshotList(wide, "t"), /too large/, "the whole list is not");
   assert.throws(() => jsonSnapshotEach([{ a: 1 }, new Proxy({}, {})], "t"), /Proxy/);
 });
+
+test("a per-call node bound lets a caller copy more than one claim's worth, and still refuses past it", () => {
+  const wide = { a: new Array(MAX_SNAPSHOT_NODES + 50).fill(1) };
+  assert.throws(() => jsonSnapshot(wide, "t"), /too large/);
+  assert.equal(jsonSnapshot(wide, "t", { maxNodes: MAX_SNAPSHOT_NODES * 2 }).a.length, MAX_SNAPSHOT_NODES + 50);
+  assert.throws(() => jsonSnapshot(wide, "t", { maxNodes: MAX_SNAPSHOT_NODES + 10 }), /too large/);
+  assert.equal(jsonSnapshotEach([wide, wide], "t", { maxNodes: MAX_SNAPSHOT_NODES * 2 }).length, 2);
+});

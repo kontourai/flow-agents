@@ -293,6 +293,149 @@ Run the deterministic fixture suite:
 node --test kits/knowledge/context-check/context-check.test.js
 ```
 
+### Living Context recall contract (Context Check 1.1)
+
+**`knowledge.living-context`** extends the Context Check recall without changing `1.0`: the
+`1.0` flow and its schemas are unchanged, and `runContextCheck` refuses a `1.1` input rather than
+running it under `1.0` rules. (The shared Knowledge schema validator now ignores inherited object
+property names, so a `1.0` input carrying an undeclared `constructor`, `toString`, `__proto__`
+or `hasOwnProperty` key is now rejected; every other `1.0` input behaves as before.) The `1.1` entry
+points live in `context-check/living-context.js` (recall and reconciliation) and
+`context-check/living-context-answer.js` (the answer step); loading `index.js` still needs no Surface
+or Survey package, but the `1.1` modules need `@kontourai/surface` with the derived-visibility exports
+(Surface 6.3.0 or later, kontourai/surface#350) and `@kontourai/survey`. Schemas:
+[`living-context-input`](../schemas/knowledge/living-context-input.schema.json) and
+[`living-context-result`](../schemas/knowledge/living-context-result.schema.json).
+
+```js
+import { runLivingContext } from "./context-check/living-context.js";
+import { answerLivingContext, createLineSupportVerifier } from "./context-check/living-context-answer.js";
+
+const input = {
+  schema_version: "1.1",
+  workspace: "platform", repository: "example/repository",
+  revision: "0123456789abcdef0123456789abcdef01234567",
+  target_audience: "maintainer",
+  reader: "maintainer",                              // required; authenticated by the host
+  as_of: { now: "2026-06-01T00:00:00Z" },            // required; valid_at / known_at default to now
+  budget: { max_tokens: 4000 },                      // required; no default budget
+  changed_surfaces: ["src/context-adapter.js"],
+  knowledge_roots: [{ id: "repository-decisions", provider: "git-repo", manifest_path: "knowledge/claims.json" }]
+};
+const recall = runLivingContext({ repoRoot, input, proposalDir });   // evidence only
+const answer = await answerLivingContext({                           // separate, abstaining step
+  repoRoot, input, verifier: createLineSupportVerifier()             // a verifier is required; inject a model or human one in production
+});
+```
+
+**Identity is required and fails closed.** A missing or blank `reader` is `READER_IDENTITY_REQUIRED`;
+a reader that every selected root does not list under its manifest `readers` is
+`UNKNOWN_READER_IDENTITY`. The reader is admitted at every selected root before a single claim of any
+root is parsed, and before any file is written. Context Check does not authenticate: the host supplies
+an identity it has authenticated, and Context Check only refuses one it does not recognise.
+
+**Visibility is Surface's.** A claim's `visibility` is written in Surface's declared forms: `"public"`
+or `{ "audiences": ["maintainer"] }` (the reader id is the audience label). It is read with
+`readDeclaredVisibility` and enforced with `visibilityAllows`; anything undeclared or unreadable, a bare
+array included, is sealed and visible to no one. Per-viewer supersession is `viewerSupersessionView`
+(kontourai/surface#350): an edge applies only to a viewer who may see its successor, so **a successor the
+reader cannot see leaves the predecessor `current` for them, with no trace of it** (the result is
+identical to one where no successor exists), chains through hidden claims collapse to the nearest visible
+successor, and a cycle among visible claims leaves them `unverifiable` (`supersession_cycle`). An edge
+carries its own visibility (`supersession_visibility`, by default that of the claim that carries it); an
+unreadable one is sealed and the edge is followed for no one. A malformed claim that Surface says the
+reader may not see, or that was recorded after `known_at`, is dropped without an error, so a parse error
+never describes it; an entitled reader's error, whatever its family, names the claim, never its array
+position. A reader's view of an id is built only from the copies they may see: a hidden duplicate neither
+changes their answer nor is observable, whatever its content or file order, and two copies they may see
+and that are known at `known_at` are a `DUPLICATE_CLAIM_ID` error. When every copy of an id is hidden and
+there is more than one, no copy can stand for the id and no combination of them is safe (a union can create a
+hidden cycle that makes Surface drop a real supersession), so the id is ambiguous: a visible claim whose
+recorded, visible edge chain reaches it is `unverifiable` (`supersession_ambiguous`), never current or
+superseded, in any file order. Identical hidden copies count as disagreeing: an id carried twice is a
+manifest defect, and Context Check does not decide which copy was meant. The walk follows recorded,
+reader-visible edges through hidden claims and stops at the first claim the reader can see; it does not
+re-apply slot or interval admission to the ambiguous id, so it can over-trigger but never under-trigger, and
+an untimed claim reports `knowledge_time_unknown` first. The cost is disclosure of one bit: because the
+ambiguous id is left out of the structure, every claim on that chain loses its history beyond it, which can
+change their chains, token costs (and so budget admission and answers), and a hidden cycle it was part of. An edge the reader may not see (its
+`supersession_visibility`) explains nothing: no chain link, no reason, no status change, so for a reader who may not see the edge an
+untimed or cross-slot successor also leaves both claims current. Asked for by id, a hidden, absent, or
+not-yet-known claim returns the same plain `no_answer`; a default scan never names one. Reconciliation
+and proposals cover only claims the reader may see. A claim that is unverifiable because of its own
+validity (stale, untimed, outside its valid time, or declared unverifiable) reconciles as `unverifiable` when
+the change intersects it (an unaffected claim stays `clean`);
+supersession trouble (a cycle, an ambiguous id, a missing edge time) says nothing about whether the change
+contradicts the claim, so recorded contradiction evidence and ordinary `affected` status are reported as usual. Stated limits: admission of an edge uses the times and
+slot of both ends, so a hidden claim's times can decide whether a chain through it collapses, though never
+what the reader is shown; and a dangling pointer is indistinguishable from a hidden successor.
+
+**As-of on two time axes**, with the semantics of Surface's knowledge-accumulation decision
+(kontourai/surface#204, merged as Surface `7486c6d`): `known_at` is knowledge time, filtered on the
+manifest's `recorded_at` (the receiver-recorded instant, never a claim's own authored time), and `valid_at`
+is valid time, a half-open `[from, until)` interval from `valid_time` (an absent bound is unbounded and
+asserts nothing about perpetual truth). A supersession edge is its own observation: it is admitted only
+once the claim's `supersession_recorded_at` and its successor's `recorded_at` are at or before
+`known_at` (untimed is indeterminate, never guessed, and makes a claim whose visible successor is untimed
+`unverifiable`), and both ends must declare the same `slot` or the edge is inert and the claim
+`unverifiable`. A `succession` takes effect at the successor's `valid_time.from`; a `correction` (the
+default) applies within the successor's valid interval, throughout when it has none. Contradiction
+evidence needs `reconciliation_recorded_at` by `known_at`, and a `verified_at` after `known_at` cannot
+anchor a TTL. The authority text itself is read at the pinned revision, not as of `known_at`: pin the
+revision that existed at the knowledge cut. No wall clock is read: `now` is explicit and also the instant
+freshness is judged at; `expires_at`/`ttl_seconds` govern freshness only, never world validity. Full slot
+identity, cardinality, `contested` outcomes, and the admission policy for who may supersede whom are not
+modelled: Surface's accumulation projection (`projectAccumulation`) would own them but needs a
+host-protected authority snapshot a Git manifest cannot supply, so consuming it is tracked in
+kontourai/flow-agents#1586 (see the decision record). `status` is the status **as of the stated instants** and the result echoes them, so a
+predecessor read at a `valid_at` before its succession, or a `known_at` before its successor was recorded,
+is `current` with a reason saying exactly why. A superseded claim is never `current` for a reader who can
+see a successor that is recorded, in effect and on the same slot, along an edge the reader may see
+(`supersession_visibility`) and the chain is acyclic: an edge the reader may not see deliberately leaves both
+claims current for them, and a cycle that exists only through hidden claims is Surface's rule (it does not
+change what the reader sees; see the decision record).
+
+**Reasons, not just rank.** Every recall carries `matched_signals`, `freshness` (Surface's
+claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surface does; a stale
+claim that would otherwise be current is `unverifiable`, while a superseded one stays `superseded` and
+reports `freshness.stale: true`), `review_posture` (`proposed` unless the manifest names a reviewer),
+`supersession_chain` (only edges this reader may see, whose ends were recorded by `known_at`), and
+`reasons`. The sparse plain `no_answer` entry carries none of these by design: it must say nothing. A requested `claim_ids` list keeps its own order; a default scan lists claims that
+intersect the change first, then by id. Order is the only ranking, and the reasons say why each
+result is there.
+
+**Budget.** `budget.max_tokens` is explicit. Each result's cost is `ceil(utf8 bytes / 4)` of its
+JSON (the estimator is named in the result), no-answer entries included. Results are kept or
+dropped whole in that order and never truncated; a result that does not fit is dropped and the
+next one is still tried. Every drop is listed by id with its estimated cost, and a drop makes the
+verdict `not_verified`. Reconciliation and proposals are not budgeted, so a dropped recall never
+hides an affected claim.
+
+**Abstention is a separate step.** Recall returns evidence and never an answer.
+`answerLivingContext` re-derives recall and sends only a `current` recall, with its authority
+document read at the pinned revision, to an independent `@kontourai/survey` `SupportVerifier`;
+a verifier is a required argument. `createLineSupportVerifier` is a deterministic fixture floor (the
+claim statement must be a whole line of its authority text); it cannot read negation, so production
+callers inject a model or human verifier. Only `supported` answers; `contradicted` is
+reported; `not-addressed`, an abstaining, throwing, or timed-out verifier, an unreadable, empty or
+oversized (`MAX_EVIDENCE_BYTES`) authority document, and budget drops all abstain, and any
+abstention makes the set `not_verified`. Each verdict is kept as Survey's immutable
+`CandidateVerification`.
+
+**Change observation.** `observeRepositoryChange({ repoRoot, base, head })` turns two raw commits
+into the `diff.paths` input. It is a thin shim: Lookout observes registered web, API and
+structured-file sources over guarded HTTP (plus structural and proposal diff helpers over those
+observations) and has no Git-revision source yet. It refuses an empty or oversized
+change (`maxPaths`, default 500) rather than truncating.
+
+Freshness is Surface's, not a second derivation. Ephemeris is the time actor that wakes a Flow run
+at a claim's deadline (it derives wake-up instants, not a trust or freshness status), so it is not a
+dependency of a synchronous, explicit-`now` check.
+
+```bash
+node --test kits/knowledge/context-check/living-context.test.js
+```
+
 ---
 
 ## Decision Lifecycle — Retiring Records (S7)
@@ -633,7 +776,7 @@ library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
 `O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
 artifacts; the CLI checks it before constructing its store. Unsupported
 platforms or a missing interpreter refuse, with the legacy runner still
-available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0. The kit
+available. This distribution qualifies Flow 5.2.0 and Surface 6.3.0. The kit
 invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
 engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
 unique run id and optionally a `flowCommand` argument array for a particular

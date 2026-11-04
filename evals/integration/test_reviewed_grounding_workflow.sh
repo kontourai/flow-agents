@@ -30,10 +30,10 @@ assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && 
 // surface: 2.17.0 -> 5.0.0 with kontourai/flow-agents#1422. One break reaches this workflow:
 // Surface 4.0 binds the published claim value to the reviewed candidate and refuses a grounding
 // decision made without claims, so run.mjs now supplies the claim it would publish.
-// surface: 5.0.0 -> 6.3.0 and survey: 8.2.0 -> 8.3.0 with kontourai/flow-agents#1571 (the released versions its memory routing consumes;
-// this workflow ran unchanged against them).
-// Native review consumes the reviewed public Survey 8.3.0 producer/session contracts.
-assert(Object.values(deterministic.revisions).join(",") === "0.19.1,8.3.0,0.3.2,6.3.0", "public revisions are not pinned");
+// surface: 5.0.0 -> 6.3.0 and survey: 8.2.0 -> 8.4.0 with kontourai/flow-agents#1131 (Living Context needs Surface's derived-visibility
+// exports) and kontourai/flow-agents#1571 (the released versions its memory routing consumes; this workflow ran unchanged against them).
+// Native review consumes the reviewed public Survey 8.4.0 producer/session contracts.
+assert(Object.values(deterministic.revisions).join(",") === "0.19.1,8.4.0,0.3.2,6.3.0", "public revisions are not pinned");
 assert(!deterministic.action.afterReview.gaps.some((gap) => gap.kind === "claims-not-supplied" || gap.kind === "value-mismatch"), "the reviewed claim value is not bound to the decision");
 assert(deterministic.failures.valueMismatch.outcome === "refused" && deterministic.failures.valueMismatch.gaps.some((gap) => gap.kind === "value-mismatch"), "a claim publishing a value other than the reviewed one was not refused with value-mismatch");
 assert(live.liveTelemetry.provider === "reference-provider-adapter" && live.liveTelemetry.model === "reference-provider-model" && live.liveTelemetry.taskDigest === deterministic.extraction.taskDigest && live.liveTelemetry.usageTokens === 42 && live.liveTelemetry.latencyMs >= 0 && live.liveTelemetry.fixtureRevision === "reviewed-grounding-fixture/v1", "optional live execution telemetry is incomplete or unbound");
