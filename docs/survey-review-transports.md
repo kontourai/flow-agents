@@ -60,7 +60,7 @@ because the host supports review.
 
 ## Provision Survey independently
 
-The examples use the published Survey 8.3.0 transport package and require Node
+The examples use the published Survey 8.4.0 transport package and require Node
 22 or later. The standalone commands are optional transports for producer-created sessions;
 installing them does not grant workflow authority. Native kit review already owns
 its Survey runtime.
@@ -70,7 +70,7 @@ lifecycle. Do not point the commands at a caller-created approval document.
 For a producer-created session at an absolute path:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.3.0 survey-review-console \
+npx --yes --package=@kontourai/survey@8.4.0 survey-review-console \
   --session /absolute/path/review-session.json --port 4243
 ```
 
@@ -80,7 +80,7 @@ arguments do not configure a workflow application callback.
 An MCP-capable host can launch the same session through stdio:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.3.0 survey-review-mcp \
+npx --yes --package=@kontourai/survey@8.4.0 survey-review-mcp \
   --session /absolute/path/review-session.json
 ```
 

@@ -100,7 +100,8 @@ async function main() {
 
   if (hookModule && typeof hookModule.run === 'function') {
     try {
-      const outputOrPromise = hookModule.run(raw, { truncated, maxStdin: MAX_STDIN });
+      const entry = typeof hookModule.runAsync === 'function' ? hookModule.runAsync : hookModule.run;
+      const outputOrPromise = entry(raw, { truncated, maxStdin: MAX_STDIN });
       // Support async run() (returns a Promise): await before emitting result.
       // Synchronous run() returns a plain value — Promise.resolve wraps it safely.
       const output = (outputOrPromise && typeof outputOrPromise.then === 'function')

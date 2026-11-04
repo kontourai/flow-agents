@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { snapshotDir } from './lib.js';
 import { ingestFromSource, runPromote } from './index.js';
+import { proposeMemory } from './store-target.js';
 
 // Produced by #669 ingestRuntimeSessions from its runtime rollout fixture.
 const residue = JSON.parse(fs.readFileSync(new URL('./fixtures/runtime-residue-669.json', import.meta.url)));
@@ -193,4 +194,32 @@ test('request keys separate sittings and positions but exclude candidate content
   const anotherSitting = { ...residue, sittingId: residue.sittingId.replace(/:0$/, ':1') };
   await runPromote({ ...opts, residue: anotherSitting });
   assert.notEqual(calls[1][4].requestKey, initial[0], 'different sittings must use different keys');
+});
+
+test('an optional request scope separates the keys of two plans for one sitting; without it the keys are unchanged', async () => {
+  // A caller that stages more than one plan for a sitting (the dream, after its visibility changes) must not collide with
+  // the first plan's positions. The default key stays exactly what it was, so existing callers are unaffected.
+  const { calls, opts } = setup();
+  const keysFor = async (extra) => { calls.length = 0; await proposeMemory({ ...opts, ...extra }); return calls.filter((call) => call[0] === 'propose').map((call) => call[4].requestKey); };
+  const plain = await keysFor({});
+  const scopedA = await keysFor({ requestScope: 'plan-a' });
+  const scopedB = await keysFor({ requestScope: 'plan-b' });
+  assert.deepEqual(plain, await keysFor({}), 'no scope: the same key as before');
+  assert.notEqual(scopedA[0], plain[0]);
+  assert.notEqual(scopedA[0], scopedB[0]);
+  assert.deepEqual(scopedA, await keysFor({ requestScope: 'plan-a' }), 'one scope: a stable key, so a retry is the same request');
+  assert.match(scopedA[0], /^knowledge\.promote:[a-f0-9]{64}$/);
+  for (const bad of ['', '  ', 7, null]) await assert.rejects(() => proposeMemory({ ...opts, requestScope: bad }), /requestScope/);
+});
+
+test('explicit positions key each candidate by its place in the caller\'s whole batch, not in the part it sends', async () => {
+  const { calls, opts } = setup();
+  const two = [candidates[0], { ...candidates[0], title: 'Second' }];
+  const whole = async (extra) => { calls.length = 0; await proposeMemory({ ...opts, candidates: two, ...extra }); return calls.filter((call) => call[0] === 'propose').map((call) => call[4].requestKey); };
+  const full = await whole({});
+  const second = await whole({ candidates: [two[1]], positions: [1] });
+  assert.deepEqual(second, [full[1]], 'the second candidate sent alone keeps the second candidate\'s key');
+  assert.deepEqual(await whole({ positions: [0, 1] }), full, 'positions equal to the indexes change nothing');
+  const sparse = Array(2); sparse[1] = 0;
+  for (const bad of [[0], [0, 0], [0, -1], [0, 1.5], [0, '1'], [0, 2 ** 53], sparse, 'x']) await assert.rejects(() => proposeMemory({ ...opts, candidates: two, positions: bad }), /positions/);
 });
