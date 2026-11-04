@@ -87,6 +87,16 @@ test("the Relay shim fails a pass that did not deliver an extraction: no tool ca
   assert.deepEqual(ok.proposals, [], "an empty list that the model did deliver is a real, empty answer");
 });
 
+test("the Relay shim tells the model to index list items, because a real model given claims[].subject answered with that literal path", async () => {
+  // Found by running a real model over a real transcript: every field came back as `claims[].x`, no field could be
+  // grouped into a claim, and the whole sitting was rejected. The fake runtimes always indexed, so only the request shows it.
+  const fake = new FakeModelRuntime([{ provider: "fake", model: "m", outputText: "", usage: {}, latencyMs: 1, toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: { proposals: [] } }], stopReason: "tool_use" }]);
+  await (await createRelayExtractionProvider({ runtime: fake })).extract({ content: "x", contentType: "text", targetSchema: [{ path: "claims[].subject", type: "string" }] });
+  const sent = fake.requests[0].messages[0].content;
+  assert.match(sent, /containing \[\] names a list/);
+  assert.match(sent, /claims\[0\]\.subject and claims\[0\]\.value describe the first claim, claims\[1\]\.subject the second/);
+});
+
 test("layer 2 of the redaction defence: no secret-shaped canary reaches the model, and the report counts the scrub markers", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl", "claude-project.jsonl"] });
   t.after(ws.cleanup);
