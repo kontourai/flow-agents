@@ -266,6 +266,10 @@ process semantics. Surface's original trust-panel element and exact package
 metadata also ship with its entry; synchronous narrative reads and panel rendering
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
+The direct pins are Surface 6.3.0 and Survey 8.3.0: the Knowledge Kit's Living Context
+recall needs Surface's derived-visibility exports (`readDeclaredVisibility`,
+`visibilityAllows`, `viewerSupersessionView`) and refuses with
+`SURFACE_VISIBILITY_UNAVAILABLE` when they are missing.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;

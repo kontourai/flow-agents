@@ -24,17 +24,17 @@ const CLAIM_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CLAIM_STATUS = new Set(["current", "superseded", "unverifiable"]);
 const GIT_ENVIRONMENT = Object.freeze({ GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" });
 
-function error(code, message) {
+export function error(code, message) {
   const value = new Error(message);
   value.code = code;
   return value;
 }
 
-function isIdentity(value) {
+export function isIdentity(value) {
   return typeof value === "string" && value.trim() === value && value.length > 0 && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
-function safeRelativePath(value, field) {
+export function safeRelativePath(value, field) {
   const normalized = typeof value === "string" ? value.replace(/\\/g, "/") : value;
   if (!isIdentity(value) || path.isAbsolute(value) || path.posix.isAbsolute(normalized) || value.split(/[\\/]+/).includes("..")) {
     throw error("INVALID_PATH", `${field} must be a non-empty repository-relative path without traversal`);
@@ -42,7 +42,7 @@ function safeRelativePath(value, field) {
   return normalized;
 }
 
-function safeClaimId(value, field) {
+export function safeClaimId(value, field) {
   if (!isIdentity(value) || !CLAIM_ID_RE.test(value)) throw error("INVALID_IDENTITY", `${field} must be a non-blank identifier ([A-Za-z0-9._-])`);
   return value;
 }
@@ -53,8 +53,8 @@ function sanitizedGitEnvironment() {
   return { ...env, ...GIT_ENVIRONMENT };
 }
 
-/** Run Git with all inherited Git overrides cleared and replace/graft behavior disabled. */
-function git(repoRoot, args) {
+/** Run Git with all inherited Git overrides cleared and replace/graft behavior disabled; output is untrimmed. */
+export function gitRaw(repoRoot, args) {
   try {
     return execFileSync("git", [
       "-C", repoRoot,
@@ -66,10 +66,14 @@ function git(repoRoot, args) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       env: sanitizedGitEnvironment(),
-    }).trim();
+    });
   } catch (cause) {
     throw error("REVISION_READ_FAILED", `Context Check could not read the requested Git revision: ${cause.stderr?.toString().trim() || cause.message}`);
   }
+}
+
+function git(repoRoot, args) {
+  return gitRaw(repoRoot, args).trim();
 }
 
 /** Validate the portable, revision-bound Context Check input contract. */
@@ -87,7 +91,7 @@ export function validateContextCheckResult(result) {
   return errors;
 }
 
-function resolveRevisionBoundRepository(repoRoot, requestedRevision) {
+export function resolveRevisionBoundRepository(repoRoot, requestedRevision) {
   if (!isIdentity(repoRoot)) throw error("REPO_ROOT_REQUIRED", "runContextCheck requires repoRoot");
   if (!REVISION_RE.test(requestedRevision)) throw error("INVALID_CONTEXT_CHECK_INPUT", "revision must be an exact 40-character Git commit SHA");
   let root;
@@ -110,21 +114,62 @@ function normalizedAuthority(authority, field) {
   };
 }
 
-function readClaimsAtRevision(repoRoot, revision, root) {
+/**
+ * Read one Knowledge root's manifest from the raw commit. The 1.0 contract accepts only `claims`;
+ * the 1.1 Living Context contract passes `extension` to accept its additional manifest and claim keys.
+ * `extension` is `{ manifestKeys: Set, parseManifest(parsed, manifestPath), claimKeys: Set, parseClaim(claim, prefix) }`.
+ */
+export function readManifestAtRevision(repoRoot, revision, root, extension) {
+  return normalizeManifestClaims(readManifestDocument(repoRoot, revision, root, extension), root, extension);
+}
+
+/**
+ * Phase one: read the manifest document and admit it (for 1.1, refuse an unrecognised reader) without
+ * parsing a single claim. The 1.1 flow runs this for every selected root before phase two for any root.
+ */
+export function readManifestDocument(repoRoot, revision, root, extension) {
   const manifestPath = safeRelativePath(root.manifest_path, "knowledge_roots[].manifest_path");
   const bytes = git(repoRoot, ["show", "--no-ext-diff", "--no-textconv", "--format=", `${revision}:${manifestPath}`]);
   let parsed;
   try { parsed = JSON.parse(bytes); } catch { throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} at ${revision} is not valid JSON`); }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).some((key) => key !== "claims") || !Array.isArray(parsed.claims)) {
-    throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} must contain only a claims array`);
+  const allowedManifestKeys = new Set(["claims", ...(extension?.manifestKeys ?? [])]);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).some((key) => !allowedManifestKeys.has(key)) || !Array.isArray(parsed.claims)) {
+    throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} must contain only a claims array${extension ? " and declared extension keys" : ""}`);
   }
-  return parsed.claims.map((claim, index) => normalizeClaim(claim, root, manifestPath, index));
+  // Manifest-level admission (for 1.1: refuse an unrecognised reader) runs before any claim is parsed.
+  const manifestExtension = extension?.parseManifest ? extension.parseManifest(parsed, manifestPath) : undefined;
+  return { parsed, extension: manifestExtension, manifestPath };
 }
 
-function normalizeClaim(claim, root, manifestPath, index) {
+/** Phase two: normalize the claims of an admitted manifest document. */
+export function normalizeManifestClaims(document, root, extension) {
+  const { parsed, manifestPath } = document;
+  const claims = [];
+  parsed.claims.forEach((claim, index) => {
+    try {
+      claims.push(normalizeClaim(claim, root, manifestPath, index, extension));
+    } catch (cause) {
+      // Under an extension a malformed claim the caller is not entitled to (not visible to them, or not yet
+      // known) is dropped before it can describe itself in an error. A well-formed hidden claim is kept: the
+      // caller's view needs it to collapse supersession chains that pass through it. Diagnostics for an entitled
+      // caller name the claim's own id, never a position, so hidden entries cannot be counted.
+      if (extension?.isUnavailableToCaller?.(claim)) return;
+      // Every parser error family names the claim by id, never by array position.
+      if (extension && typeof cause?.message === "string") throw error(cause.code ?? "INVALID_CLAIM_MANIFEST", cause.message.replaceAll(/claims\[\d+\]/g, `claim '${typeof claim?.id === "string" ? claim.id.slice(0, 80) : "(no id)"}'`));
+      throw cause;
+    }
+  });
+  return { claims, extension: document.extension, manifestPath };
+}
+
+function readClaimsAtRevision(repoRoot, revision, root) {
+  return readManifestAtRevision(repoRoot, revision, root).claims;
+}
+
+function normalizeClaim(claim, root, manifestPath, index, extension) {
   const prefix = `${manifestPath}: claims[${index}]`;
   if (!claim || typeof claim !== "object" || Array.isArray(claim)) throw error("INVALID_CLAIM_MANIFEST", `${prefix} must be an object`);
-  const allowed = new Set(["id", "claim", "status", "superseded_by", "authority", "owning_source", "affected_surfaces", "reconciliation_evidence"]);
+  const allowed = new Set(["id", "claim", "status", "superseded_by", "authority", "owning_source", "affected_surfaces", "reconciliation_evidence", ...(extension?.claimKeys ?? [])]);
   for (const key of Object.keys(claim)) if (!allowed.has(key)) throw error("INVALID_CLAIM_MANIFEST", `${prefix} has unexpected property '${key}'`);
   const id = safeClaimId(claim.id, `${prefix}.id`);
   if (!isIdentity(claim.claim)) throw error("INVALID_CLAIM_MANIFEST", `${prefix}.claim must be non-blank`);
@@ -147,14 +192,19 @@ function normalizeClaim(claim, root, manifestPath, index) {
     }
     reconciliationEvidence = { authority: normalizedAuthority(claim.reconciliation_evidence.authority, `${prefix}.reconciliation_evidence.authority`) };
   }
-  return { id, claim: claim.claim, status: claim.status, ...(supersededBy ? { superseded_by: supersededBy } : {}), authority, owning_source: owningSource, affected_surfaces: affectedSurfaces, ...(reconciliationEvidence ? { reconciliation_evidence: reconciliationEvidence } : {}), root, manifestPath };
+  return {
+    id, claim: claim.claim, status: claim.status, ...(supersededBy ? { superseded_by: supersededBy } : {}), authority, owning_source: owningSource, affected_surfaces: affectedSurfaces,
+    ...(reconciliationEvidence ? { reconciliation_evidence: reconciliationEvidence } : {}),
+    ...(extension?.parseClaim ? { extension: extension.parseClaim(claim, prefix) } : {}),
+    root, manifestPath,
+  };
 }
 
-function authorityAtRevision(authority, revision) {
+export function authorityAtRevision(authority, revision) {
   return { ...authority, revision };
 }
 
-function retrievalProvenance(revision, roots) {
+export function retrievalProvenance(revision, roots) {
   return {
     provider: "git-repo",
     knowledge_roots: [...new Set(roots.map((root) => root.id))],
@@ -184,7 +234,7 @@ function noAnswer(claimId, revision, roots) {
   };
 }
 
-function reconciliationFor(claim, changedSurfaces, revision) {
+export function reconciliationFor(claim, changedSurfaces, revision) {
   const affectedSurfaces = changedSurfaces.filter((surface) => claim.affected_surfaces.includes(surface));
   const authority = authorityAtRevision(claim.authority, revision);
   if (affectedSurfaces.length === 0) return { claim_id: claim.id, status: "clean", affected_surfaces: [], authority };
@@ -201,7 +251,7 @@ function reconciliationFor(claim, changedSurfaces, revision) {
   return { claim_id: claim.id, status: "affected", affected_surfaces: affectedSurfaces, authority };
 }
 
-function proposalFor(claim, reconciliation, revision) {
+export function proposalFor(claim, reconciliation, revision) {
   if (reconciliation.status === "clean") return null;
   const rationale = reconciliation.status === "contradicted"
     ? `Claim '${claim.id}' has explicit authoritative contradiction evidence for ${reconciliation.affected_surfaces.join(", ")} at ${revision}.`
@@ -293,7 +343,7 @@ function removeEmptyCreatedDirectory(directory) {
   try { fs.rmdirSync(directory); } catch { /* It was not left empty, or another actor owns it now. */ }
 }
 
-function writeResult(proposalDir, result) {
+export function writeResult(proposalDir, result) {
   if (!isIdentity(proposalDir)) throw error("PROPOSAL_DIR_REQUIRED", "Context Check writes require an explicit proposalDir");
   const requestedRoot = path.resolve(proposalDir);
   const outputRoot = ensurePrivateDirectory(requestedRoot, "proposalDir");
@@ -347,6 +397,9 @@ function writeResult(proposalDir, result) {
  * no-follow files below it; it never modifies repoRoot.
  */
 export function runContextCheck({ repoRoot, input, proposalDir, write = true } = {}) {
+  // 1.0 stays byte-compatible and dependency-free. The 1.1 Living Context contract has its own entry
+  // (living-context.js) so loading this module never requires Surface or Survey.
+  if (input && typeof input === "object" && input.schema_version === "1.1") throw error("UNSUPPORTED_SCHEMA_VERSION", "schema_version 1.1 inputs run through runLivingContext (context-check/living-context.js)");
   const inputErrors = validateContextCheckInput(input);
   if (inputErrors.length) throw error("INVALID_CONTEXT_CHECK_INPUT", inputErrors.join("; "));
   const { root: resolvedRoot, revision } = resolveRevisionBoundRepository(repoRoot, input.revision);

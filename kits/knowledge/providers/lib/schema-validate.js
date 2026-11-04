@@ -4,7 +4,7 @@
  * Supports exactly the draft-07 subset used by the Knowledge Kit graph schemas
  * (schemas/knowledge/*.schema.json): type, required, properties,
  * additionalProperties:false, enum, const, items, minLength, minItems, pattern,
- * uniqueItems, anyOf, oneOf, integer, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
+ * uniqueItems, anyOf, oneOf, integer, minimum/maximum, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
  * — it exists so health reports and conformance tests can assert schema validity
  * without pulling an external dependency (the same zero-dep discipline as the
  * promote sub-flow's decision-delta validator in promote/lib.js).
@@ -93,6 +93,11 @@ function validateNode(value, schema, root, pathStr, errors) {
     }
   }
 
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) errors.push(`${pathStr}: number below minimum ${schema.minimum}`);
+    if (typeof schema.maximum === "number" && value > schema.maximum) errors.push(`${pathStr}: number above maximum ${schema.maximum}`);
+  }
+
   if (Array.isArray(value)) {
     if (typeof schema.minItems === "number" && value.length < schema.minItems) {
       errors.push(`${pathStr}: array shorter than minItems ${schema.minItems}`);
@@ -116,15 +121,15 @@ function validateNode(value, schema, root, pathStr, errors) {
   if (typeOf(value) === "object") {
     const props = schema.properties || {};
     for (const req of schema.required || []) {
-      if (!(req in value)) errors.push(`${pathStr}: missing required property '${req}'`);
+      if (!Object.hasOwn(value, req)) errors.push(`${pathStr}: missing required property '${req}'`);
     }
     if (schema.additionalProperties === false) {
       for (const key of Object.keys(value)) {
-        if (!(key in props)) errors.push(`${pathStr}: unexpected property '${key}'`);
+        if (!Object.hasOwn(props, key)) errors.push(`${pathStr}: unexpected property '${key}'`);
       }
     }
     for (const [key, propSchema] of Object.entries(props)) {
-      if (key in value) {
+      if (Object.hasOwn(value, key)) {
         validateNode(value[key], propSchema, root, `${pathStr}/${key}`, errors);
       }
     }
