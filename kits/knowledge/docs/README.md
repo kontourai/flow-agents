@@ -782,7 +782,7 @@ library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
 `O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
 artifacts; the CLI checks it before constructing its store. Unsupported
 platforms or a missing interpreter refuse, with the legacy runner still
-available. This distribution qualifies Flow 5.2.0 and Surface 6.3.0. The kit
+available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0 for ingest. The kit
 invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
 engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
 unique run id and optionally a `flowCommand` argument array for a particular

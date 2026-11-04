@@ -2026,7 +2026,10 @@ automatically scrubbed. This follows Surface's producer-owned erasure boundary.
 The host must rebuild or invalidate each content-bearing projection before it
 serves it again, including any compiled briefs and indexes. Host-built projections,
 backups, snapshots, and migration manifests are outside Corpus Store's purge
-transaction. Corpus also documents an interrupted-write journal window containing
+transaction. Context Check and Living Context also read claim manifests from
+Git at pinned revisions; Corpus purge cannot erase those manifests or their Git
+history. Hosts must account for those copies and prevent erased content from
+being served from them. Corpus also documents an interrupted-write journal window containing
 before-images until recovery; purge is not a secure-erasure guarantee. A completed
 integration must test each adapter and each actual read path, including a fault
 that skips the cascade and makes conformance fail.
