@@ -54,6 +54,7 @@ async function seeded() {
   ids.retired = await make("2026-10-04T10:00:00.000Z", { type: "raw", title: "Cron sweeps run the nightly refresh", category: "decision.workflow", tags: ["cron"], body: "# Cron\n\nA nightly cron sweep refreshes the desk digest.\n" });
   store.at = "2026-10-06T10:00:00.000Z";
   await store.retire(ids.retired, "retired", { agent: "fixture", rationale: "no standing loops" });
+  ids.titled = await make("2026-10-07T09:00:00.000Z", { type: "raw", title: "Signing keys are rotated quarterly", category: "decision.security", tags: ["keys"], body: "# Signing keys are rotated quarterly\n\nNothing else is recorded here.\n" });
   ids.implemented = await make("2026-10-07T10:00:00.000Z", { type: "raw", title: "Rotate the signing key quarterly", category: "decision.security", tags: ["keys"], body: "# Keys\n\nRotate the signing key every quarter.\n" });
   store.at = "2026-10-08T10:00:00.000Z";
   await store.retire(ids.implemented, "implemented", { agent: "fixture", rationale: "done", implementedByRef: "x#1" });
@@ -172,6 +173,11 @@ describe("#1595: question to claim", () => {
     assert.match(hit.selected[0].passage, /Corpus owns erasure of memory\./);
     const miss = selectClaimsForQuestion({ question: "What is the retention period for audit logs?", documents: docs });
     assert.deepEqual(miss.selected, [], "no record covers it, so none is nominated");
+    // Some words match, but the question's rarer words appear nowhere: the partial match is reported below the bar, never nominated.
+    const partial = selectClaimsForQuestion({ question: "Station memory retention policy", documents: docs });
+    assert.deepEqual(partial.selected, []);
+    assert.ok(partial.below_threshold.length > 0 && partial.below_threshold.every((entry) => entry.coverage < 0.6));
+    assert.ok(selectClaimsForQuestion({ question: "Station memory retention policy", documents: docs, minCoverage: 0 }).selected.length > 0, "the bar is what withholds them");
     assert.deepEqual(selectClaimsForQuestion({ question: "what is the?", documents: docs }).terms, [], "a question of stop words has no terms");
   });
 
@@ -292,6 +298,18 @@ describe("#1595: ask a real store a question", () => {
     });
     assert.equal(forged.outcome, "abstained");
     assert.equal(forged.results[0].reason, "not_addressed");
+  });
+
+  test("a current record with no passage on the question is never answered from, even when its title is a line of the record", async () => {
+    const s = await sharedSeed();
+    const result = await ask({
+      repoRoot: s.repo, revision: s.revision, question: "anything",
+      select: () => ({ terms: ["keys"], weights: new Map([["keys", 1]]), selected: [{ id: s.ids.titled, score: 1, coverage: 1, matched: ["keys"], passage: "" }], below_threshold: [] }),
+    });
+    assert.equal(result.results[0].status, "current");
+    assert.equal(result.results[0].outcome, "abstained");
+    assert.equal(result.results[0].reason, "no_passage_on_question");
+    assert.equal(result.outcome, "abstained");
   });
 
   test("the CLI is read-only, exits 0 on an answer, and exits non-zero without its required arguments", async () => {
