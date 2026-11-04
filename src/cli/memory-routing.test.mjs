@@ -561,24 +561,25 @@ test("two spellings of one instant are a tie, and a tie keeps the later entry", 
   assert.deepEqual([deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made }).reviewer.rejected, deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [...made].reverse() }).reviewer.confirmed], [1, 1]);
 });
 
-test("review time comes from the session that submitted this decision, not the highest sequence number", () => {
+test("review time comes from the one session that submitted this decision; with two, there is none", () => {
   const { decision, item, session, made } = twoDecisions(["reject-proposed", "2026-11-01T10:01:40.000Z"], ["reject-proposed", "2026-11-02T10:00:10.000Z"]);
   const events = (name, verdict, selectedAt, submittedAt, shift) => buildReviewSessionEvents(session(verdict, submittedAt), name).map(event => ({ ...event, spec: { ...event.spec, sequence: event.spec.sequence + shift, occurredAt: event.spec.eventType === "decision-submitted" ? submittedAt : selectedAt } }));
-  // Sequence numbers are per session, so either session may have the higher ones: neither highest nor lowest picks the right one.
+  const seconds = reviewEvents => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made, reviewEvents }).reviewSeconds;
+  // Sequence numbers are per session, so neither the highest nor the lowest picks a session; and the data does not say which session
+  // made the decision. Two sessions that both submitted it give no time, in either order and whichever has the higher sequence.
   for (const [olderShift, newerShift] of [[3, 0], [0, 3]]) {
     const older = events("session-old", "reject-proposed", "2026-11-01T10:00:00.000Z", "2026-11-01T10:01:40.000Z", olderShift);
     const newer = events("session-new", "reject-proposed", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:10.000Z", newerShift);
-    for (const order of [[...older, ...newer], [...newer, ...older]]) {
-      const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made, reviewEvents: order });
-      assert.equal(metrics.reviewSeconds, 10, `older shifted ${olderShift}, newer shifted ${newerShift}`);
-    }
+    for (const order of [[...older, ...newer], [...newer, ...older]]) assert.equal(seconds(order), null, `older shifted ${olderShift}, newer shifted ${newerShift}`);
   }
   const older = events("session-old", "reject-proposed", "2026-11-01T10:00:00.000Z", "2026-11-01T10:01:40.000Z", 3);
   const newer = events("session-new", "reject-proposed", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:10.000Z", 0);
   assert.ok(item);
+  assert.equal(seconds(newer), 10, "alone, the session whose submission is at the decision's instant is its time");
+  assert.equal(seconds(older), null, "alone, a session whose submission is at another instant is nothing");
   // A submission that names a different decision is not this decision's time.
   const other = newer.map(event => event.spec.eventType === "decision-submitted" ? { ...event, spec: { ...event.spec, reviewDecisionName: "someone-elses" } } : event);
-  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made, reviewEvents: other }).reviewSeconds, null);
+  assert.equal(seconds(other), null);
 });
 
 test("a decision Survey defines as deciding counts; one it does not define is held, never a confirmation", () => {
@@ -1318,7 +1319,8 @@ test("review time: a submission under a reused decision name from another sessio
   const other = session("other", "2026-11-02T08:00:00.000Z", "2026-11-02T08:05:00.000Z");
   assert.equal(seconds(other), null, "the only submission happened at another instant: no time, nothing borrowed");
   const own = session("own", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z");
-  for (const order of [[...other, ...own], [...own, ...other]]) assert.equal(seconds(order), 20, "the submission at the decision's own instant is the one");
+  for (const order of [[...other, ...own], [...own, ...other]]) assert.equal(seconds(order), null, "two sessions submitted this decision name: whose it is cannot be told");
+  assert.equal(seconds(own), 20, "alone, the submission at the decision's own instant is the one");
   assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [{ ...human, spec: { ...human.spec, reviewedAt: undefined } }], reviewEvents: own }).reviewSeconds, null, "a decision with no reviewedAt has no time");
 });
 
@@ -1345,9 +1347,38 @@ test("review time: two sessions that share the decision's instant give no time, 
   for (const order of [[...quick, ...slow], [...slow, ...quick]]) assert.equal(seconds(order), null, "which session made the decision is not in the data");
   assert.equal(seconds(quick), 20);
   assert.equal(seconds(slow), 3620);
-  // The same session submitting the decision twice at that instant: the later submission in that session stands.
-  const again = [...quick, { ...quick[1], metadata: { name: "quick-3" }, spec: { ...quick[1].spec, sequence: 3 } }];
-  assert.equal(seconds(again), 20);
+  // The same session reselecting the item and submitting the decision again at that instant: the later submission stands, and its start
+  // is the selection before it (20 s, then a reselection 5 s before the end).
+  const reselect = { ...quick[0], metadata: { name: "quick-3" }, spec: { ...quick[0].spec, sequence: 3, occurredAt: "2026-11-02T10:00:15.000Z" } };
+  const second = { ...quick[1], metadata: { name: "quick-4" }, spec: { ...quick[1].spec, sequence: 4 } };
+  for (const order of [[...quick, reselect, second], [second, reselect, ...quick]]) assert.equal(seconds(order), 5, "the last submission of the session, from the selection before it");
+});
+
+test("review time: two histories that reuse one session name give no time, in either order (review 18)", () => {
+  const { decision, item } = routedClaim();
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T10:00:20.000Z" } };
+  const history = (start, end) => ["item-selected", "decision-submitted"].map((eventType, index) => ({ kind: "ReviewSessionEvent", metadata: { name: `${eventType}-${start}` },
+    spec: { sessionName: "review-workbench-session", sequence: index + 1, eventType, occurredAt: index ? end : start, actor: { id: "person:reviewer" }, reviewItemName: item.metadata.name, ...(index ? { reviewDecisionName: "decision-1" } : {}) } }));
+  const seconds = reviewEvents => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents }).reviewSeconds;
+  const quick = history("2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z"), slow = history("2026-11-02T09:00:00.000Z", "2026-11-02T10:00:20.000Z");
+  assert.equal(seconds(quick), 20);
+  for (const order of [[...quick, ...slow], [...slow, ...quick]]) assert.equal(seconds(order), null, "the same name and the same sequences are two histories, not one");
+  // Different submission instants under one reused name: the other history's selection must not supply the start either.
+  const later = history("2026-11-02T08:00:00.000Z", "2026-11-02T08:00:30.000Z");
+  for (const order of [[...quick, ...later], [...later, ...quick]]) assert.equal(seconds(order), null);
+});
+
+test("review time: a replayed review (snapshot instant kept) never takes another session's matching submission (review 18)", () => {
+  const { decision, item } = routedClaim();
+  // Replay kept the snapshot's 08:00 as the decision's reviewedAt although the review was submitted at 10:00:20.
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T08:00:00.000Z" } };
+  const session = (name, start, end) => ["item-selected", "decision-submitted"].map((eventType, index) => ({ kind: "ReviewSessionEvent", metadata: { name: `${name}-${index}` },
+    spec: { sessionName: name, sequence: index + 1, eventType, occurredAt: index ? end : start, actor: { id: "person:reviewer" }, reviewItemName: item.metadata.name, ...(index ? { reviewDecisionName: "decision-1" } : {}) } }));
+  const seconds = reviewEvents => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents }).reviewSeconds;
+  const honest = session("honest", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z");
+  const coincidence = session("coincidence", "2026-11-02T07:00:00.000Z", "2026-11-02T08:00:00.000Z");
+  assert.equal(seconds(honest), null, "alone, nothing matches the kept instant");
+  for (const order of [[...honest, ...coincidence], [...coincidence, ...honest]]) assert.equal(seconds(order), null, "another session's submission at that instant is not this decision's");
 });
 
 test("against the real Survey builders: the decisions and events its workbench stamps are the ones the Kit reads", async () => {

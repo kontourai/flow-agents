@@ -68,6 +68,8 @@ memory; every other piece stays with its owner.
 - Flow 5.4 gate expectations accept only `trust.bundle`, so routing evidence is
   recorded and recomputable but a gate cannot yet require it.
 - Review time is selection-to-submission dwell of the session that submitted the decision, from Survey
-  session events, and is absent, not estimated, when there are none. It is an upper bound on attention.
+  session events, and is absent, not estimated, when there are none or when the history can be read two ways
+  (Survey's decision does not name its session: more than one session submitting the decision, or one session
+  name carrying a sequence twice, gives no time). It is an upper bound on attention.
 - Every recall path must present claims through `presentMemoryClaims` or enforce the
   same rule: no claim without its posture and review label.

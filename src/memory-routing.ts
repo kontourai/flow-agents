@@ -638,20 +638,30 @@ function reviewDwell(decision: ReviewDecision, itemName: string, allEvents: read
     const actor = (event.spec.actor as { id?: unknown } | undefined)?.id;
     return typeof decider !== "string" || actor === undefined || actor === decider;
   });
-  // The submission of THIS decision. A decision does not name its session. When a session is built directly, Survey stamps a
-  // submission with the same `reviewedAt` as the decision it submits, so a submission is this decision's only when it happened at
-  // the instant the decision says it was reviewed. That is a narrowing, not an identity: replay keeps the snapshot's `reviewedAt`
-  // rather than the submission's, so an honest review can match nothing, and two sessions can share an instant. A decision with no
-  // `reviewedAt`, none matched, or more than one session matched has no time (null, never borrowed or guessed).
+  // The submission of THIS decision. A decision does not name its session, and nothing else in the data does either, so the time is
+  // attributed only when the history cannot be read two ways, and is null (never guessed, never borrowed) when it can:
+  //  - A session's sequence numbers are unique. Two events of one session name with the same sequence, for this item, are two
+  //    histories that reused the name (Survey's workbench names a session `review-workbench-session` by default), and which
+  //    selection starts which submission cannot be told.
+  //  - If more than one session submitted this decision for this item, at any time, whose it is cannot be told either. Matching an
+  //    instant does not settle it: replay keeps the snapshot's `reviewedAt` rather than the submission's, so another session's
+  //    submission can be the one that matches.
+  //  - Only the submission made at the instant the decision says it was reviewed counts. When a session is built directly Survey
+  //    stamps a submission with its decision's `reviewedAt`; after replay an honest review can match nothing and reads null.
+  // This is still a narrowing, not an identity: events with no actor are admitted as legacy events, and they cannot say whose they are.
+  const ofItem = events.filter(event => (event.spec.eventType === "item-selected" || event.spec.eventType === "decision-submitted")
+    && (event.spec.reviewItemName ?? event.spec.activeItemName) === itemName);
+  const positions = new Set<string>();
+  for (const event of ofItem) {
+    const position = `${event.spec.sessionName}\u0000${event.spec.sequence}`;
+    if (positions.has(position)) return undefined;
+    positions.add(position);
+  }
+  const everSubmitted = ofItem.filter(event => event.spec.eventType === "decision-submitted" && event.spec.reviewDecisionName === decision.metadata.name);
+  if (new Set(everSubmitted.map(event => event.spec.sessionName)).size > 1) return undefined;
   const reviewedAt = instantOf(decision.spec.reviewedAt);
   if (reviewedAt === -Infinity) return undefined; // explicit; an unreadable instant could never equal a real one (the seconds check below also refuses it)
-  const submitted = events.filter(event => event.spec.eventType === "decision-submitted" && event.spec.reviewItemName === itemName
-    && event.spec.reviewDecisionName === decision.metadata.name && instantOf(event.spec.occurredAt) === reviewedAt);
-  // An instant narrows the candidates; it does not name the session. If submissions from more than one session match, nothing in the
-  // data says whose they are (sequence numbers are local to a session and cannot rank across sessions), so there is no time (null,
-  // never a guess). Within one session, the last submission of the decision is the one.
-  if (new Set(submitted.map(event => event.spec.sessionName)).size > 1) return undefined;
-  const end = submitted.sort((x, y) => y.spec.sequence - x.spec.sequence)[0];
+  const end = everSubmitted.filter(event => instantOf(event.spec.occurredAt) === reviewedAt).sort((x, y) => y.spec.sequence - x.spec.sequence)[0];
   if (!end) return undefined;
   const start = events.filter(event => event.spec.eventType === "item-selected" && event.spec.sessionName === end.spec.sessionName
     && (event.spec.reviewItemName ?? event.spec.activeItemName) === itemName && event.spec.sequence < end.spec.sequence)
