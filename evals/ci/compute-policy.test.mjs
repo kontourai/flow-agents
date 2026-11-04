@@ -122,3 +122,10 @@ test('the checker CLI exits non-zero when a job-level group is reintroduced and 
     assert.match(result.stderr, /job-level concurrency is not allowed/);
   } finally { rmSync(copy, { recursive: true, force: true }); }
 });
+
+test('importing the checker from stdin does not crash on the non-file entry path', () => {
+  const href = new URL('../../scripts/ci/compute-policy.mjs', import.meta.url).href;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-'], { input: `const m = await import(${JSON.stringify(href)}); console.log(Object.keys(m.participants).length);`, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '5');
+});

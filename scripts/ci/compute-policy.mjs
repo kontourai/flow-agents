@@ -107,8 +107,12 @@ export function validate(workflows = loadWorkflows(), fixtureDirectory = join(ro
   }
   return expanded;
 }
-// Real paths: a symlinked invocation path must not make the CLI silently skip validation.
-if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
+// Real paths: a symlinked invocation path must not make the CLI silently skip
+// validation. A non-file argv[1] (stdin `-`, `-e`) is an import, not an invocation.
+const isEntryPoint = () => {
+  try { return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+};
+if (process.argv[1] && isEntryPoint()) {
   const expanded = validate();
   console.log(JSON.stringify({ participatingJobs: expanded.length, expandedRunnerJobs: expanded.reduce((n, x) => n + x.runners.length, 0), expanded }, null, 2));
 }

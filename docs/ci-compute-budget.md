@@ -18,8 +18,11 @@ supersedes the older run of the **same ref** and never another branch's run:
 | Veritas Advisory Governance | `veritas-advisory-${{ github.ref }}` |
 
 Each group embeds only `github.ref`, always with `cancel-in-progress: true`.
-Runs from different refs never share a group, so concurrent PRs run side by
-side; the platform's own runner limits are the only ceiling.
+Runs from different refs do not share a group (GitHub compares group names
+case-insensitively, so two refs differing only by case would), so concurrent PRs
+run side by side; the platform's own runner limits are the only ceiling. The one
+shared group left is the Pages callee's own deployment group, which belongs to
+the pinned callee and not to this policy.
 
 ## Why there is no cap
 
@@ -113,10 +116,14 @@ This is a budget estimate, not proof that the repaired head passes hosted CI.
 CI, Docs, Kit Gates Demo, Runtime Compatibility and Veritas advisory each cancel
 an older in-progress or pending run of the same ref when a new run starts for
 that ref, including a same-head duplicate; there is no exact-once guarantee. A
-push to `main` supersedes an older in-progress `main` run of the same workflow,
-including a Pages build for the superseded commit; the newer push publishes its
-own. Merge-queue runs use unique refs and are never cancelled by other entries.
-Cancellation and runner teardown remain platform behavior requiring hosted
+push to `main` supersedes an older in-progress `main` run of the same workflow.
+For Docs this can cancel the build or the deployment of the superseded commit:
+the callee's own `cancel-in-progress: false` deployment group does not stop its
+parent run being cancelled, and the deploy action cancels an active deployment
+on a cancellation signal. If the replacement run then fails its docs gate,
+nothing is published until a later successful run, so a stale site is possible
+in that window. Merge-queue runs use unique refs and are never cancelled by
+other entries. Cancellation and runner teardown remain platform behavior requiring hosted
 observation.
 
 ## Explicit exclusions
