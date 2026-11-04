@@ -96,7 +96,9 @@ export class FakeCorpusStore {
   #file(id) { return path.join(this.dir, `${id}.json`); }
   #write(proposal) { fs.mkdirSync(this.dir, { recursive: true }); fs.writeFileSync(this.#file(proposal.id), JSON.stringify(proposal, null, 2)); }
 
-  async proposeCreate(candidate, proposerId, evidence) {
+  // Corpus (#1573): a request key names one candidate. The same key with the same candidate answers the proposal it made,
+  // in any state; the same key with a different candidate is REQUEST_KEY_CONFLICT. Verified against the real store.
+  async proposeCreate(candidate, proposerId, evidence, options = {}) {
     const call = this.calls.proposeCreate++;
     const failure = this.failures.find((entry) => entry.n === call);
     if (failure && !failure.after) throw Object.assign(new Error("injected proposeCreate failure"), { code: "INJECTED" });
@@ -104,8 +106,19 @@ export class FakeCorpusStore {
       if (typeof candidate?.[field] !== "string" || !candidate[field].trim()) throw Object.assign(new Error(`missing required field: ${field}`), { code: "MISSING_EVIDENCE" });
     }
     if (!proposerId || !evidence?.agent || !evidence?.proposal) throw Object.assign(new Error("missing evidence"), { code: "MISSING_EVIDENCE" });
+    const requestKey = options?.requestKey;
+    if (requestKey !== undefined) {
+      const same = (await this.listProposals()).find((proposal) => proposal.request_key === requestKey);
+      this.calls.listProposals -= 1;
+      if (same) {
+        if (JSON.stringify([same.candidate.title, same.candidate.body, same.candidate.category]) !== JSON.stringify([candidate.title, candidate.body, candidate.category])) {
+          throw Object.assign(new Error("request key already names a different candidate"), { code: "REQUEST_KEY_CONFLICT" });
+        }
+        return same.id;
+      }
+    }
     const id = `prop-${String((fs.existsSync(this.dir) ? fs.readdirSync(this.dir).length : 0) + 1).padStart(4, "0")}`;
-    this.#write({ id, state: "pending", candidate: JSON.parse(JSON.stringify(candidate)), proposer_id: proposerId, evidence: { agent: evidence.agent, proposal: evidence.proposal }, proposed_at: this.clock() });
+    this.#write({ id, state: "pending", ...(requestKey === undefined ? {} : { request_key: requestKey }), candidate: JSON.parse(JSON.stringify(candidate)), proposer_id: proposerId, evidence: { agent: evidence.agent, proposal: evidence.proposal }, proposed_at: this.clock() });
     if (failure?.after) throw Object.assign(new Error("injected failure after the proposal was stored"), { code: "INJECTED" });
     return id;
   }

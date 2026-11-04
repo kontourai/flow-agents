@@ -25,9 +25,9 @@ function required(value, label) {
  *
  * @param {{residue: {source: string, complete: boolean, sittingId: string, contentHash: string, provenance: {harness: string, sessionId: string, transcriptRef: string}}, candidates: {title: string, body: string, category: string}[], proposerId: string,
  *   store: CreateProposalStore, registerRoot: (name: string, root: string) => unknown, root: string,
- *   rootName: string, write?: boolean}} options
+ *   rootName: string, write?: boolean, requestScope?: string}} options
  */
-export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName, write = true }) {
+export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName, write = true, requestScope }) {
   if (!validate(residue, RESIDUE_SCHEMA).valid || residue?.source !== 'runtime-session' || residue.complete !== true) {
     throw new Error('store target requires a schema-valid complete runtime-session residue');
   }
@@ -42,6 +42,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   if (typeof root !== 'string' || !path.isAbsolute(root)) throw new Error('store target requires a host-authorized absolute root');
   if (!Array.isArray(candidates)) throw new Error('store target requires distilled candidates');
   if (typeof write !== 'boolean') throw new Error('store target requires boolean write');
+  if (requestScope !== undefined && (typeof requestScope !== 'string' || !requestScope.trim())) throw new Error('store target requires a non-empty requestScope when given');
   if (!store || typeof store.proposeCreate !== 'function') throw new Error('store target requires a Corpus create-proposal store');
   if (typeof registerRoot !== 'function') throw new Error('store target requires host root registration');
   const provenance = { session_id: sessionId, transcript_ref: transcriptRef, sitting_id: sittingId, content_hash: residue.contentHash };
@@ -65,7 +66,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   for (const [index, candidate] of prepared.entries()) {
     // Identity excludes candidate content and mutable provenance: changes at the same position
     // must conflict, not mint a new proposal. Corpus owns durable deduplication.
-    const requestKey = `knowledge.promote:${createHash('sha256').update(JSON.stringify([sittingId, index])).digest('hex')}`;
+    const requestKey = `knowledge.promote:${createHash('sha256').update(JSON.stringify(requestScope === undefined ? [sittingId, index] : [sittingId, index, requestScope])).digest('hex')}`;
     try {
       const id = await store.proposeCreate(candidate, proposerId, { agent: proposerId, proposal: 'Create distilled memory candidate' }, { requestKey });
       proposals.push(id);

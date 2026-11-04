@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { KitDefaultStoreAdapter, standaloneFileMutationLock } from "@kontourai/corpus-store";
 import { runDream } from "../../kits/knowledge/dream/run.js";
-import { FakeCorpusStore, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
+import { FakeCorpusStore, SCRIPT, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
 
 
 async function realStore(ws) {
@@ -69,6 +69,45 @@ test("real Corpus: a proposeCreate whose reply is lost leaves the proposal, and 
   const retry = await runDream(host, runOptions(ws));
   assert.equal(retry.status, "success");
   assert.equal((await store.listProposals()).length, 2, "reused, not duplicated");
+});
+
+test("real Corpus: two claims in ONE sitting, the first reply lost: the retry proposes the second under its own key and reuses the first", async (t) => {
+  // Corpus keys a request by the sitting and the candidate's position in the batch (#1573). A retry that sent only the
+  // claims not yet proposed gave the second claim the first one's key, and Corpus refused it for good (REQUEST_KEY_CONFLICT).
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = await realStore(ws);
+  let calls = 0;
+  const lossy = new Proxy(store, {
+    get(target, prop) {
+      if (prop === "proposeCreate") {
+        return async (...args) => {
+          const id = await target.proposeCreate(...args);
+          if (calls++ === 0) throw Object.assign(new Error("reply lost"), { code: "INJECTED" });
+          return id;
+        };
+      }
+      const value = target[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const claimsOf = (content) => {
+    if (!content.includes("banker's rounding")) return [];
+    const [a] = SCRIPT[0].claims;
+    // Both claims quote the same grounded sentence, so one sitting yields two claims.
+    return [a, { ...a, property: "rounding scope", value: "the total" }];
+  };
+  const host = hostFor(ws, noApplyStore(lossy), await scriptedExtract({ claimsOf }));
+  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.code === "INJECTED");
+  assert.equal((await store.listProposals()).length, 1, "the first proposal exists although its reply was lost");
+
+  const retry = await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
+  assert.equal(retry.status, "success");
+  assert.equal(retry.claims.created, 1, "only the second claim is created; the first is reused");
+  assert.equal(retry.claims.reused, 1);
+  const proposals = await store.listProposals();
+  assert.equal(proposals.length, 2, "reused, not duplicated");
+  assert.equal(new Set(proposals.map((proposal) => proposal.id)).size, 2);
 });
 
 test("the in-test store has the proposal shape the real store writes", async (t) => {
