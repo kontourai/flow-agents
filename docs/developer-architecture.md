@@ -152,6 +152,22 @@ a Skill or establish consumption, deployment or a successful effect. See the
 [Knowledge lifecycle contract](../kits/knowledge/docs/learning-lifecycle.md) for
 limits, capacity and operator recovery.
 
+## Memory claims and routed review
+
+Native hosts consume the `memory-claims`, `memory-routing` and `memory-routing-flow`
+package subpaths; the Knowledge kit declares the matching `memory-claims` adapter.
+The Kit owns the claim shape (a caller-owned schema it hands to Traverse, which stays
+schema-neutral and proposals-only) and the routing policy. Survey owns verification
+records, review items and reviewer decisions; Flow owns the evidence; Surface owns
+which claims are current. A change no rule flags is recorded as `proposed`; a flagged
+one also becomes a Survey review item. Each routing decision embeds the input and
+policy it was computed from, so `recomputeMemoryRouting` can re-derive it, and is
+recorded as custom-kind Flow evidence on a gate the host names. Flow 5.4 gates accept
+only `trust.bundle` expectations, so that evidence is recomputable but not yet
+required. The visibility order is Surface's (`meetVisibility`) and entity proposals are Survey's contract; both are consumed from the pinned releases (surface 6.3.0, survey 8.3.0), not restated. The host supplies the model call, the Survey verifier and the Flow run. See
+the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
+evidence and the metrics.
+
 ## Runtime-session residue
 
 The Knowledge kit's `runtime-session` residue source (#669) reads Claude Code and
@@ -278,14 +294,19 @@ Codex build also resolves remaining literal public package imports from the
 current dependency graph and bundles their code, original license notices (or
 published SPDX metadata when a package ships no notice file), and version/digest
 provenance. This does not copy a flat npm dependency tree or change Flow-owned
-process semantics. Surface's original trust-panel element and exact package
+process semantics. For npm aliases the builder validates the exact published
+target name and version and records both that identity and the local specifier.
+Surface's original trust-panel element and exact package
 metadata also ship with its entry; synchronous narrative reads and panel rendering
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
-The direct pins are Surface 6.3.0 and Survey 8.4.0: the Knowledge Kit's Living Context
-recall needs Surface's derived-visibility exports (`readDeclaredVisibility`,
-`visibilityAllows`, `viewerSupersessionView`) and refuses with
-`SURFACE_VISIBILITY_UNAVAILABLE` when they are missing.
+The shared workflow trust gates retain Surface 5 and its status-function behavior.
+Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
+through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
+and accumulation. Standalone Knowledge projection can use an erasure-capable
+Surface under its ordinary name; recall requires Surface 6.3.0 or later with derived
+visibility. Packaged memory modules include their alias through Flow Agents. Survey
+is pinned to 8.4.0.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;
@@ -310,6 +331,12 @@ The production dependency pins esbuild to `0.28.2`, with the same exact version
 authorized in `pnpm-workspace.yaml`. Bundler updates must regenerate and check
 Knowledge YAML and runtime bundles, retaining their licenses and provenance;
 the generated runtime target remains Node 22.
+Generated runtime bundles add an ES module package boundary around the Knowledge
+kit so the shared injected-memory marker loads on early Node 22. The source kit
+does not carry that boundary: it would shadow the package self-references used
+by its adapters. Direct imports of generated bundle adapters from a checkout or
+linked install remain a known limitation ([#1594](https://github.com/kontourai/flow-agents/issues/1594));
+the packed-install layout resolves those imports.
 `build/runtime-imports.json` inventories the compiled runtime, vendor files and
 canonical config seed (`.codex/hooks.json` or `.claude/settings.json`). Codex
 retains that seed separately from the flattened, merged user `hooks.json`; the

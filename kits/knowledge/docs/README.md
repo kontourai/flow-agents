@@ -20,10 +20,11 @@ The installed Kit manifest declares `knowledge.store-providers` at
 loaded without Surface or Neo4j packages. The providers remain readers and
 proposal producers; importing them does not approve or apply a change.
 
-`buildKnowledgeTrustBundle` loads `@kontourai/surface` only when explicitly
-called. A consuming Node project that uses that projection must supply a
-compatible Surface package (the Flow Agents package manifest records the version
-used by this distribution). If it is unavailable, the projection rejects; it
+`buildKnowledgeTrustBundle` loads the `@kontourai/surface-knowledge` npm alias
+of `@kontourai/surface` 6.3.0 only when explicitly called. If the alias is absent,
+a standalone Kit can use an erasure-capable `@kontourai/surface` installed under
+its ordinary name. Older packages that lack the deletion API are refused. The
+Flow Agents package manifest pins the alias. If neither is available, the projection rejects; it
 does not produce a placeholder bundle or block unrelated vault reads. Neo4j
 likewise needs its driver and service only when that provider is selected.
 
@@ -207,6 +208,10 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `supersede(newId, supersededIds, evidence)` → `Promise<void>`
 - `retire(id, targetStatus, evidence)` → `Promise<void>`
 - `reindex()` → derived graph-index recovery report
+- `purge(ids, evidence)` → a Corpus purge result in explicitly selected
+  Corpus-backed mode; legacy mode rejects it with `READ_ONLY`. See
+  [Addendum M](store-contract.md#addendum-m-privileged-purge-issue-1570)
+  for authorization, coordination and migration requirements.
 
 ---
 
@@ -302,8 +307,9 @@ property names, so a `1.0` input carrying an undeclared `constructor`, `toString
 or `hasOwnProperty` key is now rejected; every other `1.0` input behaves as before.) The `1.1` entry
 points live in `context-check/living-context.js` (recall and reconciliation) and
 `context-check/living-context-answer.js` (the answer step); loading `index.js` still needs no Surface
-or Survey package, but the `1.1` modules need `@kontourai/surface` with the derived-visibility exports
-(Surface 6.3.0 or later, kontourai/surface#350) and `@kontourai/survey`. Schemas:
+or Survey package. The `1.1` modules use the `@kontourai/surface-knowledge` alias,
+or the ordinary `@kontourai/surface` name in a standalone kit, with the derived-visibility
+exports (Surface 6.3.0 or later, kontourai/surface#350), and `@kontourai/survey`. Schemas:
 [`living-context-input`](../schemas/knowledge/living-context-input.schema.json) and
 [`living-context-result`](../schemas/knowledge/living-context-result.schema.json).
 
@@ -861,7 +867,7 @@ library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
 `O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
 artifacts; the CLI checks it before constructing its store. Unsupported
 platforms or a missing interpreter refuse, with the legacy runner still
-available. This distribution qualifies Flow 5.2.0 and Surface 6.3.0. The kit
+available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0 for ingest. The kit
 invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
 engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
 unique run id and optionally a `flowCommand` argument array for a particular
@@ -1127,3 +1133,12 @@ recomputable, and the per-run metrics. Uncontested claims are recorded as `propo
 recallable and labelled unreviewed; `presentMemoryClaims` never shows a claim without
 its posture. It is exposed through the declared `knowledge.memory-claims` adapter and
 the `memory-claims`, `memory-routing` and `memory-routing-flow` package exports.
+
+## Dream run
+
+[The dream run](dream.md) turns accumulated Claude Code and Codex sessions into
+proposed memory claims and re-renders the budgeted profile briefs. A host scheduler or an
+opt-in `SessionEnd`/`PreCompact` hook starts it. It is disabled until an operator
+enables it, it consumes the residue, claim, routing and proposal contracts above rather
+than defining its own, it only proposes, and it commits its cursor last. It is exposed
+through the declared `knowledge.dream-runner` adapter and the `knowledge.dream` flow.
