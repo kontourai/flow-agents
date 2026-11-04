@@ -910,14 +910,22 @@ describe("review round 7: only prose is prose, and entity references are not tex
   test("code blocks, tables, HTML blocks, thematic breaks, setext underlines and link definitions are not prose", async () => {
     const cases = [
       ["The *allow* operator is reserved.", "    The `*allow*` operator is\n    reserved.\n"],
-      ["The *allow* operator is reserved.", "> ```\n> The `*allow*` operator is\n> reserved.\n> ```\n"],
+      ["The *allow* operator is reserved.", "> ```\n> The `*allow*` operator is reserved.\n> ```\n"],
       ["The *allow* operator ---", "The `*allow*` operator\n---\n"],
+      ["The *allow* operator ===", "The `*allow*` operator\n===\n"],
       ["--- The *allow* operator is reserved.", "---\nThe `*allow*` operator is reserved.\n"],
       ["The *allow* operator is reserved.", "| a | b |\n|---|---|\n| The `*allow*` operator | is reserved. |\n"],
-      ["The *allow* operator is reserved.", "<div>\nThe `*allow*` operator is reserved.\n</div>\n"],
+      ["| The *allow* operator is reserved. |", "| a |\n|---|\n| The `*allow*` operator is reserved. |\n"],
+      ["The *allow* operator is reserved.", "| a |\n|---|\nThe `*allow*` operator is reserved.\n"],
+      ["The *allow* operator is reserved.", "<div>\nThe `*allow*` operator is reserved.\n"],
+      ["The *allow* operator is reserved.", "<!--\n\nThe `*allow*` operator is reserved.\n\n-->\n"],
+      ["The *allow* operator is reserved.", "<pre>\n\nThe `*allow*` operator is reserved.\n\n</pre>\n"],
     ];
     for (const [claim, doc] of cases) assert.equal(await verdict(claim, doc), "not-addressed", JSON.stringify(doc));
-    // ...while the same words as prose, a setext heading, or a list item still are.
+    // ...while the same words after the block ends, as prose, a setext heading, or a list item still are.
+    assert.equal(await verdict("The *allow* operator is reserved.", "<div>x</div>\n\nThe `*allow*` operator is reserved.\n"), "supported");
+    assert.equal(await verdict("The *allow* operator is reserved.", "<!-- note -->\nThe `*allow*` operator is reserved.\n"), "supported", "a one-line comment ends on its own line");
+    assert.equal(await verdict("The *allow* operator is reserved.", "| a |\n|---|\n| b |\n\nThe `*allow*` operator is reserved.\n"), "supported", "a table ends at a blank line");
     assert.equal(await verdict("The *allow* operator is reserved.", "The `*allow*` operator is\nreserved.\n"), "supported");
     assert.equal(await verdict("The *allow* operator", "The `*allow*` operator\n---\n"), "supported", "a setext heading displays its text");
     assert.equal(await verdict("indented continuation The operator is reserved.", "Intro line\n    indented continuation\nThe operator is reserved.\n"), "not-addressed", "a lazy continuation joins the paragraph: a fragment of the joined sentence is not a sentence");

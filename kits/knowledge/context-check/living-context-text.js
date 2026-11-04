@@ -128,6 +128,7 @@ export function documentUnits(text) {
   const units = [];
   let current;
   let fence;
+  let skip; // a table or an HTML block: everything up to its end is not prose
   const lines = text.split(/\r?\n/);
   let index = 0;
   if (lines[0] === "---") {
@@ -142,15 +143,25 @@ export function documentUnits(text) {
       if (closing && closing[1][0] === fence.char && closing[1].length >= fence.length) fence = undefined;
       continue;
     }
+    if (skip) {
+      if (skip.until ? skip.until.test(core) : core.trim() === "") { skip = undefined; current = undefined; }
+      continue;
+    }
     const opening = /^\s{0,3}(`{3,}|~{3,})/.exec(core);
     if (opening) { fence = { char: opening[1][0], length: opening[1].length }; current = undefined; continue; }
     if (core.trim() === "") { current = undefined; continue; }
     if (current?.kind === "paragraph" && /^\s{0,3}(?:=+|-+)\s*$/.test(core)) { current.kind = "heading"; current = undefined; continue; } // a setext underline
     if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(core)) { current = undefined; continue; } // a thematic break
-    // Not prose, and not allowed to leave a half paragraph behind: a table row, an HTML block, a link definition.
-    if (core.includes("|") || /^\s{0,3}<[!/?A-Za-z]/.test(core) || /^\s{0,3}\[[^\]]+\]:/.test(core)) {
+    // Not prose, and not allowed to leave a half paragraph behind. A table runs to the next blank line; an HTML block to its end
+    // (a comment to `-->`, pre/script/style/textarea to their closing tag, any other tag to the next blank line); a link definition is one line.
+    const html = /^\s{0,3}<[!/?A-Za-z]/.test(core);
+    if (core.includes("|") || html || /^\s{0,3}\[[^\]]+\]:/.test(core)) {
       if (current && units.at(-1) === current) units.pop();
       current = undefined;
+      if (core.includes("|") || html) {
+        const until = /^\s{0,3}<!--/.test(core) ? /-->/ : /^\s{0,3}<(?:pre|script|style|textarea)\b/i.test(core) ? /<\/(?:pre|script|style|textarea)>/i : undefined;
+        skip = until && !until.test(core.replace(/^\s{0,3}<!--/, "").replace(/^\s{0,3}<[a-z]+[^>]*>/i, "")) ? { until } : until ? undefined : { until: undefined };
+      }
       continue;
     }
     if (current === undefined && /^(?: {4}|\t)/.test(core)) continue; // an indented code block
