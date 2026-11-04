@@ -45,7 +45,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   if (requestScope !== undefined && (typeof requestScope !== 'string' || !requestScope.trim())) throw new Error('store target requires a non-empty requestScope when given');
   // `positions` names where each candidate sits in the caller's whole batch, for a caller that sends only part of it: the key
   // follows the candidate's place in the whole, not in the part. Absent, a candidate's place is its index here, as before.
-  if (positions !== undefined && (!Array.isArray(positions) || positions.length !== candidates.length || positions.some((p) => !Number.isSafeInteger(p) || p < 0) || new Set(positions).size !== positions.length)) {
+  if (positions !== undefined && (!Array.isArray(positions) || positions.length !== candidates.length || Array.from(positions).some((p) => !Number.isSafeInteger(p) || p < 0) || new Set(positions).size !== positions.length)) {
     throw new Error('store target requires positions to be distinct non-negative integers, one per candidate');
   }
   if (!store || typeof store.proposeCreate !== 'function') throw new Error('store target requires a Corpus create-proposal store');

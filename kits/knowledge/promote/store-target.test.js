@@ -220,5 +220,6 @@ test('explicit positions key each candidate by its place in the caller\'s whole 
   const second = await whole({ candidates: [two[1]], positions: [1] });
   assert.deepEqual(second, [full[1]], 'the second candidate sent alone keeps the second candidate\'s key');
   assert.deepEqual(await whole({ positions: [0, 1] }), full, 'positions equal to the indexes change nothing');
-  for (const bad of [[0], [0, 0], [0, -1], [0, 1.5], [0, '1'], 'x']) await assert.rejects(() => proposeMemory({ ...opts, candidates: two, positions: bad }), /positions/);
+  const sparse = Array(2); sparse[1] = 0;
+  for (const bad of [[0], [0, 0], [0, -1], [0, 1.5], [0, '1'], [0, 2 ** 53], sparse, 'x']) await assert.rejects(() => proposeMemory({ ...opts, candidates: two, positions: bad }), /positions/);
 });

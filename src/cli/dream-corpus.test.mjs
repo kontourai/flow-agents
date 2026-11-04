@@ -154,11 +154,20 @@ test("real Corpus: a changed plan for a half-proposed sitting proposes only what
   const [first] = await store.listProposals();
   await store.rejectCreate(first.id, "a-human-reviewer", "not wanted");
 
-  // The sitting grows by a turn, so its stored plan is not resumed and the model is asked again, and now says three things.
+  // The first sitting grows by a turn (inserted right after the message that holds the claim), so its stored plan is not resumed and
+  // the model is asked again, and now says three things. The sitting actually changes: the run must re-extract it.
   const rollout = path.join(ws.transcriptRoot, "codex-rollout.jsonl");
-  fs.appendFileSync(rollout, `${JSON.stringify({ timestamp: "2026-10-31T14:00:40.000Z", type: "response_item", payload: { type: "message", id: "m-extra", role: "user", content: [{ type: "input_text", text: "One more thing: the rounding applies to refunds." }] }, ordinal: 99 })}\n`);
+  const lines = fs.readFileSync(rollout, "utf8").split("\n");
+  const at = lines.findIndex((line) => line.includes("banker's rounding"));
+  assert.ok(at > 0, "the fixture has the message that holds the claim");
+  lines.splice(at + 1, 0, JSON.stringify({ timestamp: "2026-10-31T14:00:06.500Z", type: "response_item", payload: { type: "message", id: "m-extra", role: "user", content: [{ type: "input_text", text: "One more thing: the rounding applies to refunds." }] }, ordinal: 99 }));
+  fs.writeFileSync(rollout, lines.join("\n"));
   plan = [a, mk("rounding scope", "the total"), mk("rounding applies to", "refunds")];
-  await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
+  const second = await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
+  assert.equal(second.sittings.resumed, 0, "the stored plan was not resumed: the sitting changed");
+  assert.equal(second.claims.distilled, 3, "the model was asked again and said three things");
+  assert.equal(second.claims.created, 2, "only the two new claims are proposed");
+  assert.equal(second.claims.reused, 1, "the known claim is reused, not sent again");
 
   const proposals = await store.listProposals();
   const states = Object.fromEntries(proposals.map((proposal) => [proposal.id, proposal.state]));
@@ -183,4 +192,32 @@ test("the in-test store has the proposal shape the real store writes", async (t)
   const realRecord = await real.get(await real.applyCreate(realId, "reviewer"));
   assert.deepEqual(shape((await fake.getProposal(fakeId))), shape(await real.getProposal(realId)).filter((key) => key !== "reviewer_id" && key !== "decided_at" && key !== "record_id"));
   assert.ok(realRecord.mutation_log.some((entryLog) => entryLog.op === "apply-create" && entryLog.evidence.proposal_id === realId));
+});
+
+test("the in-test store answers a request key as the real store does: same request returns the proposal, any change conflicts", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const real = await realStore(ws);
+  const fakeWs = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(fakeWs.cleanup);
+  const fake = new FakeCorpusStore(fakeWs.memoryRoot);
+  const candidate = { type: "raw", title: "t", body: "b", category: "memory.claim", provenance: { agent: "knowledge.dream", session_id: "s", note: "{}" } };
+  const evidence = { agent: "knowledge.dream", proposal: "Create distilled memory candidate" };
+  const outcome = async (store, ...args) => store.proposeCreate(...args).then(() => "ok", (error) => error.code);
+  const cases = {
+    "reordered fields": [{ category: "memory.claim", body: "b", type: "raw", title: "t", provenance: { note: "{}", session_id: "s", agent: "knowledge.dream" } }, "knowledge.dream", { proposal: evidence.proposal, agent: evidence.agent }],
+    "changed provenance": [{ ...candidate, provenance: { ...candidate.provenance, note: "other" } }, "knowledge.dream", evidence],
+    "changed proposer": [candidate, "someone-else", evidence],
+    "changed evidence": [candidate, "knowledge.dream", { ...evidence, proposal: "another reason" }],
+    "changed body": [{ ...candidate, body: "other" }, "knowledge.dream", evidence],
+  };
+  const idOf = (store) => store.proposeCreate(candidate, "knowledge.dream", evidence, { requestKey: "k" });
+  const realId = await idOf(real), fakeId = await idOf(fake);
+  assert.equal(await idOf(real), realId);
+  assert.equal(await idOf(fake), fakeId, "the same request answers the proposal it made");
+  for (const [name, args] of Object.entries(cases)) {
+    assert.equal(await outcome(fake, ...args, { requestKey: "k" }), await outcome(real, ...args, { requestKey: "k" }), name);
+  }
+  assert.equal((await fake.listProposals()).length, 1);
+  assert.equal((await real.listProposals()).length, 1);
 });

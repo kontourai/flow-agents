@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { FakeModelRuntime } from "@kontourai/relay";
+import { FakeModelRuntime, canonicalJson } from "@kontourai/relay";
 import { bindTraverseExtract } from "../../kits/knowledge/dream/model.js";
 
 export const RUNTIME_FIXTURES = path.resolve(import.meta.dirname, "..", "..", "kits", "knowledge", "promote", "fixtures", "runtime");
@@ -112,8 +112,8 @@ export class FakeCorpusStore {
       this.calls.listProposals -= 1;
       if (same) {
         // Real Corpus digests the whole request: the candidate with its provenance, the proposer and the evidence.
-        const sent = JSON.stringify([candidate, proposerId, { agent: evidence.agent, proposal: evidence.proposal }]);
-        if (JSON.stringify([same.candidate, same.proposer_id, same.evidence]) !== sent) {
+        const canon = (value) => canonicalJson(JSON.parse(JSON.stringify(value)));
+        if (canon([same.candidate, same.proposer_id, same.evidence]) !== canon([candidate, proposerId, { agent: evidence.agent, proposal: evidence.proposal }])) {
           throw Object.assign(new Error("request key already names a different candidate"), { code: "REQUEST_KEY_CONFLICT" });
         }
         return same.id;
