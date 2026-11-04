@@ -865,12 +865,13 @@ describe("review round 6: a claim is plain text, a document is rendered only whe
 
   test("a claim is plain text: markers in a claim are characters, so a literal claim does not match a formatted document", async () => {
     assert.equal(await verdict("Use *allow* here.", "Use allow here.\n"), "not-addressed");
+    assert.equal(await verdict("Use *allow* here.", "Use [*allow*](http://example.test/a) here.\n"), "not-addressed", "a link label holding markup is not rendered");
     assert.equal(await verdict("Use *allow* here.", "Use *allow* here.\n"), "supported", "identical text, however marked up, is the document's statement");
     assert.equal(await verdict("Use allow here.", "Use *allow* here.\n"), "supported", "the displayed text of a simple emphasis");
   });
 
   test("rendering is the identity unless every marker is a simple well-formed pair, and is idempotent on its own output", () => {
-    const identity = ["a **b *c* d** e", "**a** and **b *c***", "x ***y*** z", "a * b *c", "a\\b", "a <b> c", "a ![i](u) b", "a [b] c", "a [b](u c) d", "a `` b `` c", "a ` b ` c", "a _b c", "a **b c", "a~b", "a ~~b~ c"];
+    const identity = ["a **b *c* d** e", "**a** and **b *c***", "x ***y*** z", "a * b *c", "a\\b", "a <b> c", "a ![i](u) b", "a [b] c", "a [b](u c) d", "a `` b `` c", "a ` b ` c", "a _b c", "a **b c", "a~b", "a ~~b~ c", "foo*bar* baz", "well-**known** thing"];
     for (const text of identity) assert.equal(renderInline(text), text, text);
     assert.equal(renderInline("a * b"), "a * b", "a lone marker between spaces is text");
     assert.equal(renderInline("snake_case and __init__ and **Note:** *x* _y_ ~~z~~ `c` [l](http://u/p)"), "snake_case and init and Note: x y z c l");
