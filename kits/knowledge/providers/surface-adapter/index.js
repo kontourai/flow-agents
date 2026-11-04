@@ -56,6 +56,21 @@ function compactMutationLog(mutationLog) {
   }));
 }
 
+// Corpus keeps the erasure audit entry on the tombstone. Never fabricate one:
+// Surface requires a dated, attributed deletion fact, so malformed tombstones
+// must fail closed instead of becoming apparently live claims.
+function deletedRetention(mutationLog) {
+  const entry = Array.isArray(mutationLog) && mutationLog.find((e) => e?.op === "purged");
+  if (!entry || typeof entry.at !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(entry.at) ||
+      !Number.isFinite(Date.parse(entry.at)) ||
+      typeof entry.agent !== "string" || !entry.agent.trim() ||
+      typeof entry.rationale !== "string" || !entry.rationale.trim()) {
+    throw new Error("purged record lacks valid erasure audit evidence");
+  }
+  return { state: "deleted", erasedAt: entry.at, actor: entry.agent, rationale: entry.rationale };
+}
+
 /**
  * Build a TrustBundle from Knowledge Kit graph data.
  *
@@ -66,11 +81,23 @@ function compactMutationLog(mutationLog) {
  * @param {string[]} [options.recordTypes] - Filter by record types
  * @param {boolean} [options.includeRetired=false] - Include retired records
  * @param {Object} [options.agent] - Agent identity for provenance
- * @returns {Promise<import("@kontourai/surface").TrustBundle>}
+ * @returns {Promise<import("@kontourai/surface-knowledge").TrustBundle>}
  */
 export async function buildKnowledgeTrustBundle(options = {}) {
   // Vault and health consumers do not require the optional Surface projection.
-  const { TrustBundleBuilder } = await import("@kontourai/surface");
+  // The installed Flow Agents package supplies an isolated alias; a standalone
+  // Kit may instead have the public Surface 6 package under its ordinary name.
+  let surface;
+  try {
+    surface = await import("@kontourai/surface-knowledge");
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND" || !error.message.includes("'@kontourai/surface-knowledge'")) throw error;
+    surface = await import("@kontourai/surface");
+  }
+  if (typeof surface.TrustBundleBuilder !== "function" || typeof surface.isDeletedClaim !== "function") {
+    throw new Error("Knowledge Surface projection requires @kontourai/surface 6.3.0 or a compatible erasure-capable release");
+  }
+  const { TrustBundleBuilder } = surface;
   const {
     storeRoot,
     store,
@@ -100,7 +127,8 @@ export async function buildKnowledgeTrustBundle(options = {}) {
   }
   if (recordTypes.length) {
     const typeSet = new Set(recordTypes);
-    filteredNodes = filteredNodes.filter((n) => typeSet.has(n.attributes.record_type));
+    filteredNodes = filteredNodes.filter((n) => typeSet.has(n.attributes.record_type) ||
+      (options.recordTypes === undefined && n.attributes.status === "purged" && n.attributes.record_type === "[omitted]"));
   }
   if (!includeRetired) {
     filteredNodes = filteredNodes.filter((n) => n.attributes.status !== "retired");
@@ -113,10 +141,11 @@ export async function buildKnowledgeTrustBundle(options = {}) {
 
   const builder = new TrustBundleBuilder({ source: "knowledge-kit" });
 
-  // nodeId -> claimId, populated as claims are emitted below. Used both to
-  // replace O(n^2) node lookups and to skip identity links whose endpoints
-  // never received a claim.
-  const claimIdByNodeId = new Map();
+  // Assign IDs before emitting claims so support can point to later nodes.
+  const claimIdByNodeId = new Map(filteredNodes.map((node) => {
+    const { record_type, category: cat, status } = node.attributes;
+    return [node.id, `knowledge:${record_type}.${status === "purged" ? "purged" : cat || "uncategorized"}#${node.id}`];
+  }));
 
   // Nodes → Claims
   for (const node of filteredNodes) {
@@ -131,19 +160,30 @@ export async function buildKnowledgeTrustBundle(options = {}) {
       updated_at,
     } = node.attributes;
 
-    const claimId = `knowledge:${record_type}.${cat || "uncategorized"}#${node.id}`;
+    const deleted = status === "purged";
+    const claimId = claimIdByNodeId.get(node.id);
     const claimStatus = statusFor(status);
-    claimIdByNodeId.set(node.id, claimId);
+
+    // Corpus defines support as source_ids and source links. Only project
+    // references with claims in this bundle; category/type filtering may hide
+    // other inputs, so consumers requiring a complete trace must request them.
+    const sourceIds = new Set([
+      ...(Array.isArray(node.attributes.record_provenance?.source_ids) ? node.attributes.record_provenance.source_ids : []),
+      ...edges.filter((edge) => edge.from === node.id && edge.attributes?.vault_link_kind === "source").map((edge) => edge.to),
+    ]);
+    // Surface rejects self-derivation; stores can accept a self-source, which
+    // cannot provide independent support and must not break the entire bundle.
+    const derivedFrom = [...sourceIds].filter((id) => id !== node.id).map((id) => claimIdByNodeId.get(id)).filter(Boolean);
 
     const createdAt = created_at || node.provenance?.retrieved_at || nowIso;
     const updatedAt = updated_at || node.provenance?.retrieved_at || nowIso;
 
-    const metadata = {
+    const metadata = deleted ? { surfaceRetention: deletedRetention(mutation_log) } : {
       knowledgeRecordType: record_type,
       knowledgeCategory: cat,
       knowledgeStatus: status,
     };
-    if (Array.isArray(mutation_log) && mutation_log.length) {
+    if (!deleted && Array.isArray(mutation_log) && mutation_log.length) {
       metadata.knowledgeMutationLog = compactMutationLog(mutation_log);
     }
 
@@ -154,21 +194,27 @@ export async function buildKnowledgeTrustBundle(options = {}) {
       facet: `knowledge.${record_type}`,
       claimType: claimTypeFor(record_type),
       fieldOrBehavior: "content",
-      value: node.body || node.title,
+      value: deleted ? null : node.body || node.title,
       status: claimStatus,
       createdAt,
       updatedAt,
-      ...(expires_at ? { expiresAt: expires_at } : {}),
-      ...(ttl_seconds !== undefined && ttl_seconds !== null ? { ttlSeconds: ttl_seconds } : {}),
+      ...(!deleted && expires_at ? { expiresAt: expires_at } : {}),
+      ...(!deleted && ttl_seconds !== undefined && ttl_seconds !== null ? { ttlSeconds: ttl_seconds } : {}),
       impactLevel: "medium",
       metadata,
+      ...(!deleted && derivedFrom.length ? { derivedFrom } : {}),
     });
+
+    // Surface refuses evidence attached to deleted claims. The provider directs
+    // evidence-of edges from a linking record to its target; do not quote a
+    // deleted linking record as evidence on a surviving target either.
+    if (deleted) continue;
 
     // Evidence: source links (raw → compiled, etc.)
     const sourceEdges = filteredEdges.filter((e) => e.to === node.id && e.type === "evidence-of");
     for (const edge of sourceEdges) {
       const sourceNode = nodeById.get(edge.from);
-      if (!sourceNode) continue;
+      if (!sourceNode || sourceNode.attributes.status === "purged") continue;
 
       const evidenceId = `${claimId}.evidence.${sourceNode.id}`;
       builder.addEvidence({

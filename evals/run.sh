@@ -162,6 +162,7 @@ run_static() {
   bash "$EVAL_DIR/static/test_unit_helpers.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_knowledge_providers.sh" || result=1
+  bash "$EVAL_DIR/static/test_knowledge_purge.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_model_routing_hints.sh" || result=1
   echo ""

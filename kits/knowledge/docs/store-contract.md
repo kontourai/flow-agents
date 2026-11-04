@@ -53,7 +53,7 @@ body. Callers/flows must supply and check that evidence. Both adapters require
 | `aliases` | string[] | no | Human-readable, category-scoped slug aliases resolvable via `get`/`getLinks` (Addendum H). Append-only; never changes `id`. |
 | `links` | Link[] | no | Outbound links from this record (see §2). |
 | `provenance` | Provenance | yes | Immutable creation provenance (see §4); `agent` required, `source_ids`, `session_id`, `note` optional. |
-| `status` | `"active"` \| `"implemented"` \| `"retired"` | no | Created as active; absent means active. Change via `retire`, not `update` (§B). |
+| `status` | `"active"` \| `"implemented"` \| `"retired"` \| `"purged"` | no | Created as active; absent means active. Change via `retire`, not `update` (§B); `purged` is the privileged Corpus tombstone state (§M). |
 | `mutation_log` | MutationLogEntry[] | adapter-maintained | Empty at creation; append-only operation/evidence history (§4.2). |
 | `created_at` | ISO-8601 string | yes | Creation timestamp in UTC. |
 | `updated_at` | ISO-8601 string | yes | Last mutation timestamp in UTC. |
@@ -780,11 +780,9 @@ It NEVER deletes records. Superseded records remain fully queryable with their p
   reverse link of kind `"supersedes"` pointing from `new_id`.
 
 **Supersede-not-delete invariant:**
-> Calling `supersede` MUST NOT remove any record. No mutation op in this contract deletes records.
-> This is a hard invariant; adapters MUST enforce it. Moving a record to `archive/`
-> MUST preserve its bytes and historical access; relocation is distinct from physical
-> purge/deletion. A purge policy is a future concern and is explicitly out of scope
-> for this version.
+> Calling `supersede` MUST NOT remove any record. Supersede remains the default for
+> ordinary changes, and moving a record to `archive/` preserves its historical access.
+> The separately authorized purge operation in Addendum M is the erasure exception.
 
 **Bundled implementation gap:** Obsidian archive path reuse can overwrite an earlier
 predecessor and make `get(earlierId)` return a later record. See the
@@ -965,8 +963,8 @@ Retired records MUST remain reachable from:
 These are normative retention requirements. The bundled Obsidian
 [archive collision gap](#known-obsidian-archive-retention-gap) can violate full-record
 retrieval and original-byte retention; a surviving source id or graph link does not
-cure it. No deletion or overwrite of retained records is authorized. Physical purge
-(if ever needed) is a separate, future policy hook not defined in this version.
+cure it. Retirement does not authorize deletion or overwrite of retained records.
+The separately privileged purge exception is specified in Addendum M.
 
 ### B.7 Proposal-Artifact Lifecycle (close-on-apply)
 
@@ -1943,3 +1941,139 @@ returns superseded snapshots is covered for that adapter by `evals/consolidation
 (the Obsidian adapter archives superseded snapshots out of the working set; both are
 required to retain `get()` access, but the Obsidian archive collision gap above can
 violate that requirement).
+
+## Addendum M: Privileged purge (issue #1570)
+
+The owner approved an explicit erasure exception on 2026-11-02. The operation is
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/1cb793f9b13408256536ebb97a15a3dcf98a0b23/packages/store/README.md#owner-decisions).
+Both bundled adapter entry points can explicitly select a host-supplied Corpus
+module. In that mode the returned store delegates **all** operations to the
+corresponding Corpus adapter; the kit does not implement a second cascade.
+Without that selection, the legacy adapter's `purge` always refuses with
+`READ_ONLY`.
+
+The host installs the published `@kontourai/corpus-store` package, stops all
+legacy readers and writers, migrates kit-v1 vaults using Corpus's documented offline
+migration, and supplies the same coordination directory, lock protocol and
+identity guard to every cooperating writer. The standalone lock is not
+interoperable with Station's lock. Corpus mode is explicit because a legacy
+writer does not participate in Corpus transactions; a boolean declaration is
+not proof that other processes have stopped. Do not mix modes on a live root.
+As an additional fail-closed guard, the legacy vault adapter refuses to open a
+root containing Corpus's `path-index.json`; the legacy default adapter refuses
+to mutate tombstones, add links to them via `link`, or introduce new `source`
+support for them. These checks
+do not stop older processes that were already running.
+Opening the legacy default adapter can initialize `cache-version.json`, and
+its `reindex` can rewrite the graph index. Refusing tombstone mutation does not
+make a legacy open or reindex a coordinated Corpus operation.
+Compatibility changes and the vault migration are described by Corpus's store
+contract; Corpus mode is not a byte-for-byte replacement for all legacy inputs.
+For example, it refuses a compiled record without a `source` link to an existing
+raw record, a
+whitespace-only body, and the reserved id `__proto__`, which the legacy kit
+accepts. Hosts must qualify their stored records and callers before switching.
+
+```js
+import * as corpus from '@kontourai/corpus-store';
+const store = new DefaultKnowledgeStore({
+  storeRoot,
+  corpusStore: {
+    module: corpus,
+    legacyProcessesStopped: true,
+    services: { coordinationDirectory, lock, coordinationIdentity, allowPurge: true },
+  },
+});
+```
+
+The same selection is accepted by `ObsidianKnowledgeStore`. `allowPurge` is
+omitted or false unless the host authorizes the operation; the supplied agent
+name alone is not authorization. Pass the returned store to
+`new MarkdownVaultProvider({ store })` and pass that provider to
+`buildKnowledgeTrustBundle({ store: provider })`. Constructing a separate
+provider from `storeRoot` selects the legacy reader and is not coordinated with
+the Corpus-backed store. Host-controlled readers and projections must likewise
+use the coordinated store, not a concurrently opened legacy adapter. Before
+purge, the host must suspend and drain in-flight projection reads; a read already
+in progress can retain pre-purge content. Rebuild projections after the operation
+before admitting new reads.
+
+The privileged interface is separate from ordinary mutations: `purge(ids,
+{ agent, rationale, note? })` requires an explicit host authorization decision,
+`allowPurge: true`, and non-empty agent and rationale. Default access is denied.
+The audit records the operation and its actor and rationale; it must not put erased
+content into the evidence. Supersede remains the default for ordinary changes.
+
+A full tombstone retains the stable id, type, creation time, provenance identity
+(`agent`, `session_id`, `source_ids`), link targets and kinds, and a sanitized
+identity-oriented mutation log including `purged`. It has status and category
+`purged`, a fixed title, an empty body, and no aliases, tags, link labels,
+provenance note, expiry, unknown content-bearing fields, or content digest. Purge
+audit rationale and optional note remain, so callers must keep erased content out
+of them. Near the vault's note-size limit, Corpus may emit a compact or minimal
+tombstone that omits some audit prose or identity references and records the
+omissions; see its owner decision for the bounded fallback. Its id cannot be
+reused and mutations of it and new support links to it are refused.
+
+Support comprises provenance `source_ids` and links of kind `source`. The Corpus
+operation cascades transitively to records that had real support and lose all of
+it; a cycle cannot support itself, while a source outside the store counts as real
+support. Records with remaining support survive and log `support-purged`;
+referrers log `reference-purged`. The result identifies survivors and referrers
+for producer review: their own content may reproduce erased content and is not
+automatically scrubbed. This follows Surface's producer-owned erasure boundary.
+
+The host must rebuild or invalidate each content-bearing projection before it
+serves it again, including any compiled briefs and indexes. Host-built projections,
+backups, snapshots, and migration manifests are outside Corpus Store's purge
+transaction. Context Check and Living Context also read claim manifests from
+Git at pinned revisions; Corpus purge cannot erase those manifests or their Git
+history. Hosts must account for those copies and prevent erased content from
+being served from them. Corpus also documents an interrupted-write journal window containing
+before-images until recovery; purge is not a secure-erasure guarantee. A completed
+integration must test each adapter and each actual read path, including a fault
+that skips the cascade and makes conformance fail.
+Create proposals can contain complete candidate records outside the working set.
+Corpus Store's purge includes create proposals: a pending proposal
+that rests only on erased sources is rejected and its candidate scrubbed; one
+with remaining support is blocked from application and returned for review. A
+blocked proposal retains its candidate, which may itself reproduce erased
+content, so the host must review it. The Corpus-backed adapter mode adopts this
+behavior from the published `@kontourai/corpus-store@0.1.0-next.0`.
+
+When a purged record is projected into a Surface claim, the Knowledge Surface
+adapter maps its retained purge audit entry to `metadata.surfaceRetention` with
+state `deleted` and a null claim value. It excludes evidence on the tombstone
+and does not quote a tombstoned linking record as evidence for a live target. Missing
+purge audit evidence fails the projection; no erasure actor or rationale is
+invented. A shortened vault tombstone keeps a bounded, non-blank rationale; a
+malformed tombstone with an empty or whitespace-only rationale fails closed.
+Corpus #57 remains open for upstream tracking; the published package retains
+the bounded rationale and the kit conformance gate checks both bounded shapes.
+If a minimal tombstone's oversized type is replaced with `[omitted]`, the
+default provider and Surface projection still include the deletion fact via the
+purged-category history. An explicit record-type filter can exclude it.
+Survivor content remains the producer's responsibility. The conformance gate
+exercises the pinned published package through both adapters and this projection,
+including a cascade fault in an isolated copy:
+
+```sh
+bash evals/static/test_knowledge_purge.sh
+```
+
+Corpus tombstones have category `purged`, so a projection filtered by an earlier
+category will not include their deletion facts. Hosts that need a deletion trace
+must account for those tombstones independently. The Surface adapter projects
+`source_ids` and `source` links to derivation inputs when the input has a claim
+in the selected bundle. Surface's erasure recomputation can then report deletion
+pressure on survivors. Filtering and external or missing inputs can omit support
+from that bundle and may conservatively reduce a survivor's derived status to
+`unknown`; request all relevant inputs for a complete trace. The purge
+result and retained `support-purged` entries also identify survivors for producer
+review, including content that might reproduce erased material.
+The Knowledge projection pins `@kontourai/surface` 6.3.0 under the
+`@kontourai/surface-knowledge` npm alias, which interprets deleted retention.
+Existing shared trust gates retain their separately pinned Surface 5 behavior;
+this does not prove that other hosts have refreshed their projections. Surface 5
+can validate a bundle containing this metadata without interpreting the claim as
+deleted. Hosts need an erasure-capable Surface version for deletion-aware reports.

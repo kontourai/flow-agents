@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,4 +54,82 @@ test("the installed public provider entry reads a vault without optional Surface
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("standalone Knowledge projection accepts ordinary erasure-capable Surface and rejects older Surface", () => {
+  const root = mkdtempSync(join(tmpdir(), "knowledge-surface-fallback-"));
+  try {
+    const installed = join(root, "kit");
+    cpSync(kitRoot, installed, { recursive: true });
+    const adapter = join(installed, "providers/surface-adapter/index.js");
+    const scope = join(root, "node_modules/@kontourai");
+    mkdirSync(scope, { recursive: true });
+    const publicName = join(scope, "surface");
+    const packageRoot = (specifier) => resolve(fileURLToPath(import.meta.resolve(specifier)), "../../..");
+    const livingEntry = join(installed, "context-check/living-context.js");
+    const runLiving = (expectSuccess) => {
+      const program = `
+        import assert from "node:assert/strict";
+        import { pathToFileURL } from "node:url";
+        const { assertSurfaceVisibility } = await import(pathToFileURL(process.argv[1]));
+        if (${expectSuccess}) assert.doesNotThrow(() => assertSurfaceVisibility());
+        else assert.throws(() => assertSurfaceVisibility(), { code: "SURFACE_VISIBILITY_UNAVAILABLE" });
+      `;
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
+      return spawnSync(process.execPath, ["--input-type=module", "-e", program, livingEntry], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    };
+    const run = (expectSuccess) => {
+      const program = `
+        import { pathToFileURL } from "node:url";
+        const { buildKnowledgeTrustBundle } = await import(pathToFileURL(process.argv[1]));
+        const at = "2026-11-02T12:00:00.000Z";
+        const store = { readGraph: async () => ({ nodes: [{ id: "erased", type: "note", title: "[purged]",
+          attributes: { record_type: "raw", category: "purged", status: "purged", created_at: at, updated_at: at,
+            mutation_log: [{ op: "purged", at, agent: "owner", rationale: "request" }] },
+          provenance: { source: "knowledge:erased", retrieved_at: at } }], edges: [] }) };
+        try {
+          const bundle = await buildKnowledgeTrustBundle({ store });
+          if (!${expectSuccess} || bundle.claims[0]?.metadata?.surfaceRetention?.state !== "deleted") process.exit(2);
+        } catch (error) {
+          if (${expectSuccess} || !/requires @kontourai\\/surface 6\\.3\\.0/.test(error.message)) throw error;
+        }
+      `;
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
+      return spawnSync(process.execPath, ["--input-type=module", "-e", program, adapter], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    };
+    symlinkSync(packageRoot("@kontourai/surface-knowledge"), publicName, "junction");
+    let result = run(true);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    result = runLiving(true);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    rmSync(publicName);
+    symlinkSync(packageRoot("@kontourai/surface"), publicName, "junction");
+    result = run(false);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    result = runLiving(false);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+
+    // A present alias with a missing transitive dependency is broken, not an
+    // absent alias. Even with ordinary Surface 6 installed, preserve its error.
+    rmSync(publicName);
+    symlinkSync(packageRoot("@kontourai/surface-knowledge"), publicName, "junction");
+    const alias = join(scope, "surface-knowledge");
+    mkdirSync(alias);
+    writeFileSync(join(alias, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
+    writeFileSync(join(alias, "index.js"), 'import "flow-agents-missing-surface-test-dependency";\n');
+    const brokenProgram = `
+      import assert from "node:assert/strict";
+      import { pathToFileURL } from "node:url";
+      const { buildKnowledgeTrustBundle } = await import(pathToFileURL(process.argv[1]));
+      await assert.rejects(() => buildKnowledgeTrustBundle({ store: { readGraph: async () => ({ nodes: [], edges: [] }) } }),
+        (error) => error.code === "ERR_MODULE_NOT_FOUND" && error.message.includes("'flow-agents-missing-surface-test-dependency'"));
+    `;
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
+    result = spawnSync(process.execPath, ["--input-type=module", "-e", brokenProgram, adapter], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    const brokenLiving = `import assert from "node:assert/strict"; import { pathToFileURL } from "node:url";
+      await assert.rejects(import(pathToFileURL(process.argv[1])), (error) => error.code === "ERR_MODULE_NOT_FOUND" && error.message.includes("'flow-agents-missing-surface-test-dependency'"));`;
+    result = spawnSync(process.execPath, ["--input-type=module", "-e", brokenLiving, livingEntry], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -38,6 +38,11 @@
       "for": "Validate evidence bundles and derive workflow claim trust reports."
     },
     {
+      "product": "surface",
+      "via": "@kontourai/surface-knowledge",
+      "for": "Project Knowledge erasure, visibility, and memory using Surface 6.3.0."
+    },
+    {
       "product": "survey",
       "via": "@kontourai/survey",
       "for": "Bind review queues and apply persisted decisions to workflow evidence."

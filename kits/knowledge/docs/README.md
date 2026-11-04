@@ -20,10 +20,11 @@ The installed Kit manifest declares `knowledge.store-providers` at
 loaded without Surface or Neo4j packages. The providers remain readers and
 proposal producers; importing them does not approve or apply a change.
 
-`buildKnowledgeTrustBundle` loads `@kontourai/surface` only when explicitly
-called. A consuming Node project that uses that projection must supply a
-compatible Surface package (the Flow Agents package manifest records the version
-used by this distribution). If it is unavailable, the projection rejects; it
+`buildKnowledgeTrustBundle` loads the `@kontourai/surface-knowledge` npm alias
+of `@kontourai/surface` 6.3.0 only when explicitly called. If the alias is absent,
+a standalone Kit can use an erasure-capable `@kontourai/surface` installed under
+its ordinary name. Older packages that lack the deletion API are refused. The
+Flow Agents package manifest pins the alias. If neither is available, the projection rejects; it
 does not produce a placeholder bundle or block unrelated vault reads. Neo4j
 likewise needs its driver and service only when that provider is selected.
 
@@ -207,6 +208,10 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `supersede(newId, supersededIds, evidence)` → `Promise<void>`
 - `retire(id, targetStatus, evidence)` → `Promise<void>`
 - `reindex()` → derived graph-index recovery report
+- `purge(ids, evidence)` → a Corpus purge result in explicitly selected
+  Corpus-backed mode; legacy mode rejects it with `READ_ONLY`. See
+  [Addendum M](store-contract.md#addendum-m-privileged-purge-issue-1570)
+  for authorization, coordination and migration requirements.
 
 ---
 
@@ -302,8 +307,9 @@ property names, so a `1.0` input carrying an undeclared `constructor`, `toString
 or `hasOwnProperty` key is now rejected; every other `1.0` input behaves as before.) The `1.1` entry
 points live in `context-check/living-context.js` (recall and reconciliation) and
 `context-check/living-context-answer.js` (the answer step); loading `index.js` still needs no Surface
-or Survey package, but the `1.1` modules need `@kontourai/surface` with the derived-visibility exports
-(Surface 6.3.0 or later, kontourai/surface#350) and `@kontourai/survey`. Schemas:
+or Survey package. The `1.1` modules use the `@kontourai/surface-knowledge` alias,
+or the ordinary `@kontourai/surface` name in a standalone kit, with the derived-visibility
+exports (Surface 6.3.0 or later, kontourai/surface#350), and `@kontourai/survey`. Schemas:
 [`living-context-input`](../schemas/knowledge/living-context-input.schema.json) and
 [`living-context-result`](../schemas/knowledge/living-context-result.schema.json).
 
@@ -776,7 +782,7 @@ library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
 `O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
 artifacts; the CLI checks it before constructing its store. Unsupported
 platforms or a missing interpreter refuse, with the legacy runner still
-available. This distribution qualifies Flow 5.2.0 and Surface 6.3.0. The kit
+available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0 for ingest. The kit
 invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
 engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
 unique run id and optionally a `flowCommand` argument array for a particular
@@ -969,6 +975,68 @@ as `NO_CONVERSATION` rather than blocked as drift.
 review, activation for context consumers, observed effects and retirement from
 ordinary Knowledge record storage status. It is exposed through the declared
 `knowledge.learning-lifecycle` adapter and public package exports.
+
+## Memory create proposals (Corpus #40)
+
+The explicit `runPromote({ target: "store", ... })` path accepts a complete
+schema-valid `runtime-session` residue from #669 and already-distilled candidates with
+`title`, `body`, and `category`. The host supplies its authorized absolute
+`root`, a `registerRoot(name, root)` function, and a Corpus store constructed
+for that same root with host-owned locking and coordination. The host supplies
+the root name explicitly. This path does not discover or authorize paths or
+edit an MCP registry itself. The host's registration implementation determines whether its
+MCP server lists the root. The host must refuse registration when an existing name points to a different
+root; re-registering the same name and root is allowed. The reference host
+registry currently replaces the existing root silently, so it does not satisfy
+this requirement. The host protocol is tracked in
+[#753](https://github.com/kontourai/flow-agents/issues/753).
+
+Each candidate is sent through `proposeCreate(candidate, proposerId, evidence,
+{ requestKey })`. The opaque key hashes the sitting ID and candidate position;
+it contains no source text. Replaying the same ordered batch returns the
+original proposal IDs while the key remains active. Corpus refuses a replay if
+the key was retired after a purge or scrub. Changed content or provenance at an
+occupied position is refused as `REQUEST_KEY_CONFLICT`. The proposer identity
+is part of the stored request, so changing it at the same sitting and position
+also conflicts rather than creating another proposal. A changed sitting must be
+reconciled by the host; this bridge does not replace earlier proposals.
+
+The candidate provenance note encodes the session ID, transcript reference,
+sitting ID and producer-supplied content hash pending the structured provenance
+contract in [Corpus #46](https://github.com/kontourai/corpus/issues/46). The
+bridge validates the hash shape but does not recompute it from turns. This is a
+proposal request, not an approval or an applied record; the Corpus #40 contract
+owns persistence, review, and exclusion from ordinary reads. Reviewers use
+Corpus `applyCreate` or `rejectCreate`; this bridge invokes neither operation.
+Extraction and scheduling are not provided here. Retry only the same ordered
+batch and provenance after an uncertain response. The store deduplicates
+individual proposals; a shorter batch does not remove or reconcile previously
+staged proposals. The adapter/root binding is a host obligation pending
+[Corpus #47](https://github.com/kontourai/corpus/issues/47); the registry
+protocol remains subject to [#753](https://github.com/kontourai/flow-agents/issues/753).
+
+An error from `proposeCreate` carries already returned proposal IDs, the failed
+candidate index and its opaque request key for reconciliation. A request-key
+conflict and Corpus `MISSING_EVIDENCE` are surfaced as definite refusals for the
+failed candidate. Other failures are conservatively reported as indeterminate,
+including coded errors not explicitly recognized here; inspect the cause and
+reconcile or retry only the identical batch. `MISSING_EVIDENCE` can be returned
+before key lookup, so it does not establish whether the position was previously
+occupied. A `REQUEST_KEY_CONFLICT` can mean different input or a retired key
+after a purge or scrub.
+
+Returned `posture: "proposed"` names the submitted intent. The accompanying
+`review_state: "not_observed"` is not evidence of the current proposal state.
+Query Corpus before treating a replayed receipt as pending, applied or rejected.
+`write: false` returns `preview` without registering or writing; an empty
+candidate list returns `noop`. The create-proposal API is an upstream dependency.
+
+The Corpus integration tests use the exact published `@kontourai/corpus-store`
+version declared by this package. Set `KNOWLEDGE_HOST_ROOT` to a checkout of
+the host to also exercise its registry and MCP server in an isolated temporary
+XDG home; that host-dependent test is skipped when the path is unavailable.
+Candidate fields are limited to `title`, `body`, and `category`; `write` must
+be a boolean.
 
 ## Memory claims and routed review
 

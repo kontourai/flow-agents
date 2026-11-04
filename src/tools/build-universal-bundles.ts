@@ -906,6 +906,13 @@ function writeBundledSurvey(targetRoot:string):void {
  writeText(path.join(vendorRoot,'survey.bundle.json'),JSON.stringify({schema_version:'1.0',entry_package:packageName,entry_version:metadata.version,bundles,assets,packages:[...packages.values()].sort((a,b)=>`${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`))},null,2)+'\n');
 }
 
+/** An npm alias identifies a published package independently of its local key. */
+export function matchesDeclaredRuntimePackage(key: string, declared: string | undefined, actual: { name: string; version: string }): boolean {
+  if (!declared) return false;
+  const alias = /^npm:(@[^/@]+\/[^/@]+|[^/@]+)@([^@]+)$/.exec(declared);
+  return actual.name === (alias?.[1] ?? key) && actual.version === (alias?.[2] ?? declared);
+}
+
 /** Finish the standalone public import graph without shipping an npm tree.
  * Keep module-relative data with Flow; staging changes only Node resolution,
  * never Flow's validators or process semantics. */
@@ -933,7 +940,7 @@ function writeBundledRuntimeImports(targetRoot: string): void {
     let packageRoot = path.dirname(resolvedEntry);
     while (!fs.existsSync(path.join(packageRoot, "package.json"))) packageRoot = path.dirname(packageRoot);
     const entryPackage = loadJson<{ name: string; version: string }>(path.join(packageRoot, "package.json"));
-    if (!declared || entryPackage.name !== packageName || entryPackage.version !== declared) {
+    if (!matchesDeclaredRuntimePackage(packageName, declared, entryPackage)) {
       throw new Error(`Standalone runtime dependency must match exact published version: ${specifier}`);
     }
     const bundleName = specifier.replace(/^@kontourai\//, "").replaceAll("/", "-");
@@ -1028,7 +1035,7 @@ function writeBundledRuntimeImports(targetRoot: string): void {
         }
       }
       writeText(path.join(path.dirname(vendorFile), `${bundleName}.runtime.bundle.json`), `${JSON.stringify({
-        schema_version: "1.0", entry_package: packageName, entry_version: entryPackage.version,
+        schema_version: "1.0", entry_package: entryPackage.name, entry_specifier: specifier, entry_version: entryPackage.version,
         bundle_digest: `sha256:${crypto.createHash("sha256").update(output.text).digest("hex")}`,
         packages: [...packaged.values()].sort((first, second) => `${first.name}@${first.version}`.localeCompare(`${second.name}@${second.version}`)),
       }, null, 2)}\n`);

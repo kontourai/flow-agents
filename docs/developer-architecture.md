@@ -164,6 +164,17 @@ candidate cursor that the transaction owner commits only after its own work
 succeeds. See the [Knowledge kit documentation](../kits/knowledge/docs/README.md#residue-sources-runtime-session-ingest)
 for the cursor rule, drift handling and scrub guarantees.
 
+## Memory-root proposals
+
+The Knowledge kit can stage distilled session candidates through a host-supplied
+Corpus store adapter for an authorized memory root. The proposal includes session,
+transcript and sitting provenance; Corpus owns the pending proposal and its review
+transaction. Staging does not apply a record or establish its review state. The
+repository pins `@kontourai/corpus-store` as a development dependency to exercise
+the integration; the host supplies the adapter at runtime. See the
+[proposal target documentation](../kits/knowledge/docs/README.md) for registration,
+retry and recovery boundaries.
+
 ## Memory claims and routed review
 
 Native hosts consume the `memory-claims`, `memory-routing` and `memory-routing-flow`
@@ -267,14 +278,19 @@ Codex build also resolves remaining literal public package imports from the
 current dependency graph and bundles their code, original license notices (or
 published SPDX metadata when a package ships no notice file), and version/digest
 provenance. This does not copy a flat npm dependency tree or change Flow-owned
-process semantics. Surface's original trust-panel element and exact package
+process semantics. For npm aliases the builder validates the exact published
+target name and version and records both that identity and the local specifier.
+Surface's original trust-panel element and exact package
 metadata also ship with its entry; synchronous narrative reads and panel rendering
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
-The direct pins are Surface 6.3.0 and Survey 8.4.0: the Knowledge Kit's Living Context
-recall needs Surface's derived-visibility exports (`readDeclaredVisibility`,
-`visibilityAllows`, `viewerSupersessionView`) and refuses with
-`SURFACE_VISIBILITY_UNAVAILABLE` when they are missing.
+The shared workflow trust gates retain Surface 5 and its status-function behavior.
+Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
+through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
+and accumulation. Standalone Knowledge projection can use an erasure-capable
+Surface under its ordinary name; recall requires Surface 6.3.0 or later with derived
+visibility. Packaged memory modules include their alias through Flow Agents. Survey
+is pinned to 8.4.0.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;
