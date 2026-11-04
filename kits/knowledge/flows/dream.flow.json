@@ -1,0 +1,110 @@
+{
+  "id": "knowledge.dream",
+  "version": "1.0",
+  "description": "Knowledge Kit dream flow (issue #671): distil accumulated sessions from both supported runtimes into proposed memory claims and re-render budgeted briefs. Callable by a host scheduler; never schedules itself and is disabled until the operator enables it. ingest (runtime-session residue, cursor read) -> distil (memory claims through a Relay model runtime) -> route (routed-review policy) -> propose (Corpus create proposals; the run cannot apply one) -> brief (global and per-project, hard byte budgets) -> report (per-run, reconciled with the store) -> cursor (committed last). Executable logic: dream/run.js.",
+  "steps": [
+    { "id": "ingest", "next": "distill" },
+    { "id": "distill", "next": "route" },
+    { "id": "route", "next": "propose" },
+    { "id": "propose", "next": "brief" },
+    { "id": "brief", "next": "report" },
+    { "id": "report", "next": "cursor" },
+    { "id": "cursor", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "exports": [
+    "knowledge.dream.ingest",
+    "knowledge.dream.distill",
+    "knowledge.dream.route",
+    "knowledge.dream.propose",
+    "knowledge.dream.brief",
+    "knowledge.dream.report",
+    "knowledge.dream.cursor"
+  ],
+  "gates": {
+    "ingest-gate": {
+      "step": "ingest",
+      "expects": [
+        {
+          "id": "residue-ingested-from-cursor",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Runtime-session residue was read from the committed cursor inside host-authorised transcript roots. Ingest writes nothing and returns a candidate cursor. A rotated or unreadable telemetry file blocks the run and holds the cursor.",
+          "bundle_claim": { "claimType": "knowledge.dream.ingest", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] }
+        }
+      ]
+    },
+    "distill-gate": {
+      "step": "distill",
+      "expects": [
+        {
+          "id": "claims-distilled-through-relay",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Each complete sitting was distilled into memory claims by a model call routed through a Relay runtime (Datum role, Dispatch routing). A sitting whose every extraction pass failed fails the run; it is not read as a sitting with nothing in it.",
+          "bundle_claim": { "claimType": "knowledge.dream.distill", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] }
+        }
+      ]
+    },
+    "route-gate": {
+      "step": "route",
+      "expects": [
+        {
+          "id": "claims-routed",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Every claim has a recomputable routing decision. A claim no rule flags is recorded as proposed; a flagged claim is routed to Survey review. Routing never blocks recall and never promotes a claim.",
+          "bundle_claim": { "claimType": "knowledge.dream.route", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] }
+        }
+      ]
+    },
+    "propose-gate": {
+      "step": "propose",
+      "expects": [
+        {
+          "id": "claims-proposed-not-applied",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Claims were staged with Corpus proposeCreate and reconciled by claim id, so a replay creates no duplicate. The run applies nothing: only a reviewer other than the proposer promotes a proposal.",
+          "bundle_claim": { "claimType": "knowledge.dream.propose", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] }
+        }
+      ]
+    },
+    "brief-gate": {
+      "step": "brief",
+      "expects": [
+        {
+          "id": "briefs-within-budget",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The global brief and each project brief are at or under their byte budgets, ranked by confidence x recency x scope-match, and contain only reviewed claims unless the operator opted in to labelled unreviewed ones.",
+          "bundle_claim": { "claimType": "knowledge.dream.brief", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] }
+        }
+      ]
+    },
+    "report-gate": {
+      "step": "report",
+      "expects": [
+        {
+          "id": "report-reconciles-with-store",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The per-run report exists and its created and reused counts equal the receipts it lists and the proposals the store gained.",
+          "bundle_claim": { "claimType": "knowledge.dream.report", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] }
+        }
+      ]
+    },
+    "cursor-gate": {
+      "step": "cursor",
+      "expects": [
+        {
+          "id": "cursor-committed-last",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The cursor was committed after every other step succeeded, and not at all when any step failed. It never passes an incomplete sitting, one over the per-run cap, or one that failed.",
+          "bundle_claim": { "claimType": "knowledge.dream.cursor", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] }
+        }
+      ]
+    }
+  }
+}

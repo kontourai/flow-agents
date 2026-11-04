@@ -78,6 +78,11 @@
       "id": "knowledge.living-context",
       "path": "flows/living-context.flow.json",
       "description": "Living Context recall contract (Context Check 1.1, issue #1131): required reader identity that fails closed, as-of on valid time and knowledge time, per-result reasons, an explicit whole-result token budget, and a separate answer step that abstains through Survey support verification. Proposals-only; extends knowledge.context-check without changing it. Executable logic: context-check/living-context.js and context-check/living-context-answer.js."
+    },
+    {
+      "id": "knowledge.dream",
+      "path": "flows/dream.flow.json",
+      "description": "Knowledge dream flow (issue #671): distil accumulated sessions from both supported runtimes into proposed memory claims and re-render budgeted briefs. A host scheduler calls it; it never schedules itself and is disabled until the operator enables it. ingest -> distill (Relay model runtime) -> route (routed-review policy) -> propose (Corpus create proposals; the run cannot apply one) -> brief (global and per-project, hard byte budgets) -> report -> cursor (committed last). Executable logic: dream/run.js."
     }
   ],
   "workflow_triggers": [
@@ -178,6 +183,11 @@
       "id": "knowledge.memory-claims",
       "path": "adapters/memory-claims/index.mjs",
       "description": "Memory claim schema and routed-review policy for distilled memory (#1571). The claim schema (subject, property, value, valid time, speaker/source, epistemic posture) is a caller-owned Traverse target schema; distillMemoryClaims turns Traverse proposals into schema-valid claims. Uncontested claims are recorded as proposed; contradiction, consequential supersession, entity merge/split, low extraction agreement and visibility widening route to Survey review. Each decision embeds its input and policy and is recorded as Flow evidence so routing is recomputable; per-run metrics report proposed count, routed share, reviewer decisions and review time."
+    },
+    {
+      "id": "knowledge.dream-runner",
+      "path": "dream/index.js",
+      "description": "Executable logic for the knowledge.dream flow (issue #671): runDream(host, options) reads the runtime-session cursor (#669), distils sittings into memory claims through a Relay model runtime resolved from a Datum role (#1571), routes them, stages them as Corpus create proposals (#670), compiles the budgeted profile briefs #672 reads, writes a per-run report and commits the cursor last. It only proposes: only a reviewer other than the proposer promotes a claim. Disabled until the operator enables it; dryRun is read-only."
     }
   ],
   "assets": [
@@ -200,6 +210,16 @@
       "id": "knowledge.memory-proposal-target",
       "path": "promote/store-target.js",
       "description": "Host-composed Corpus create-proposal bridge for distilled runtime-sitting memory; preserves session, transcript, and sitting provenance without applying records."
+    },
+    {
+      "id": "knowledge.dream-cli",
+      "path": "dream/cli.js",
+      "description": "Command a host scheduler invokes: node dream/cli.js run --config /abs/dream.config.json [--dry-run]. Exit 0 ran, 1 failed, 2 disabled or misconfigured, 3 blocked telemetry, 75 another run holds the lock."
+    },
+    {
+      "id": "knowledge.dream-hook-trigger",
+      "path": "dream/hook-trigger.js",
+      "description": "Opt-in SessionEnd/PreCompact hook command that starts a detached, best-effort dream run. Inert unless FLOW_AGENTS_DREAM_TRIGGER=1 and FLOW_AGENTS_DREAM_CONFIG name an enabled config. Not registered by any default hook profile."
     }
   ],
   "evals": [

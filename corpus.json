@@ -372,6 +372,10 @@
       "section": "Decisions"
     },
     {
+      "source": "docs/decisions/memory-dream-run.md",
+      "section": "Decisions"
+    },
+    {
       "source": "docs/decisions/model-routing.md",
       "section": "Decisions"
     },
@@ -650,6 +654,7 @@
     "decisions/living-context-recall.html": "docs/decisions/living-context-recall.md",
     "decisions/mcp-posture.html": "docs/decisions/mcp-posture.md",
     "decisions/memory-claim-routing.html": "docs/decisions/memory-claim-routing.md",
+    "decisions/memory-dream-run.html": "docs/decisions/memory-dream-run.md",
     "decisions/model-routing.html": "docs/decisions/model-routing.md",
     "decisions/portable-host-integration.html": "docs/decisions/portable-host-integration.md",
     "decisions/promotion-gate.html": "docs/decisions/promotion-gate.md",

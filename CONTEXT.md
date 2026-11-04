@@ -90,6 +90,11 @@ _Avoid_: Promotion gate as a synonym (the gate is the recorded promote claim; th
 The scrubbed user and assistant text of one sitting of a Claude Code or Codex conversation, with its provenance. A sitting is a stretch of conversation separated from the next by an idle gap. It is produced by the `runtime-session` residue source (see kits/knowledge/docs/README.md). It is candidate input for later distillation; it is not a transcript archive, evidence, or instruction authority. Ingest returns a candidate cursor, and the transaction owner commits it only after its work succeeds.
 _Avoid_: Runtime transcript (the raw transcript stays runtime-owned; residue is a filtered, redacted projection)
 
+### Dream Run
+
+The Knowledge Kit's callable flow that distils accumulated runtime sessions into proposed memory claims and re-renders the budgeted briefs session start reads: ingest from a cursor, distil through a Relay model runtime, route, stage Corpus create proposals, compile briefs, write a per-run report, commit the cursor last. A host scheduler or an opt-in `SessionEnd`/`PreCompact` hook starts it; it never schedules itself, is disabled until an operator enables it, and only proposes. Only a reviewer other than the proposer promotes a claim. See kits/knowledge/docs/dream.md and docs/decisions/memory-dream-run.md.
+_Avoid_: Dream job as if this repository scheduled it, auto-apply (the run never applies)
+
 ### Kontour Resource Contract
 
 A versioned Kontour record shape for durable machine-readable configuration, scope, run state, evidence, provider output, and cross-product interchange. Kontour Resource Contracts are the default for new pre-public durable contracts unless a product records why a native shape is clearer.
