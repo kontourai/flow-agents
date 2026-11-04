@@ -278,14 +278,19 @@ Codex build also resolves remaining literal public package imports from the
 current dependency graph and bundles their code, original license notices (or
 published SPDX metadata when a package ships no notice file), and version/digest
 provenance. This does not copy a flat npm dependency tree or change Flow-owned
-process semantics. Surface's original trust-panel element and exact package
+process semantics. For npm aliases the builder validates the exact published
+target name and version and records both that identity and the local specifier.
+Surface's original trust-panel element and exact package
 metadata also ship with its entry; synchronous narrative reads and panel rendering
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
-The direct pins are Surface 6.3.0 and Survey 8.4.0: the Knowledge Kit's Living Context
-recall needs Surface's derived-visibility exports (`readDeclaredVisibility`,
-`visibilityAllows`, `viewerSupersessionView`) and refuses with
-`SURFACE_VISIBILITY_UNAVAILABLE` when they are missing.
+The shared workflow trust gates retain Surface 5 and its status-function behavior.
+Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
+through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
+and accumulation. Standalone Knowledge projection can use an erasure-capable
+Surface under its ordinary name; recall requires Surface 6.3.0 or later with derived
+visibility. Packaged memory modules include their alias through Flow Agents. Survey
+is pinned to 8.4.0.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;
