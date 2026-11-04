@@ -299,6 +299,12 @@ The production dependency pins esbuild to `0.28.2`, with the same exact version
 authorized in `pnpm-workspace.yaml`. Bundler updates must regenerate and check
 Knowledge YAML and runtime bundles, retaining their licenses and provenance;
 the generated runtime target remains Node 22.
+Generated runtime bundles add an ES module package boundary around the Knowledge
+kit so the shared injected-memory marker loads on early Node 22. The source kit
+does not carry that boundary: it would shadow the package self-references used
+by its adapters. Direct imports of generated bundle adapters from a checkout or
+linked install remain a known limitation ([#1594](https://github.com/kontourai/flow-agents/issues/1594));
+the packed-install layout resolves those imports.
 `build/runtime-imports.json` inventories the compiled runtime, vendor files and
 canonical config seed (`.codex/hooks.json` or `.claude/settings.json`). Codex
 retains that seed separately from the flattened, merged user `hooks.json`; the
