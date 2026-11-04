@@ -1,5 +1,19 @@
 # Changelog
 
+## [9.12.0](https://github.com/kontourai/flow-agents/compare/v9.11.0...v9.12.0) (2026-11-04)
+
+
+### Features
+
+* **knowledge:** Living Context recall contract ([#1572](https://github.com/kontourai/flow-agents/issues/1572)) ([5f83650](https://github.com/kontourai/flow-agents/commit/5f83650bb18793fbf1d86697d86afb2457ca0627)), closes [#1131](https://github.com/kontourai/flow-agents/issues/1131)
+* **knowledge:** memory claim schema and routed-review policy for distilled memory ([#1574](https://github.com/kontourai/flow-agents/issues/1574)) ([b0e4b10](https://github.com/kontourai/flow-agents/commit/b0e4b106dd8d7f9f8a847c77ec7e9c395acceaa9))
+* **knowledge:** runtime-session residue source on Ferry/Thread ([#1575](https://github.com/kontourai/flow-agents/issues/1575)) ([ae4a941](https://github.com/kontourai/flow-agents/commit/ae4a9410b8aa6e5b4086acedfc32446c5a00d747))
+
+
+### Fixes
+
+* avoid impossible URL credential scans on opaque identifiers ([#1599](https://github.com/kontourai/flow-agents/issues/1599)) ([a531ad5](https://github.com/kontourai/flow-agents/commit/a531ad5e82f92f4f485da4c5ad8d4e52ecea3e7d))
+
 ## [9.11.0](https://github.com/kontourai/flow-agents/compare/v9.10.0...v9.11.0) (2026-10-31)
 
 
