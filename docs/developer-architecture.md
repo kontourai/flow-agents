@@ -164,6 +164,22 @@ candidate cursor that the transaction owner commits only after its own work
 succeeds. See the [Knowledge kit documentation](../kits/knowledge/docs/README.md#residue-sources-runtime-session-ingest)
 for the cursor rule, drift handling and scrub guarantees.
 
+## Memory claims and routed review
+
+Native hosts consume the `memory-claims`, `memory-routing` and `memory-routing-flow`
+package subpaths; the Knowledge kit declares the matching `memory-claims` adapter.
+The Kit owns the claim shape (a caller-owned schema it hands to Traverse, which stays
+schema-neutral and proposals-only) and the routing policy. Survey owns verification
+records, review items and reviewer decisions; Flow owns the evidence; Surface owns
+which claims are current. A change no rule flags is recorded as `proposed`; a flagged
+one also becomes a Survey review item. Each routing decision embeds the input and
+policy it was computed from, so `recomputeMemoryRouting` can re-derive it, and is
+recorded as custom-kind Flow evidence on a gate the host names. Flow 5.4 gates accept
+only `trust.bundle` expectations, so that evidence is recomputable but not yet
+required. The visibility order is Surface's (`meetVisibility`) and entity proposals are Survey's contract; both are consumed from the pinned releases (surface 6.3.0, survey 8.4.0), not restated. The host supplies the model call, the Survey verifier and the Flow run. See
+the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
+evidence and the metrics.
+
 ## Delegation authority and bounded rounds
 
 The package exports separate `delegation-group-rounds` and
@@ -256,10 +272,10 @@ metadata also ship with its entry; synchronous narrative reads and panel renderi
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
 The shared workflow trust gates retain Surface 5 and its status-function behavior.
-The Knowledge projection and Living Context recall use Surface 6.3.0 through the
-`@kontourai/surface-knowledge` alias for erasure and derived visibility. A standalone
-Knowledge Kit may use an erasure-capable Surface package under its ordinary name.
-Survey is pinned to 8.3.0.
+Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
+through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
+and accumulation. A standalone Knowledge Kit may use an erasure-capable Surface
+package under its ordinary name. Survey is pinned to 8.4.0.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;

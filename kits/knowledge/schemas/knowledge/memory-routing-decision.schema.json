@@ -1,0 +1,407 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/memory-routing-decision.schema.json",
+  "title": "Knowledge Memory Routing Decision",
+  "description": "One routed-review decision, recorded as Flow evidence. It carries the exact input and policy it was computed from, so the outcome is recomputable: re-running the routing rules over `input` and `policy` must reproduce `outcome` and `reasons`. `id` is the sha256 digest of the input and policy. There is no clock in the record; Flow stamps the attachment time. An uncontested claim is `proposed` (recorded, recallable, unreviewed); a `routed` change waits for Survey review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "changeId",
+    "changeType",
+    "outcome",
+    "reasons",
+    "evaluated",
+    "input",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "changeId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "changeType": {
+      "enum": [
+        "claim",
+        "entity"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "proposed",
+        "routed"
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule",
+          "detail"
+        ],
+        "properties": {
+          "rule": {
+            "enum": [
+              "contradicted-by-verification",
+              "contested-by-accumulation",
+              "consequential-supersession",
+              "entity-identity-change",
+              "low-extraction-agreement",
+              "visibility-widening"
+            ]
+          },
+          "detail": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "evaluated": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Every rule that ran, so a rule that never ran cannot read as one that passed."
+    },
+    "input": {
+      "description": "Everything the rules read. For a claim: the claim, the same-slot claims it was compared against (plus any claims it supersedes), the Survey support-verification records bound to it, the extraction-agreement counts and the audiences it was checked against. For an entity change: the Survey entity proposal reference and the operation. Embedded in full so the rules can be re-run.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "claim",
+            "current",
+            "verifications",
+            "agreement",
+            "baselines",
+            "accumulation"
+          ],
+          "properties": {
+            "type": {
+              "const": "claim"
+            },
+            "claim": {
+              "type": "object",
+              "description": "A memory-claim.schema.json document."
+            },
+            "current": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "description": "A memory-claim.schema.json document."
+              }
+            },
+            "verifications": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "A Survey CandidateVerification record."
+              }
+            },
+            "agreement": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "passes",
+                    "agreeing"
+                  ],
+                  "properties": {
+                    "passes": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "agreeing": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              ],
+              "description": "Null when no extraction passes were measured. passes >= 1 and 0 <= agreeing <= passes; anything else is treated as unmeasured."
+            },
+            "baselines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ref",
+                  "visibility"
+                ],
+                "properties": {
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "`source`, or the id of a current claim in the slot."
+                  },
+                  "visibility": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "description": "Surface's visibility lattice (kontourai/surface src/visibility.ts, surface#356): public, or restricted to named audiences (opaque strings the owning store resolves). Restricted with none is sealed.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "kind"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "const": "public"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "kind",
+                              "audiences"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "const": "restricted"
+                              },
+                              "audiences": {
+                                "type": "array",
+                                "maxItems": 1024,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    "description": "Null when the bound declares none, which reads as sealed."
+                  }
+                }
+              },
+              "description": "What the claim's visibility must stay within: its source, and every current claim in its slot."
+            },
+            "accumulation": {
+              "description": "What Surface's projection (`projectAccumulation`, run by the host) says about the claim's slot, with the query slot it answered: the outcome, which claims are candidates, which support the current value (Surface joins subjects an admitted identity mapping declares equivalent, so these can carry another raw subject), and the gap codes. Null when it was not run. Only a stated claim is projected.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "outcome",
+                    "slot",
+                    "candidateClaimIds",
+                    "supportingClaimIds",
+                    "gapCodes"
+                  ],
+                  "properties": {
+                    "outcome": {
+                      "enum": [
+                        "current",
+                        "contested",
+                        "invalid",
+                        "none"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "candidateClaimIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "gapCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "slot": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "subjectType",
+                        "subjectId",
+                        "fieldOrBehavior",
+                        "claimType"
+                      ],
+                      "properties": {
+                        "subjectType": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "fieldOrBehavior": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "claimType": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "qualifiers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "supportingClaimIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "proposalRef",
+            "operations",
+            "subjects"
+          ],
+          "properties": {
+            "type": {
+              "const": "entity"
+            },
+            "proposalRef": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The Survey entity proposal's content-addressed id. Survey owns the proposal and its review item."
+            },
+            "subjects": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "subjectType",
+                  "subjectId"
+                ],
+                "properties": {
+                  "subjectType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "subjectId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "description": "Every subject the Survey entity proposal names (a Survey SubjectRef), sorted."
+            },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Every operation the Survey entity proposal's alternatives carry."
+            }
+          }
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "minPasses",
+        "minAgreement",
+        "multiValued",
+        "consequential"
+      ],
+      "properties": {
+        "version": {
+          "const": "1.0"
+        },
+        "minPasses": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Extraction passes needed to measure agreement. Fewer passes route as low agreement: unmeasured is not agreed."
+        },
+        "minAgreement": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Smallest share of passes that must produce an equivalent claim."
+        },
+        "consequential": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "properties",
+            "subjectTypes"
+          ],
+          "properties": {
+            "properties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "subjectTypes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "description": "Superseding a claim on one of these properties or subject types goes to review."
+        },
+        "multiValued": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Properties that may hold several values at once. Surface's projection has one value policy, so they are not projected and never contested."
+        }
+      }
+    }
+  }
+}

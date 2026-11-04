@@ -1,0 +1,139 @@
+{
+  "description": "What a model would answer for each extraction pass over each sitting. Only the model call is scripted: Traverse's real extract() prepares the text, verifies every excerpt, resolves locators and normalises the paths. Quotes are verbatim sentences from sittings.json.",
+  "sittings": [
+    {
+      "passes": [
+        [
+          {
+            "quote": "The widget service uses PostgreSQL 15 as its primary database.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "primary database",
+            "value": "PostgreSQL 15",
+            "posture": "stated"
+          },
+          {
+            "quote": "Maya Chen owns the on-call rotation for the widget service.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "on-call owner",
+            "value": "Maya Chen",
+            "posture": "stated"
+          },
+          {
+            "quote": "Our retry budget is 5 attempts per request.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "retry budget",
+            "value": "5 attempts per request",
+            "posture": "stated"
+          }
+        ],
+        [
+          {
+            "quote": "The widget service uses PostgreSQL 15 as its primary database.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "primary database",
+            "value": "PostgreSQL 15",
+            "posture": "stated"
+          },
+          {
+            "quote": "Maya Chen owns the on-call rotation for the widget service.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "on-call owner",
+            "value": "Maya Chen",
+            "posture": "stated"
+          }
+        ]
+      ]
+    },
+    {
+      "passes": [
+        [
+          {
+            "quote": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "primary database",
+            "value": "PostgreSQL 16",
+            "posture": "stated",
+            "validFrom": "2026-10-30",
+            "replacesPrior": true
+          },
+          {
+            "quote": "Actually the retry budget is 8 attempts per request.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "retry budget",
+            "value": "8 attempts per request",
+            "posture": "stated",
+            "replacesPrior": true
+          },
+          {
+            "quote": "Maya Chen no longer owns the on-call rotation for the widget service, drop that.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "on-call owner",
+            "value": "Maya Chen",
+            "posture": "retracted"
+          },
+          {
+            "quote": "If we ever shard the database we would probably use Citus.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "sharding technology",
+            "value": "Citus",
+            "posture": "hypothetical"
+          },
+          {
+            "quote": "Priya Rao leads the platform team.",
+            "subject": "platform team",
+            "subjectType": "team",
+            "property": "lead",
+            "value": "Priya Rao",
+            "posture": "stated"
+          }
+        ],
+        [
+          {
+            "quote": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "primary database",
+            "value": "PostgreSQL 16",
+            "posture": "stated",
+            "validFrom": "2026-10-30",
+            "replacesPrior": true
+          },
+          {
+            "quote": "Actually the retry budget is 8 attempts per request.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "retry budget",
+            "value": "8 attempts per request",
+            "posture": "stated",
+            "replacesPrior": true
+          },
+          {
+            "quote": "Maya Chen no longer owns the on-call rotation for the widget service, drop that.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "on-call owner",
+            "value": "Maya Chen",
+            "posture": "retracted"
+          },
+          {
+            "quote": "If we ever shard the database we would probably use Citus.",
+            "subject": "widget service",
+            "subjectType": "service",
+            "property": "sharding technology",
+            "value": "Citus",
+            "posture": "hypothetical"
+          }
+        ]
+      ]
+    }
+  ]
+}
