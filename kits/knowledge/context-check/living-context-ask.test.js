@@ -848,6 +848,10 @@ describe("review round 5", () => {
     assert.equal(help.status, 0);
     assert.match(help.stdout, /--revision\s+the 40-character commit to read; use "\$\(git rev-parse HEAD\)"/);
     assert.match(help.stdout, /--now\s+the moment you ask about/);
+    assert.match(help.stdout, /--nomination-budget\s+size limit, in tokens, of the step that looks up newer records/);
+    const tiny = run(...base, "--budget", "1", "What is the CI compute policy?");
+    assert.equal(tiny.status, 0, tiny.stderr);
+    assert.match(tiny.stdout, /A: ABSTAINED - every result was too large for --budget; raise it\./);
     const shortSha = run("--repo", s.repo, "--revision", "HEAD", "--reader", "r", "--now", NOW, "question");
     assert.equal(shortSha.status, 2);
     assert.match(shortSha.stderr, /full 40-character commit id; use "\$\(git rev-parse HEAD\)"/);
@@ -986,6 +990,11 @@ describe("the block layer: a flat document is read as prose, anything contextual
       ["the same with CRLF", "- Parent\r\n\r\n  The **key** is\r\n  reserved.\r\n2) Another **item**\r\n", "The key is reserved. 2) Another item"],
       ["a heading inside a list item", "- P\n  # H\n  The **key** is reserved.\n", "H The key is reserved."],
       ["a rule inside a list item", "- P\n  ***\n  **A**.\n2) **B**\n", "A. 2) B"],
+      ["a setext underline indented under a list item", "- P\n    =\n", "P ="],
+      ["a setext dash underline under a list item", "- The **key** is\n  reserved\n  ---\n", "The key is reserved ---"],
+      ["a rule right after a bullet", "- ***\n  **A**.\n2) **B**\n", "A. 2) B"],
+      ["a table inside a list item", "- P\n  | a | b |\n  |---|---|\n  | c | d |\n  The **key** is reserved.\n", "The key is reserved."],
+      ["an indented table row", "Intro.\n\n   | a | b |\n   |---|---|\n", "| a | b | |---|---|"],
       ["an indented paragraph after a heading", "# Title\n  The **key** is reserved.\n", "The key is reserved."],
       ["indented code", "Intro.\n\n    The **key** is\n    reserved.\n", "The key is reserved."],
       ["an indented code marker after a bullet", "-     The **key** is\n      reserved.\n", "The key is reserved."],

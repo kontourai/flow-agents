@@ -428,7 +428,7 @@ It ignores case, extra spaces, a leading `-` or `>`, and one final full stop. It
 
 How it reads a page:
 
-- It reads a page sentence by sentence only if the page is *flat*: paragraphs, `#` headings, top-level list items with wrapped lines, tables and fenced code at the left margin (both skipped), and rules. On one real store of 205 records, 177 were flat. In this repository's `docs/`, 33 of 44 were.
+- It reads a page sentence by sentence only if the page is *flat*: paragraphs, `#` headings, top-level list items with wrapped lines, tables and fenced code at the left margin (both skipped), and rules. On one real store of 205 records, 176 were flat. In this repository's `docs/`, 33 of 44 were.
 - A page with a quote, an indented code fence, an HTML block, a link definition, a nested list or an item that holds another block, indented code or an indented paragraph after a blank line, a `===`/`---` heading underline, a tab, an empty list item, a lone carriage return or a NUL byte is read one line at a time (the version 2 rule). The tool does not guess at nesting.
 - Bold, italic, code and link forms are rendered only when they are simple and unambiguous. Anything else (nested pairs, three markers in a row, an unpaired marker, an escape, an `&amp;`-style entity, a double-backtick span, an image, inline HTML, strikethrough) leaves the whole paragraph as written. Then only a claim that is a word-for-word sentence of it can match, and otherwise the verifier abstains.
 - A sentence ends at a full stop, space, then a capital letter, digit or opening quote. A short list of abbreviations is exempt. An abbreviation not on the list can end a sentence early, and the tail would then count as a sentence.
