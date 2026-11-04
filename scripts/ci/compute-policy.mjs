@@ -19,7 +19,7 @@ export const assignments = {
 // The lane is run-ID parity, chosen without arithmetic: all jobs of one run share
 // a lane per slot, and the expression embeds no PR, ref, head or attempt identity.
 // The base name is `-v2-` so it cannot collide with the retired
-// `flow-agents-compute-1`/`-2` groups, whose locks leaked on 2026-11-03.
+// `flow-agents-compute-1`/`-2` groups, whose queue head stalled on 2026-11-03.
 export const laneExpression = [0, 2, 4, 6, 8].map(d => `endsWith(github.run_id, '${d}')`).join(' || ');
 export const lanes = ['a', 'b'];
 export const admissionGroup = slot => `flow-agents-compute-v2-${slot}-\${{ (${laneExpression}) && 'a' || 'b' }}`;

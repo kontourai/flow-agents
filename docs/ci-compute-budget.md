@@ -27,7 +27,8 @@ The repository owner decided (2026-11-03) to split each slot into two lanes,
 allowing two concurrent admission units per slot and raising the repository-wide
 peak from 2 to 4 runners. That halves the exposure to any single stalled run
 (one stuck group stalls a quarter of participating work, not half) and doubles
-throughput. The groups were renamed to `flow-agents-compute-v2-…` so that runs
+admission capacity (actual throughput still depends on the workload and on how
+run IDs fall across lanes). The groups were renamed to `flow-agents-compute-v2-…` so that runs
 created under the old workflow revisions, which may still be pending in the
 retired groups, cannot share a queue with the new ones; the policy refuses the
 retired names if they reappear.
@@ -45,7 +46,7 @@ An even run ID selects lane `a`; an odd one selects lane `b`. All jobs of one
 run therefore land in the same lane of their respective slots, and a re-run of
 that run keeps the lane. The expression reads only `github.run_id`: it embeds no
 PR number, ref, head SHA or run attempt, so distinct PRs and branches share the
-same four groups and one head cannot multiply its own admission. Lanes are
+same four groups. Nothing in the name is per PR or per head, so no PR gets a private group; distinct runs of one head can occupy both lanes of a slot. Lanes are
 statistical, not balanced; consecutive runs can land in the same lane.
 `scripts/ci/compute-policy.mjs` accepts exactly this string for slots 1 and 2
 and refuses every other group name, a fifth group, a changed expression, a
@@ -176,8 +177,9 @@ mutable pins, unclassified PR compute and callee growth. It also pins the
 parity expression and checks that it maps run IDs to exactly two lanes. Its
 finite model exhausts every completion interleaving in 96 scenarios containing
 two PR graphs and runtime compatibility, with both job orders, all six
-caller-batch arrival orders and all eight lane assignments, and asserts a peak
-of at most four concurrent runners.
+caller-batch arrival orders and eleven lane assignments (eight with one lane per
+owner, three giving each workflow run of an owner its own lane), and asserts a
+model peak of exactly four concurrent runners.
 Separate model cases cover FIFO, overflow, duplicate work and cross-head
 cancellation. This is bounded model evidence, not exhaustive platform evidence.
 

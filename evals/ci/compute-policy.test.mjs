@@ -143,13 +143,21 @@ test('exhaust every completion interleaving of the expanded graph for two PRs pl
   let states = 0, peak = 0;
   const scenarios = [];
   const owners = ['pr-a', 'pr-b', 'compat'];
-  // A run's lane is fixed for the whole run, so every job of an owner shares it.
-  for (const laneBits of [0, 1, 2, 3, 4, 5, 6, 7]) for (const order of permutations(owners)) for (const reverse of [false, true]) {
-    const laneOf = owner => (laneBits >> owners.indexOf(owner)) & 1;
+  // A run's lane is fixed for the whole run, so every job of one workflow run shares it.
+  // A PR's workflows are separate runs with independent run IDs, so besides one lane
+  // per owner (eight assignments) the patterns below give each workflow run its own lane.
+  const files = [...new Set(graph.map(x => x.file))].sort();
+  const laneAssignments = [
+    ...[0, 1, 2, 3, 4, 5, 6, 7].map(bits => ({ name: `owner-bits-${bits}`, laneOf: owner => (bits >> owners.indexOf(owner)) & 1 })),
+    { name: 'per-file', laneOf: (owner, file) => files.indexOf(file) % 2 },
+    { name: 'per-file-inverted', laneOf: (owner, file) => 1 - (files.indexOf(file) % 2) },
+    { name: 'per-file-and-owner', laneOf: (owner, file) => (files.indexOf(file) + owners.indexOf(owner)) % 2 },
+  ];
+  for (const { name: laneName, laneOf } of laneAssignments) for (const order of permutations(owners)) for (const reverse of [false, true]) {
     // Both PRs include CI, full readiness, docs gate and the demo. Pages is a
     // separate push caller, included pessimistically in pr-a's arrival batch.
     const jobs = order.flatMap(owner => graph.filter(x => owner === 'compat' ? x.file === 'runtime-compat.yml' : x.file !== 'runtime-compat.yml' && (x.id !== 'pages' || owner === 'pr-a'))
-      .map((x, i) => ({ ...x, key: `${owner}/${x.file}/${x.id}/${i}`, workflow: `${owner}/${x.file}`, owner, lane: laneOf(owner) })));
+      .map((x, i) => ({ ...x, key: `${owner}/${x.file}/${x.id}/${i}`, workflow: `${owner}/${x.file}`, owner, lane: laneOf(owner, x.file) })));
     if (reverse) jobs.reverse();
     for (const job of jobs) job.dependencies = jobs.filter(x => x.workflow === job.workflow && job.needs.includes(x.id)).map(x => x.key);
     const seen = new Set();
@@ -173,11 +181,11 @@ test('exhaust every completion interleaving of the expanded graph for two PRs pl
       }
     }
     visit(empty(), jobs);
-    scenarios.push({ order, reverse, laneBits, jobs, states: [...seen].map(x => JSON.parse(x)) });
+    scenarios.push({ order, reverse, laneName, jobs, states: [...seen].map(x => JSON.parse(x)) });
   }
   if (process.env.FLOW_COMPUTE_MODEL_OUTPUT) writeFileSync(process.env.FLOW_COMPUTE_MODEL_OUTPUT, JSON.stringify({ kind: 'finite-model-not-platform-proof', scenarios }, null, 2));
   assert.ok(states > 1000);
-  assert.ok(peak > 2 && peak <= 4, `peak concurrent runners ${peak} must use the raised bound but never exceed 4`);
+  assert.equal(peak, 4, 'the model must reach, and never exceed, the raised bound of 4 concurrent runners');
   console.log(`MODEL: ${states} distinct states; peak ${peak}; all completion interleavings in ${scenarios.length} bounded expanded-graph scenarios`);
 });
 
