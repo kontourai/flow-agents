@@ -18,20 +18,12 @@ jobs:
   # Suite-wide secret-scan gate, defined once in kontourai/.github (Hachure: one
   # normative source). Scans git-tracked history; gitignored runtime/.env excluded.
   secret-scan:
-    concurrency:
-      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Secret Scan
     uses: kontourai/.github/.github/workflows/secret-scan.yml@fd058ed6fcc780d60cc22e26d8c327281a197932
     permissions:
       contents: read
 
   source-and-static:
-    concurrency:
-      group: flow-agents-compute-v2-2-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Source and Static
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -215,10 +207,6 @@ jobs:
           retention-days: 14
 
   workflow-contracts:
-    concurrency:
-      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Workflow Contracts
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -407,10 +395,6 @@ jobs:
           retention-days: 14
 
   runtime-and-kit:
-    concurrency:
-      group: flow-agents-compute-v2-2-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Runtime and Kit
     runs-on: ubuntu-latest
     # 20 -> 30, measured rather than nudged. This lane is the longest in the matrix and was already
@@ -692,10 +676,6 @@ jobs:
           retention-days: 14
 
   integration-coverage:
-    concurrency:
-      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Integration Coverage
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -875,10 +855,6 @@ jobs:
           retention-days: 14
 
   usage-feedback:
-    concurrency:
-      group: flow-agents-compute-v2-2-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Usage Feedback
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -951,10 +927,6 @@ jobs:
   # contract, and the codex trampoline through cmd.exe and PowerShell (never
   # bash). A hard-failing lane on purpose: if this breaks, Windows is broken.
   windows-hook-smoke:
-    concurrency:
-      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     name: Windows Hook Smoke
     runs-on: windows-latest
     timeout-minutes: 20
