@@ -14,6 +14,8 @@ const KNOWLEDGE_SCHEMA_FILES = [
   "context-check-result.schema.json",
   "edge.schema.json",
   "health-report.schema.json",
+  "living-context-input.schema.json",
+  "living-context-result.schema.json",
   "node.schema.json",
   "proposal.schema.json",
   "residue.schema.json",

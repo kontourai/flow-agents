@@ -73,6 +73,11 @@
       "id": "knowledge.context-check",
       "path": "flows/context-check.flow.json",
       "description": "Standalone Living Context recall and reconciliation (issue #1131): bind a repository/workspace and verified raw revision, read selected git-repo Knowledge roots only with sanitized Git revision reads, return contextual current/superseded/unverifiable recall with authority and retrieval provenance, return neutral affected/requires-reconciliation for bounded path intersections unless explicit authority supplies contradiction, and emit minimal owning-source proposals only. It is not a Surface trust derivation or Builder integration. Executable logic: context-check/index.js."
+    },
+    {
+      "id": "knowledge.living-context",
+      "path": "flows/living-context.flow.json",
+      "description": "Living Context recall contract (Context Check 1.1, issue #1131): required reader identity that fails closed, as-of on valid time and knowledge time, per-result reasons, an explicit whole-result token budget, and a separate answer step that abstains through Survey support verification. Proposals-only; extends knowledge.context-check without changing it. Executable logic: context-check/living-context.js and context-check/living-context-answer.js."
     }
   ],
   "workflow_triggers": [
@@ -153,6 +158,16 @@
       "id": "knowledge.context-check-runner",
       "path": "context-check/index.js",
       "description": "Deterministic Context Check adapter for issue #1131: runContextCheck({repoRoot, input, proposalDir}) validates complete revision-bound input/result schemas, verifies raw Git revision identity while clearing inherited Git overrides and disabling replace/graft semantics, distinguishes neutral affected reconciliation from Surface trust, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory."
+    },
+    {
+      "id": "knowledge.living-context-runner",
+      "path": "context-check/living-context.js",
+      "description": "Living Context adapter for issue #1131: runLivingContext({repoRoot, input, proposalDir}) validates the 1.1 input/result schemas, refuses a missing or unrecognised reader identity at every root before parsing any claim, reads selected git-repo Knowledge roots only at the pinned raw commit, evaluates visibility and per-viewer supersession with Surface's derived-visibility exports (Surface 6.3.0 or later) plus valid time and knowledge time per reader, derives freshness with Surface claimIntrinsicExpiry, keeps or drops whole results under an explicit token budget, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory. answerLivingContext (context-check/living-context-answer.js) is the separate answer step: it sends only current recalls to a Survey SupportVerifier and abstains otherwise."
+    },
+    {
+      "id": "knowledge.change-observer",
+      "path": "context-check/observe-change.js",
+      "description": "Bounded repository-change observation: observeRepositoryChange({repoRoot, base, head, maxPaths}) lists the paths touched between two raw commits (sanitized Git, no hooks or textconv) as the diff.paths a Context Check takes, and refuses an empty or oversized change instead of truncating. A thin shim: Lookout has no Git-revision source yet."
     },
     {
       "id": "knowledge.learning-lifecycle",
@@ -262,6 +277,11 @@
       "id": "knowledge.context-check-suite",
       "path": "context-check/context-check.test.js",
       "description": "Deterministic standalone Context Check contract suite (issue #1131): sanitized exact raw-revision reads despite a dirty working tree, Git replace and inherited GIT_DIR adversaries, current/superseded authority status, neutral bounded reconciliation with full surface intersection, explicit per-missing no-answer/not_verified behavior, owning-source-only proposals, no-follow symlink-safe proposal containment, complete input/result schemas, and diff-path handling."
+    },
+    {
+      "id": "knowledge.living-context-suite",
+      "path": "context-check/living-context.test.js",
+      "description": "Living Context contract suite (issue #1131): missing/blank/unknown reader refused at every root before any claim is parsed, hidden/absent/not-yet-known indistinguishable by id, Surface per-viewer supersession (a successor the reader cannot see leaves the predecessor current with no trace; a visible, recorded, same-slot, in-effect successor along an edge the reader may see never does on an acyclic chain (a cycle through hidden claims is Surface's rule); an ambiguous hidden id on the chain makes it unverifiable in any file order), edge visibility, valid-time and knowledge-time as-of, Surface freshness boundary, per-result reasons, whole-result budget boundaries, Survey support-verification abstention (thin support, throwing/timing-out/malformed verifier, unreadable/empty/oversized evidence, required verifier), result-validator consistency, and proposals-only containment."
     }
   ],
   "skills": [
