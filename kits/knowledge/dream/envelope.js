@@ -6,7 +6,8 @@
  * JSON envelope, so a proposal read back from the store is a claim again, and
  * the claim's content-addressed id refuses a body edited after the fact.
  *
- * Corpus has no idempotency key yet (corpus#45) and a model is not
+ * Corpus keys a create request by the sitting and the candidate's position
+ * (#1573) and refuses a different candidate at a taken key, and a model is not
  * deterministic, so a retry must not re-extract a sitting that a failed run
  * half-proposed: it would word the claims differently. Every envelope of a
  * sitting therefore carries the sitting's whole `plan`: the ordered claims the

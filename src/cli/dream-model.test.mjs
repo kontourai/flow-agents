@@ -93,7 +93,7 @@ test("the Relay shim tells the model to index list items, because a real model g
   const fake = new FakeModelRuntime([{ provider: "fake", model: "m", outputText: "", usage: {}, latencyMs: 1, toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: { proposals: [] } }], stopReason: "tool_use" }]);
   await (await createRelayExtractionProvider({ runtime: fake })).extract({ content: "x", contentType: "text", targetSchema: [{ path: "claims[].subject", type: "string" }] });
   const sent = fake.requests[0].messages[0].content;
-  assert.match(sent, /containing \[\] names a list/);
+  assert.match(sent, /contains \[\], that path names a list, and the exact path to write has a zero-based index/);
   assert.match(sent, /claims\[0\]\.subject and claims\[0\]\.value describe the first claim, claims\[1\]\.subject the second/);
 });
 
