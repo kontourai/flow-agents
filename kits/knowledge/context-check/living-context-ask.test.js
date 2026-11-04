@@ -457,6 +457,26 @@ describe("review: what ask returns respects the reader and the knowledge instant
     assert.equal(result.outcome, "abstained");
   });
 
+  test("a successor the reader may not see is not followed, named or quoted, and the predecessor stays current for them", async () => {
+    const m = await track(async ({ put }) => { put("docs/quartz.md", "Quartz pricing is flat.\n"); put("docs/zirconium.md", "Zirconium pricing is tiered.\n"); return {}; });
+    const claim = (id, extra) => ({ id, claim: `${id} pricing`, status: "current", authority: { path: id === "mem-a" ? "docs/quartz.md" : "docs/zirconium.md", citation: id }, owning_source: { owner: "o", path: "docs/quartz.md" }, affected_surfaces: ["docs/quartz.md"], recorded_at: "2026-10-01T00:00:00Z", slot: "pricing", ...extra });
+    const record = (id, body, title) => ({ claim_id: id, path: id === "mem-a" ? "docs/quartz.md" : "docs/zirconium.md", title, type: "memory-claim", category: "memory.claim", tags: [], record_status: "stated", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", body });
+    const source = {
+      manifest: { readers: ["alice", "bob"], claims: [
+        claim("mem-a", { visibility: { audiences: ["alice", "bob"] }, status: "superseded", superseded_by: "mem-z", supersession_kind: "succession", supersession_recorded_at: "2026-10-02T00:00:00Z" }),
+        claim("mem-z", { visibility: { audiences: ["alice"] }, recorded_at: "2026-10-02T00:00:00Z" }),
+      ] },
+      records: [record("mem-a", "Quartz pricing is flat.\n", "Quartz pricing"), record("mem-z", "Zirconium pricing is tiered.\n", "Hidden successor title")],
+    };
+    const ask2 = (reader) => askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "Quartz pricing flat", reader, readers: ["alice", "bob"], now: NOW, verifier, additional: [source] });
+    const bob = await ask2("bob");
+    assert.equal(JSON.stringify(bob.results).match(/Hidden successor|zirconium|mem-z/i), null, JSON.stringify(bob.results));
+    assert.equal(bob.results[0].status, "current", "a successor Bob cannot see leaves the predecessor current for him");
+    const alice = await ask2("alice");
+    assert.ok(alice.results.some((entry) => entry.claim_id === "mem-z" && entry.via === "successor_of:mem-a"));
+    assert.equal(alice.results.find((entry) => entry.claim_id === "mem-a").status, "superseded");
+  });
+
   test("a reader the host did not declare is refused before any selection", async () => {
     const m = await track(async ({ make }) => ({ a: await make("2026-10-01T00:00:00.000Z", { title: "Canary note", body: "Canary details.\n" }) }));
     await assert.rejects(askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "canary details", reader: "stranger", readers: ["alice"], now: NOW, verifier }), (cause) => cause.code === "UNKNOWN_READER_IDENTITY");
@@ -541,6 +561,8 @@ describe("review: the verifier supports only what the document says", () => {
 
   test("literal code is compared as written: markers inside a code span are not emphasis", async () => {
     assert.equal(await verdict("Set `allow` to true.", "Set `_allow` to true."), "not-addressed");
+    assert.equal(await verdict("Set allow to true.", "Set `*allow*` to true."), "not-addressed", "emphasis markers inside code are code");
+    assert.equal(await verdict("Set allow to true.", "Set *allow* to true."), "supported", "the same markers outside code are formatting");
     assert.equal(await verdict("Rotate api_key", "Rotate `api_key_`."), "not-addressed");
     assert.equal(await verdict("Use admin as the prefix.", "Use *admin as the prefix."), "not-addressed", "an unpaired marker is a character, not formatting");
     assert.equal(await verdict("Set `_allow` to true.", "Set `_allow` to true."), "supported");
@@ -554,18 +576,18 @@ describe("review: the verifier supports only what the document says", () => {
     assert.equal(await verdict("Production grants access.", "# No access\nProduction grants access.\n"), "supported");
     assert.equal(await verdict("Government may approve access.", "Only the U.S. Government may approve access.\n"), "not-addressed");
     assert.equal(await verdict("Only the U.S. Government may approve access.", "Only the U.S. Government may approve access.\n"), "supported");
-    assert.equal(await verdict("Grant access.", "````\nGrant\n```\naccess.\n````\n"), "not-addressed", "prose inside a four-backtick fence is not a paragraph");
+    assert.equal(await verdict("Grant access.", "````\n```\nGrant\naccess.\n```\n````\n"), "not-addressed", "prose inside a four-backtick fence is not a paragraph, even after a shorter fence line");
   });
 
   test("the cost of judging a statement is bounded by the document, not quadratic in it", async () => {
-    const sentences = Array.from({ length: 800 }, (_, i) => `Item ${i} stays.`).join(" ");
+    const sentences = Array.from({ length: 4500 }, (_, i) => `Item ${i} stays.`).join(" ");
     let started = Date.now();
     assert.equal(await verdict("Nothing here matches this at all.", sentences), "not-addressed");
-    assert.ok(Date.now() - started < 2000, `800 sentences took ${Date.now() - started} ms`);
+    assert.ok(Date.now() - started < 2000, `4500 sentences took ${Date.now() - started} ms`);
     started = Date.now();
     assert.equal(await verdict("No match.", `${"[a ".repeat(20000)}\n`), "not-addressed");
     assert.ok(Date.now() - started < 2000, `unmatched brackets took ${Date.now() - started} ms`);
-    assert.equal(await verdict("Item 799 stays.", sentences), "supported");
+    assert.equal(await verdict("Item 4499 stays.", sentences), "supported");
     assert.equal(await verdict("Item 3 stays. Item 4 stays. Item 5 stays.", sentences), "supported");
     assert.equal(await verdict("Item 3 stays. Item 5 stays.", sentences), "not-addressed");
   });
