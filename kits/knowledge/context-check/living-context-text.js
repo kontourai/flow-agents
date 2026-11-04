@@ -29,14 +29,10 @@ const EMPHASIS = [
   [/~~(?=\S)([^~\n]{1,2000}?)(?<=\S)~~/g, "$1"],
 ];
 
-/** Emphasis and links that are formatting. Markers without a partner are characters and stay. Inner emphasis goes first, so a nested pair is stripped on the second pass. */
+/** Emphasis and links that are formatting. Markers without a partner are characters and stay. Single-marker emphasis goes before double, so a nested pair is stripped in one pass. */
 function stripFormatting(text) {
   let current = text;
-  for (let pass = 0; pass < 3; pass++) {
-    const before = current;
-    for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
-    if (current === before) break;
-  }
+  for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
   return current;
 }
 
