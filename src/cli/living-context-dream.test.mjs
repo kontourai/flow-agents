@@ -55,4 +55,11 @@ test("claims a dream run staged are asked about through recall: answered from th
 
   const stranger = await askLivingContext({ repoRoot: repo, revision, question: "What is the rounding mode?", reader: "someone-else", readers: [...readers, "someone-else"], now: "2026-11-05T00:00:00Z", verifier: createLineSupportVerifier(), additional: [derived] });
   assert.ok(!stranger.results.some((entry) => entry.outcome === "answered"), "claims stamped for the owner are not answered to anyone else");
+  // ...and nothing of them is returned at all: no title, excerpt, file, id or near miss.
+  const leaked = JSON.stringify({ results: stranger.results, below: stranger.below_threshold });
+  for (const claim of claims) {
+    assert.ok(!leaked.includes(claim.source.excerpt) && !leaked.includes(claim.id.replace(/^sha256:/, "")), "no excerpt or claim id");
+  }
+  assert.ok(!leaked.includes("sittings/") && !leaked.includes("[stated"), "no file or title");
+  assert.deepEqual(stranger.results, []);
 });

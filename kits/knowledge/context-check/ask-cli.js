@@ -25,6 +25,7 @@ const USAGE = `usage: ask-cli.js --repo <dir> --revision <full sha> --reader <id
   --min-coverage          share of the question's words a record must match (default 0.6)
   --min-passage-coverage  share of the question's words the quoted sentence and title must match (default 0.5)
   --budget      size limit of the result in tokens (default 4000); larger results are dropped whole
+  --nomination-budget  size limit, in tokens, of the step that looks up newer records (default 1000000)
   --json        print the full result instead of the summary
   --manifest    print how each record was read, and what was skipped, instead of asking
   --help        print this text`;
@@ -32,7 +33,7 @@ const USAGE = `usage: ask-cli.js --repo <dir> --revision <full sha> --reader <id
 const ABSTAIN_WHY = {
   no_record_covers_question: "no record has enough of your question's words",
   no_question_terms: "the question has only common words; add the specific nouns",
-  no_record_known_at_now: "no record existed at --now; set --now to a later time",
+  no_record_visible_at_now: "no record you may read existed at --now; check --readers, or set --now to a later time",
   nothing_answerable_nominated: "nothing that matched can be answered from",
 };
 const ITEM_WHY = {
@@ -48,19 +49,20 @@ function render(result) {
   const lines = [
     `Q: ${result.question}`,
     `   Read "${result.store}" at commit ${result.revision.slice(0, 12)} as of ${result.as_of}, for reader ${result.reader}.`,
-    `   Searched for: ${result.terms.join(", ") || "(nothing)"}. Records: ${result.store_stats.claims} read, ${result.store_stats.known_at_now ?? result.store_stats.claims} known at that time, ${result.store_stats.excluded} skipped.`,
+    `   Searched for: ${result.terms.join(", ") || "(nothing)"}. Records: ${result.store_stats.claims} read, ${result.store_stats.visible_at_now ?? result.store_stats.claims} readable at that time, ${result.store_stats.excluded} skipped.`,
   ];
   const reasons = new Map();
   for (const entry of result.excluded) reasons.set(entry.reason, (reasons.get(entry.reason) ?? 0) + 1);
   if (reasons.size) lines.push(`   Skipped: ${[...reasons].map(([reason, count]) => `${reason} x${count}`).join(", ")}.`);
   if (result.nominations_truncated) lines.push(`   WARNING: ${result.nominations_truncated} more matching records were not checked (limit of 200 reached). Narrow the question.`);
-  if (result.successors_unresolved) lines.push(`   WARNING: could not find the newer record for ${result.successors_unresolved.length} replaced records (${result.successors_unresolved.slice(0, 3).join(", ")}${result.successors_unresolved.length > 3 ? ", ..." : ""}). They may appear without what replaced them.`);
+  if (result.successors_unresolved) lines.push(`   WARNING: could not check for newer records for ${result.successors_unresolved.length} matching records (${result.successors_unresolved.slice(0, 3).join(", ")}${result.successors_unresolved.length > 3 ? ", ..." : ""}). A replaced record may be listed without what replaced it.`);
   if (result.abstained) {
     lines.push(`A: ABSTAINED - ${ABSTAIN_WHY[result.abstained] ?? result.abstained} (${result.abstained})`);
     for (const near of result.below_threshold) lines.push(`   Nearest miss: ${near.id} (matched ${near.matched.join(", ")}; covers ${near.coverage} of the question, needs ${result.min_coverage ?? 0.6}).`);
     return lines.join("\n");
   }
-  lines.push(result.outcome === "answered" ? "A: ANSWERED - at least one record states the sentence quoted below." : "A: ABSTAINED - no record states a sentence that answers it.");
+  const allDropped = result.results.length > 0 && result.results.every((item) => item.reason === "dropped_by_budget");
+  lines.push(result.outcome === "answered" ? "A: ANSWERED - at least one record states the sentence quoted below." : allDropped ? "A: ABSTAINED - every result was too large for --budget; raise it." : "A: ABSTAINED - no record states a sentence that answers it.");
   for (const item of result.results) {
     const answered = item.outcome === "answered";
     const why = answered ? "" : ` - ${ITEM_WHY[item.reason] ?? item.reason}`;

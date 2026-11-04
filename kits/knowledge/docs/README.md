@@ -468,7 +468,7 @@ node kits/knowledge/context-check/ask-cli.js \
 ```
 Q: What is the CI compute policy?
    Read "knowledge" at commit 686eaad9d01d as of 2026-11-05T23:00:00Z, for reader me.
-   Searched for: ci, compute, policy. Records: 3 read, 3 known at that time, 0 skipped.
+   Searched for: ci, compute, policy. Records: 3 read, 3 readable at that time, 0 skipped.
 A: ANSWERED - at least one record states the sentence quoted below.
   - ANSWERED: CI compute policy: no repository-wide caps
       from knowledge/records/83b90dc8-....md [current], updated 2026-10-05T11:00:00.000Z
@@ -481,7 +481,7 @@ A: ANSWERED - at least one record states the sentence quoted below.
       context only, not an answer: "Flow Agents bounds CI compute with four repository-wide queue groups."
 ```
 
-- `Q:` and the two lines under it: your question; the commit, store folder, time and reader used; the words searched for; and how many records were read, existed at that time, or were skipped.
+- `Q:` and the two lines under it: your question; the commit, store folder, time and reader used; the words searched for; and how many records were read, were readable at that time, or were skipped.
 - `A: ANSWERED` means at least one record answered. `A: ABSTAINED` means none did.
 - Each `-` line is one record: its outcome, the reason when it did not answer, then its title.
 - `from <file> [status]` is the record file. Open it to check the sentence. The status is `current`, `superseded` or `unverifiable`. The date is its last update.
@@ -496,14 +496,14 @@ When it abstains, the line after `A: ABSTAINED` gives the reason:
 | Reason | What it means | What to do |
 |---|---|---|
 | `no_record_covers_question` | No record has enough of your question's words. The nearest misses are listed. | Use the words your records use. It matches words, not meaning. |
-| `no_record_known_at_now` | No record existed at `--now`. | Set `--now` to a later time. |
+| `no_record_visible_at_now` | No record you may read existed at `--now`. | Check `--readers`, or set `--now` to a later time. |
 | `no_question_terms` | The question had only common words. | Add the specific nouns. |
 | `no_passage_on_question` | A current record matched, but no single sentence in it does. | Open the file and read it, or ask with words from its body. |
 | `not_current` | The record was replaced, retired, or has an unknown status. | Read the newer record if one is listed. |
 | `dropped_by_budget` | The result was too large for `--budget`. | Raise `--budget`. |
 | `not_addressed`, `evidence_*` | The answer check did not confirm the sentence. | Open the file and read it. |
 
-A line starting `WARNING:` means the list is incomplete (more matches than the limit, or a replacement could not be looked up). Narrow the question.
+A line starting `WARNING:` means the list is incomplete (more matches than the limit, or the check for newer records could not run). Narrow the question.
 
 #### How a record is read
 

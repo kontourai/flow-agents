@@ -836,7 +836,7 @@ describe("review round 5", () => {
     assert.doesNotMatch(plain.stdout, /WARNING/);
     const starved = spawnSync(process.execPath, [cli, ...base, "--nomination-budget", "1", "What is the CI compute policy?"], { encoding: "utf8" });
     assert.equal(starved.status, 0, starved.stderr);
-    assert.match(starved.stdout, /WARNING: could not find the newer record for \d+ replaced records/);
+    assert.match(starved.stdout, /WARNING: could not check for newer records for \d+ matching records/);
   });
 
   test("the CLI explains itself: --help, a missing or wrong store, a short commit, an unknown reader, and a time before any record", async () => {
@@ -859,8 +859,8 @@ describe("review round 5", () => {
     assert.match(stranger.stderr, /reader "stranger" is not in --readers \(maintainer, other\)/);
     const early = run("--repo", s.repo, "--revision", s.revision, "--reader", "maintainer", "--now", "2020-01-01T00:00:00Z", "What is the CI compute policy?");
     assert.equal(early.status, 0, early.stderr);
-    assert.match(early.stdout, /A: ABSTAINED - no record existed at --now; set --now to a later time \(no_record_known_at_now\)/);
-    assert.match(early.stdout, /0 known at that time/);
+    assert.match(early.stdout, /A: ABSTAINED - no record you may read existed at --now; check --readers, or set --now to a later time \(no_record_visible_at_now\)/);
+    assert.match(early.stdout, /0 readable at that time/);
   });
 
   test("exclusions of further sources are reported by reason, without naming the claims", async () => {
@@ -984,6 +984,8 @@ describe("the block layer: a flat document is read as prose, anything contextual
       ["a nested list", "- Parent\n  - Child **x**\n  continues here.\n", "Child x continues here."],
       ["a loose list item's next paragraph", "- Parent\n\n  The **key** is\n  reserved.\n2) Another **item**\n", "The key is reserved. 2) Another item"],
       ["the same with CRLF", "- Parent\r\n\r\n  The **key** is\r\n  reserved.\r\n2) Another **item**\r\n", "The key is reserved. 2) Another item"],
+      ["a heading inside a list item", "- P\n  # H\n  The **key** is reserved.\n", "H The key is reserved."],
+      ["a rule inside a list item", "- P\n  ***\n  **A**.\n2) **B**\n", "A. 2) B"],
       ["an indented paragraph after a heading", "# Title\n  The **key** is reserved.\n", "The key is reserved."],
       ["indented code", "Intro.\n\n    The **key** is\n    reserved.\n", "The key is reserved."],
       ["an indented code marker after a bullet", "-     The **key** is\n      reserved.\n", "The key is reserved."],
@@ -1028,6 +1030,11 @@ describe("the block layer: a flat document is read as prose, anything contextual
       assert.equal(await verdict(`Enable signing.${space}#`, `# **Enable** signing.${space}#\n\nBody.\n`), "supported", `the hash stays text after ${JSON.stringify(space)}`);
     }
     assert.equal(await verdict("Enable signing.", "# **Enable** signing. #\r\n"), "supported", "...but a space does close it, with CRLF too");
+    // The opening hashes are separated from a closing sequence by the same space: an empty heading shows nothing.
+    assert.deepEqual(documentUnits("# #\n\nBody.\n").map((unit) => unit.sentences), [[], ["Body."]]);
+    assert.deepEqual(documentUnits("## ###\n").map((unit) => unit.sentences), [[]]);
+    assert.equal(await verdict("#", "# #\n\nBody.\n"), "not-addressed");
+    assert.equal(await verdict("foo#", "# foo#\n\nBody.\n"), "supported", "a hash stuck to the text is text");
     // A claim made only of marker characters stays malformed, as in version 2.
     assert.equal((await verifier.verify({ candidateId: "c", value: "*", evidence: [{ id: "e", excerpt: "> q\n*\n", locator: "l" }] })).result, "abstain");
     assert.equal((await verifier.verify({ candidateId: "c", value: "- > *", evidence: [{ id: "e", excerpt: "- > *\n", locator: "l" }] })).result, "abstain");

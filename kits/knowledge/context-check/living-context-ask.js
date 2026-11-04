@@ -73,9 +73,9 @@ export async function askLivingContext({
   const selection = select({ question, documents, limit, minCoverage, minPassageCoverage });
   // Exclusions of further sources are reported by reason only: their claim ids may name claims this reader may not see.
   const excluded = [...store.excluded, ...additional.flatMap((source) => (source.excluded ?? []).map((entry) => ({ source: "additional", reason: entry.reason })))];
-  const base = { question, revision: store.revision, store: store.store, reader, as_of: now, store_stats: { ...store.stats, excluded: excluded.length, known_at_now: answerable.size }, min_coverage: minCoverage, excluded, terms: selection.terms, below_threshold: selection.below_threshold };
+  const base = { question, revision: store.revision, store: store.store, reader, as_of: now, store_stats: { ...store.stats, excluded: excluded.length, visible_at_now: answerable.size }, min_coverage: minCoverage, excluded, terms: selection.terms, below_threshold: selection.below_threshold };
 
-  if (store.records.length > 0 && answerable.size === 0) return { ...base, outcome: "abstained", abstained: "no_record_known_at_now", results: [] };
+  if (store.records.length > 0 && answerable.size === 0) return { ...base, outcome: "abstained", abstained: "no_record_visible_at_now", results: [] };
   if (selection.terms.length === 0) return { ...base, outcome: "abstained", abstained: "no_question_terms", results: [] };
   if (selection.selected.length === 0) return { ...base, outcome: "abstained", abstained: "no_record_covers_question", results: [] };
 
