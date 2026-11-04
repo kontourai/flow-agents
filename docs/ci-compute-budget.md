@@ -4,102 +4,86 @@ title: CI Compute Budget
 
 # CI Compute Budget
 
-Flow Agents uses four repository-wide native job concurrency groups: two
-slots, each split into two lanes. The groups are
-`flow-agents-compute-v2-1-a`, `flow-agents-compute-v2-1-b`,
-`flow-agents-compute-v2-2-a` and `flow-agents-compute-v2-2-b`. Every
-participating job sets `queue: max` and `cancel-in-progress: false`. The names
-contain no PR, ref, head or attempt identifier; the only run-derived input is
-the lane, described below. Admission happens in GitHub Actions, before a runner
-is assigned; there is no runner-held acquisition loop.
+Flow Agents has **no repository-wide job-level compute cap**. No participating
+job sets `concurrency`. The only concurrency control is each workflow's own
+top-level, per-ref group with `cancel-in-progress: true`, so a new push
+supersedes the older run of the **same ref** and never another branch's run:
 
-## Why there are four groups, named `-v2-`
+| Workflow | Workflow-level group |
+| --- | --- |
+| CI | `flow-agents-ci-${{ github.ref }}` |
+| Docs | `flow-agents-docs-${{ github.ref }}` |
+| Kit Gates Demo | `flow-agents-kit-gates-demo-${{ github.ref }}` |
+| Runtime Compatibility | `flow-agents-runtime-compat-${{ github.ref }}` |
+| Veritas Advisory Governance | `veritas-advisory-${{ github.ref }}` |
 
-On 2026-11-03 a stalled queue head in the single-occupancy groups
-`flow-agents-compute-1` and `flow-agents-compute-2` blocked every participating
-run for about an hour. About 41 runs across all workflows sat `pending` while no
-run was `in_progress`, `queued`, `waiting` or `action_required`. The queue
-resumed after the stuck head was cancelled; it was head-of-line blockage, not a
-permanent lock. The lesson is structural: with one occupant per group, one stuck
-run blocks the whole repository.
+Each group embeds only `github.ref`, always with `cancel-in-progress: true`.
+Runs from different refs do not share a group (GitHub compares group names
+case-insensitively, so two refs differing only by case would), so concurrent PRs
+run side by side; the platform's own runner limits are the only ceiling. The one
+shared group left is the Pages callee's own deployment group, which belongs to
+the pinned callee and not to this policy.
 
-The repository owner decided (2026-11-03) to split each slot into two lanes,
-allowing two concurrent admission units per slot and raising the repository-wide
-peak from 2 to 4 runners. That halves the nominal admission capacity a single stalled
-run can remove (one of four groups, not one of two; the share of work actually
-delayed depends on how run IDs fall across lanes) and doubles admission capacity (actual throughput still depends on the workload and on how
-run IDs fall across lanes). The groups were renamed to `flow-agents-compute-v2-…` so that runs
-created under the old workflow revisions, which may still be pending in the
-retired groups, cannot share a queue with the new ones; the policy refuses the
-retired names if they reappear.
+## Why there is no cap
 
-### Lane assignment
+The repository previously bounded participating compute with native job-level
+concurrency groups using `queue: max`: first two groups
+(`flow-agents-compute-1` and `-2`, each admitting one job), then, after a stall
+on 2026-11-03, four (`flow-agents-compute-v2-{1,2}-{a,b}`, a lane chosen by
+run-ID parity). Admission stalled repeatedly on 2026-11-03 and 2026-11-04. A
+stalled queue head blocked every participating run for about an hour, and after
+the groups were renamed and widened, runs still sat `pending` for roughly 25
+minutes while every group in their lane was empty and only one job ran
+repository-wide. Cancelling superseded runs did not restore admission. A shared
+queue that can stall by itself turns one bad run into a repository-wide outage.
 
-A slot's lane is chosen per run, without arithmetic, from the parity of
-`github.run_id`:
+The repository is public, so GitHub-hosted minutes are free. The cap protected
+no cost, and its failure mode cost far more than it saved. The owner therefore
+decided (2026-11-04) to remove all job-level concurrency and keep only per-ref
+supersession, which also stops superseded commits from occupying runners (the
+Veritas advisory workflow now has the same per-ref group as CI).
 
-```yaml
-group: flow-agents-compute-v2-<slot>-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-```
-
-An even run ID selects lane `a`; an odd one selects lane `b`. All jobs of one
-run therefore land in the same lane of their respective slots, and a re-run of
-that run keeps the lane. The expression reads only `github.run_id`: it embeds no
-PR number, ref, head SHA or run attempt, so distinct PRs and branches share the
-same four groups. Nothing in the name is per PR or per head, so no PR gets a private group; distinct runs of one head can occupy both lanes of a slot. Lanes are
-statistical, not balanced; consecutive runs can land in the same lane.
-`scripts/ci/compute-policy.mjs` accepts exactly this string for slots 1 and 2
-and refuses every other group name, a fifth group, a changed expression, a
-missing `queue: max` and `cancel-in-progress: true`.
+This changes the earlier guarantee: there is no bound on concurrent
+participating runners other than the platform's. Runs created under older
+workflow revisions may still sit `pending` in the retired
+`flow-agents-compute-*` groups; they are not retroactively released by this
+change and can be cancelled.
 
 ## Participating inventory
 
-Slot numbers below are the assignment in `scripts/ci/compute-policy.mjs`; each
-slot has lanes `a` and `b` as described above.
+| Workflow | Job or matrix child | Expanded runners |
+| --- | --- | --- |
+| CI | secret-scan | gitleaks (1) |
+| CI | source-and-static | 1 |
+| CI | workflow-contracts | 1 |
+| CI | runtime-and-kit | 1 |
+| CI | integration-coverage | 1 |
+| CI | usage-feedback | 1 |
+| CI | windows-hook-smoke | 1 |
+| Runtime Compatibility | harness-canary / opencode | 1 |
+| Runtime Compatibility | harness-canary / pi | 1 |
+| Runtime Compatibility | framework-sdk-canary | 1 |
+| Runtime Compatibility | report (failure only) | 1 |
+| Veritas Advisory Governance | readiness (full existing readiness) | 1 |
+| Docs | gate | docs-gate (1) |
+| Docs | pages (push/manual only) | build then deploy (2 sequential) |
+| Kit Gates Demo | release-evidence-gate-demo | 1 |
 
-| Workflow | Caller job or matrix child | Slot | Expanded runners |
-| --- | --- | --- | --- |
-| CI | secret-scan | 1 | gitleaks (1) |
-| CI | source-and-static | 2 | 1 |
-| CI | workflow-contracts | 1 | 1 |
-| CI | runtime-and-kit | 2 | 1 |
-| CI | integration-coverage | 1 | 1 |
-| CI | usage-feedback | 2 | 1 |
-| CI | windows-hook-smoke | 1 | 1 |
-| Runtime Compatibility | harness-canary / opencode | 1 | 1 |
-| Runtime Compatibility | harness-canary / pi | 1 | 1 |
-| Runtime Compatibility | framework-sdk-canary | 2 | 1 |
-| Runtime Compatibility | report (failure only) | 1 | 1 |
-| Veritas Advisory Governance | readiness (full existing readiness) | 2 | 1 |
-| Docs | gate | 1 | docs-gate (1) |
-| Docs | pages (push/manual only) | 2 | build then deploy (2 sequential) |
-| Kit Gates Demo | release-evidence-gate-demo | 1 | 1 |
-
-This is 15 admission units covering 16 expanded runner jobs. At most one
-admission unit runs in each group, there are `2 slots × 2 lanes = 4` groups, and
-each unit holds at most one runner at a time. Therefore the participating peak
-across **all PRs and compatibility runs together** is
-`2 × 2 × 1 = 4` runners (it was `2` before the lane split). Matrix children each
-contend for their assigned group; a per-run `max-parallel` would not establish
-this repository-wide bound. A caller holding a slot while Pages changes stages
-can reduce utilization, but cannot increase the peak.
+This is 15 participating jobs (counting matrix children) covering 16 expanded
+runner jobs. The inventory remains a reviewed classification rather than a
+bound: a new workflow or job fails the policy check until its participation or
+exclusion is classified, so growth stays visible in review.
 
 Promptfoo offline compatibility is a step inside the existing Workflow Contracts
-job, so it shares slot 1 rather than creating another admission unit or runner.
-Its verification command is registered in the baseline check inventory, the
-workflow-contracts lane and that job's steps together. Adding a check within a
-job can increase its slot occupancy time; it does not change the four-group peak.
-Changes that add a job or expand a reusable caller instead require a new
-participation and runner-width review.
+job. Its verification command is registered in the baseline check inventory,
+the workflow-contracts lane and that job's steps together.
 
 The delegation rounds public-contract check is a step in Source and Static,
 registered as `delegation-rounds-public-contract` in the baseline inventory and
 that lane. It runs the rounds owner tests with the shared unit-test state
-preload. It adds slot-2 occupancy, not a job, admission unit, or runner. The
-existing lane finalizer still determines success from its recorded checks;
-`continue-on-error` on an individual step does not turn a failed check into
-passing lane evidence. Current hosted duration must be measured separately;
-the earlier timing estimate below predates this additional step.
+preload. The existing lane finalizer still determines success from its recorded
+checks; `continue-on-error` on an individual step does not turn a failed check
+into passing lane evidence.
 
 The security scan, docs gate and Pages callees are pinned to shared-workflow
 commit `fd058ed6fcc780d60cc22e26d8c327281a197932`. Full Veritas readiness retains
@@ -107,19 +91,10 @@ its existing `ea4c99c803a565f56cd18abbf9041f3467d1ee93` pin. Exact downloaded
 callee snapshots and SHA-256 digests are retained under
 `evals/fixtures/ci-compute/`. These are evidence fixtures, not alternative
 workflow implementations. The source validator rejects mutable or unknown
-pins, nested reusable calls, matrices in callees, and any pair of callee jobs
-without an ordering dependency. Pages' separate deployment concurrency group
-does not match any caller group, avoiding same-group caller/callee nesting.
+pins, nested reusable calls, matrices in callees, any pair of callee jobs
+without an ordering dependency, and any callee `concurrency` other than Pages'
+own deployment group, so a pinned callee cannot reintroduce a shared queue.
 Updating a pin requires retaining and reviewing its new expansion.
-
-The bound applies to runs using these workflow revisions. Already-created runs
-and older PR workflow revisions are not retroactively enrolled. During rollout,
-legacy work (including runs still pending in the retired `flow-agents-compute-1`/`-2` groups) can overlap the participating jobs and exceed four total runners;
-this source change alone is not proof of a live repository-wide ceiling.
-This is a cooperative repository source policy, not an organization security
-boundary: a writer who can change workflows can also propose changing the budget.
-Regression checks reject candidate bypasses; they cannot remove already-admitted
-legacy jobs.
 
 ## Job execution deadlines
 
@@ -135,67 +110,58 @@ The remaining checks took 23 seconds in the preceding successful main
 with about two more seconds for finalization and upload. Combining those
 measurements projects roughly 15m24s, leaving about 14m36s under the new limit.
 This is a budget estimate, not proof that the repaired head passes hosted CI.
-The change preserves every check and the slot/lane concurrency bound; a longer
-deadline can increase slot occupancy without increasing peak runners.
 
-## Queue and cancellation limits
+## Cancellation
 
-GitHub allows one running admission and up to 100 pending entries per group.
-FIFO is by arrival at that group, not PR creation time or workflow start time.
-An additional entry at a full queue is cancelled; that is a nonpassing result,
-not evidence that its checks ran. Each of the four groups orders independently.
-This does not promise globally balanced service, equal PR shares, or a maximum
-wait. A busy group can have a backlog while the others are idle.
-
-CI retains its existing per-ref workflow concurrency and latest-head
-cancellation. A new CI run can cancel older CI work for the same ref, including
-a same-head duplicate; there is no new controller or exact-once guarantee.
-Docs, readiness and demo retain their existing duplicate/cancellation behavior.
-Shared slot groups never cancel another PR to make space. Cancellation and
-runner teardown remain platform behavior requiring hosted observation.
+CI, Docs, Kit Gates Demo, Runtime Compatibility and Veritas advisory each cancel
+an older in-progress or pending run of the same ref when a new run starts for
+that ref, including a same-head duplicate; there is no exact-once guarantee. A
+push to `main` supersedes an older in-progress `main` run of the same workflow.
+For Docs this can cancel the build or the deployment of the superseded commit:
+the callee's own `cancel-in-progress: false` deployment group does not stop its
+parent run being cancelled, and the deploy action cancels an active deployment
+on a cancellation signal. If the replacement run then fails its docs gate,
+nothing is published until a later successful run, so a stale site is possible
+in that window. Merge-queue runs use unique refs and are never cancelled by
+other entries. Cancellation and runner teardown remain platform behavior requiring hosted
+observation.
 
 ## Explicit exclusions
 
 The `publish-npm.yml` verification and publication jobs, the `release-please.yml`
 release controller, and the `add-to-project.yml` issue automation caller are
-outside this participating budget. They retain their existing ownership and
-triggers. Total repository compute, organization capacity, and other repositories
-can exceed four. This policy reserves no organization slots and requires no paid
-capacity. A new workflow or job fails classification until its participation or
-exception is reviewed; the current excluded workflows cannot acquire PR triggers
-without changing the policy.
+outside the participating inventory. They retain their existing ownership,
+concurrency and triggers. A new workflow or job fails classification until its
+participation or exception is reviewed; the current excluded workflows cannot
+acquire PR triggers without changing the policy.
 
-## Validation and remaining proof
+## Validation
 
 `bash evals/static/test_ci_compute_policy.sh` runs through the existing static
 suite and required CI evidence path. It validates original YAML, immutable
-callee expansion, all matrix children, and mutation cases for a third group,
-ref splitting, the retired group names, a fifth group (third slot or third
-lane), a changed or inverted parity expression, lane inputs drawn from PR, ref,
-head SHA or run attempt, missing jobs/admission/queue, cross-PR cancellation,
-mutable pins, unclassified PR compute and callee growth. It also pins the
-parity expression and checks that it maps run IDs to exactly two lanes. Its
-finite model exhausts every completion interleaving in 132 scenarios containing
-two PR graphs and runtime compatibility, with both job orders, all six
-caller-batch arrival orders and eleven lane assignments (eight with one lane per
-owner, three giving each workflow run of an owner its own lane), and asserts a
-model peak of exactly four concurrent runners.
-Separate model cases cover FIFO, overflow, duplicate work and cross-head
-cancellation. This is bounded model evidence, not exhaustive platform evidence.
+callee expansion and all matrix children. The policy is the inverse of the
+earlier admission rule:
+
+- every participating workflow has exactly its pinned per-ref group with
+  `cancel-in-progress: true`; a missing group, `cancel-in-progress` false,
+  omitted or non-boolean, a group not keyed on `github.ref` alone, or an
+  extra key is refused;
+- no participating job has `concurrency` of any shape, including the retired
+  `flow-agents-compute-*` names, `queue`, a bare string or an empty block. The
+  tests reintroduce one on every participating job and require the refusal;
+- unclassified workflows or jobs, PR triggers on excluded workflows, matrix
+  growth, mutable callee pins and callee concurrency are refused.
+
+The checker CLI compares real paths for its entry-point guard, so a symlinked
+invocation path cannot make it skip validation silently.
 
 For local workflow syntax validation run `node scripts/ci/actionlint-compute.mjs`
-with actionlint installed. The compatibility path validates the complete known
-admission shapes on original YAML, then removes only their `queue` properties
-from private temporary lint copies for actionlint 1.7.12. Workflow expressions,
-needs, matrix and reusable-call keyword validation still run. It does not edit
-the source or rewrite arbitrary unknown queue shapes. Security and policy checks
-always consume original YAML. No extra dependency engine is introduced.
+with actionlint installed. It runs the policy on the original YAML, then
+actionlint on the real workflow files: no workflow uses a key actionlint cannot
+parse, so no lowered copies are made. Workflow expressions, needs, matrix and
+reusable-call keyword validation run.
 
-GitHub documents [job concurrency](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idconcurrency)
-and [concurrency on reusable calls](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#supported-keywords-for-jobs-that-call-a-reusable-workflow).
-Source/schema/model checks do not prove runner admission on the hosted platform.
-**Hosted job-level queue admission for this Flow policy is NOT_VERIFIED** until
-candidate runs demonstrate cross-PR and matrix/reusable waiting before runner
-assignment. No dispatch, unchanged-head rerun or auto-merge arming is needed to
-prepare this policy. Existing required check names, evidence scopes, security
-permissions, triggers and checkout identities remain intact.
+GitHub documents [workflow and job concurrency](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency).
+Source checks do not prove hosted run start latency; that is confirmed by
+observing candidate runs start promptly. Existing required check names, evidence
+scopes, security permissions, triggers and checkout identities remain intact.
