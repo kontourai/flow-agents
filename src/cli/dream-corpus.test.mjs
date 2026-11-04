@@ -216,7 +216,10 @@ test("the in-test store answers a request key as the real store does: same reque
   assert.equal(await idOf(real), realId);
   assert.equal(await idOf(fake), fakeId, "the same request answers the proposal it made");
   for (const [name, args] of Object.entries(cases)) {
-    assert.equal(await outcome(fake, ...args, { requestKey: "k" }), await outcome(real, ...args, { requestKey: "k" }), name);
+    // Agreement alone could be two stores failing for the same unrelated reason, so each outcome is named.
+    const expected = name === "reordered fields" ? "ok" : "REQUEST_KEY_CONFLICT";
+    assert.equal(await outcome(real, ...args, { requestKey: "k" }), expected, `real: ${name}`);
+    assert.equal(await outcome(fake, ...args, { requestKey: "k" }), expected, `fake: ${name}`);
   }
   assert.equal((await fake.listProposals()).length, 1);
   assert.equal((await real.listProposals()).length, 1);
