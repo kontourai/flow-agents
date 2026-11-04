@@ -1,23 +1,13 @@
 /**
- * Observation-source boundary. Adapters return already-scrubbed Knowledge
- * residues; parsing belongs to Ferry/Thread (kontourai/thread#80). This module
- * never reads or writes a source file or advances a cursor.
+ * Temporary injection seam for Ferry's importObservations API. The host owns
+ * source bytes and must commit the returned cursor atomically with downstream
+ * effects. This shim does not parse files or commit cursors. Replace the
+ * injected importer with the published Ferry API after kontourai/thread#80.
  */
-import { readFileSync } from 'node:fs';
-import { validate } from '../providers/lib/schema-validate.js';
-
-const schema = JSON.parse(readFileSync(new URL('../schemas/knowledge/residue.schema.json', import.meta.url), 'utf8'));
-const MAX_RESIDUES = 1000;
-
-export async function readObservationResidues(adapter, cursor = {}) {
-  if (!adapter || typeof adapter.read !== 'function') throw new TypeError('observation adapter must supply read');
-  if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) throw new TypeError('observation cursor must be an object');
-  const result = await adapter.read(structuredClone(cursor));
-  if (!result || !Array.isArray(result.residues) || result.residues.length > MAX_RESIDUES || !result.cursor || typeof result.cursor !== 'object' || Array.isArray(result.cursor)) throw new Error('invalid observation adapter result');
-  const seen = new Set();
-  for (const residue of result.residues) {
-    if (!validate(residue, schema).valid || residue.source !== 'runtime-session' || seen.has(residue.sittingId)) throw new Error('invalid or duplicate observation residue');
-    seen.add(residue.sittingId);
-  }
-  return structuredClone(result);
+export function importObservationSource(importer, data, options) {
+  if (typeof importer !== 'function') throw new TypeError('observation importer must be a function');
+  if (!options || typeof options.sourceId !== 'string' || !options.sourceId.trim()) throw new TypeError('sourceId must be a non-empty string');
+  // Ferry owns parsing, cursor validation, omission limits and replay checks.
+  // Copy the options so an adapter cannot mutate the caller's saved cursor.
+  return importer(data, structuredClone(options));
 }

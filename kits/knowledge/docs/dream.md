@@ -26,7 +26,7 @@ An instinct is a learned pattern. The dream run does not yet write an instinct c
 
 Proposals with a score use envelope version 1.3; existing proposals without one remain version 1.2. A version that only reads 1.2 cannot read a 1.3 proposal unless that proposal is rejected. Applied 1.3 proposals may prevent rollback; the path for resolving an applied proposal has not been verified. Do not roll back until an operator has checked every 1.3 proposal and confirmed a recovery path. This temporary field does not migrate instincts or create compiled records. Remove it after the upstream store contract and migration are in place.
 
-The temporary observation adapter (`instincts/observation-source.js`) accepts session records that already match the residue schema; the caller tracks how far it has read. Its only adapter is a test fixture. It is not connected to the dream runner and cannot read observation files. Replace it with the importer tracked by [Thread #80](https://github.com/kontourai/thread/issues/80), then integrate its cursor with the dream transaction.
+The temporary observation adapter (`instincts/observation-source.js`) follows the `importObservations(data, { sourceId, cursor, maxMalformed })` API merged in [Thread #81](https://github.com/kontourai/thread/pull/81). It currently uses a fixture importer in tests and cannot read observation files. The host must save the returned cursor atomically with downstream effects. Once the Ferry release is published, replace the fixture seam with that importer and connect its events and cursor to the dream transaction.
 
 ## The run
 

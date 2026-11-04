@@ -1,30 +1,27 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { readObservationResidues } from './observation-source.js';
+import { importObservationSource } from './observation-source.js';
 
-const fixture = JSON.parse(readFileSync(new URL('../promote/fixtures/runtime-residue-669.json', import.meta.url), 'utf8'));
-// Fixture adapter only: never interprets observation files or writes cursors.
-const fixtureAdapter = { async read(cursor) { return { residues: cursor.done ? [] : [fixture], cursor: { done: true } }; } };
-test('fixture adapter returns the existing residue contract and does not mutate its input cursor', async () => {
-  const cursor = {}; const result = await readObservationResidues(fixtureAdapter, cursor);
-  assert.equal(result.residues[0].sittingId, fixture.sittingId); assert.deepEqual(cursor, {});
-  assert.deepEqual((await readObservationResidues(fixtureAdapter, result.cursor)).residues, []);
+// Fixture only: supplies an already-constructed Ferry result and parses no data.
+function fixtureImporter(data, options) {
+  assert.equal(data, 'fixture input');
+  return { events: [{ id: 'event-id', sourceId: options.sourceId, ordinal: 1, timestamp: '2026-01-01T00:00:00Z', session: 'session', projectId: 'project', projectName: 'project', event: 'tool_start', tool: 'tool' }], malformed: 0, partial: 0, cursor: { version: 1, sourceId: options.sourceId, lines: 1, digest: 'a'.repeat(64) } };
+}
+test('the fixture importer uses the merged Ferry API shape', () => {
+  const result = importObservationSource(fixtureImporter, 'fixture input', { sourceId: 'fixture' });
+  assert.equal(result.events[0].sourceId, 'fixture');
+  assert.deepEqual(result.cursor, { version: 1, sourceId: 'fixture', lines: 1, digest: 'a'.repeat(64) });
+  assert.equal(result.malformed, 0); assert.equal(result.partial, 0);
 });
-test('invalid and duplicate residues fail closed', async () => {
-  await assert.rejects(readObservationResidues({ read: () => ({ residues: [fixture, fixture], cursor: {} }) }), /duplicate/);
-  await assert.rejects(readObservationResidues({ read: () => ({ residues: [{ ...fixture, turns: [] }], cursor: {} }) }), /invalid/);
+test('passes the saved cursor and limits through without letting an importer mutate them', () => {
+  const options = { sourceId: 'fixture', cursor: { version: 1, sourceId: 'fixture', lines: 1, digest: 'a'.repeat(64) }, maxMalformed: 2 };
+  const result = importObservationSource((data, input) => { assert.equal(input.maxMalformed, 2); assert.equal(input.cursor.lines, 1); input.cursor.lines = 2; return { events: [], malformed: 0, partial: 1, cursor: input.cursor }; }, '', options);
+  assert.equal(options.cursor.lines, 1); assert.equal(result.cursor.lines, 2); assert.equal(result.partial, 1);
 });
-
-test('the adapter cannot change the caller cursor', async () => {
-  const cursor = { nested: { offset: 7 } };
-  await readObservationResidues({ read(input) { input.nested.offset = 99; return { residues: [], cursor: input }; } }, cursor);
-  assert.equal(cursor.nested.offset, 7);
-});
-test('the adapter rejects an oversized batch before consuming it', async () => {
-  await assert.rejects(readObservationResidues({ read: () => ({ residues: Array(1001).fill(fixture), cursor: {} }) }), /adapter result/);
-});
-test('a valid non-runtime residue is not an observation', async () => {
-  const sidecar = { sessionDir: 'fixture', sessionMarkdown: null, slug: 'fixture', repo: null, status: null, phase: null, planSummary: '', definitionOfDone: '', decisions: [], learnings: [], evidence: null, critiqueSummary: null, transcriptRefs: [], touchedFiles: [] };
-  await assert.rejects(readObservationResidues({ read: () => ({ residues: [sidecar], cursor: {} }) }), /invalid/);
+test('propagates importer errors without advancing or replacing the cursor', () => {
+  const options = { sourceId: 'fixture', cursor: { version: 1, sourceId: 'fixture', lines: 1, digest: 'a'.repeat(64) } };
+  assert.throws(() => importObservationSource(() => { throw new Error('prefix changed'); }, '', options), /prefix changed/);
+  assert.equal(options.cursor.lines, 1);
+  assert.throws(() => importObservationSource(null, '', options), /importer/);
+  assert.throws(() => importObservationSource(fixtureImporter, '', { sourceId: '' }), /sourceId/);
 });
