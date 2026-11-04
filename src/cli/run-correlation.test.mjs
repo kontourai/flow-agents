@@ -4,6 +4,8 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import {
   RUN_CORRELATION_IDENTITY_KEYS,
+  CREDENTIAL_PATTERN_SOURCES,
+  containsSensitiveCredential,
   RunCorrelationValidationError,
   attachRunCorrelation,
   createRunCorrelationEnvelope,
@@ -282,4 +284,63 @@ test("runtime adapters declare support for every correlation identity field", ()
   assert.equal(runtimeCorrelationIdentityDeclaration("codex").runtime_turn.status, "supported");
   assert.equal(runtimeCorrelationIdentityDeclaration("opencode").runtime_turn.status, "partial");
   assert.equal(runtimeCorrelationIdentityDeclaration("strands-local").runtime_session.status, "not_applicable");
+});
+
+
+test("credential screening avoids URL scans when the required delimiter is absent", () => {
+  const urlSource = CREDENTIAL_PATTERN_SOURCES.find((source) => source.includes("://"));
+  assert.ok(urlSource);
+  const urlPatternSource = new RegExp(urlSource).source;
+  const original = RegExp.prototype.test;
+  const ordinary = ["ordinary-identifier", "a".repeat(255), "a".repeat(4096)];
+  let attempts = 0;
+  RegExp.prototype.test = function (value) {
+    if (this.source === urlPatternSource && ordinary.includes(value)) attempts++;
+    return original.call(this, value);
+  };
+  try {
+    for (const value of ordinary) assert.equal(containsSensitiveCredential(value), false);
+  } finally {
+    RegExp.prototype.test = original;
+  }
+  assert.equal(attempts, 0, "an impossible URL credential must not enter the expensive URL pattern");
+});
+
+test("credential screening retains exported-pattern results and JavaScript coercion", () => {
+  const patterns = CREDENTIAL_PATTERN_SOURCES.map((source) => new RegExp(source));
+  const reference = (value) => patterns.some((pattern) => pattern.test(value));
+  const credential = (...parts) => parts.join("");
+  const values = [
+    "", "ordinary-identifier", "a".repeat(255), "a".repeat(4096),
+    "https://example.test/no-credential", `https://${"a".repeat(4096)}/no-credential`,
+    "https://reader:example@host.test/path", "prefix HtTpS://reader:example@host.test/path suffix",
+    "scheme:/reader@example.test", "scheme://reader?name@example.test",
+    "Bearer example-value", "api_key=example-value", "access-token:example-value",
+    "client_secret=example-value", "token:example-value", "password=example-value",
+    credential("sk_", "abcdefghijk"), credential("gho_", "abcdefghijk"),
+    credential("github_", "pat_abcdefghijklmn"), credential("xox", "b-abcdefghijk"),
+    credential("gl", "pat-abcdefghijk"), credential("AK", "IAABCDEFGHIJKLMN"),
+    credential("AI", "zaabcdefghijklmnopqrstuv"), credential("ya", "29.abcdefghijk"),
+    credential("S", "G.abcdefghijk.abcdefghijk"), credential("wh", "sec_abcdefghijk"),
+    credential("rk_", "test_abcdefghijk"), credential("sk-", "proj-abcdefghijk"),
+    credential("sk-", "ant-abcdefghijk"), credential("sq0", "atp-abcdefghijk"),
+    credential("eyJ", "abcdefghijk.abcdefghijk."),
+  ];
+  let state = 3558;
+  const next = () => (state = (Math.imul(state, 1664525) + 1013904223) >>> 0);
+  const alphabet = "aAZ0:.@/-_? # ";
+  for (let i = 0; i < 1000; i++) {
+    const length = next() % 192;
+    values.push(Array.from({ length }, () => alphabet[next() % alphabet.length]).join(""));
+  }
+  for (const value of values) assert.equal(containsSensitiveCredential(value), reference(value));
+  for (const value of [null, undefined, 42, true, ["ordinary"], new String("ordinary")]) {
+    assert.equal(containsSensitiveCredential(value), reference(value));
+  }
+  const changingValue = () => {
+    let count = 0;
+    return { toString: () => ++count === 2 ? "Bearer example-value" : "ordinary" };
+  };
+  assert.equal(containsSensitiveCredential(changingValue()), reference(changingValue()));
+  assert.throws(() => containsSensitiveCredential(Symbol("ordinary")), TypeError);
 });
