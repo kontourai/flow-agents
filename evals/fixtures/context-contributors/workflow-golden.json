@@ -1,0 +1,8 @@
+{
+  "false:SessionStart": "\n\n---\nCONTEXT MAP: use docs/context-map.md before broad repo rediscovery. If structure, commands, schemas, skills, agents, or packs changed, run `npm run context-map -- --check`.\n---",
+  "false:UserPromptSubmit": "",
+  "false:PostToolUse": "",
+  "true:SessionStart": "\n\n---\nRESUME: matrix status:in_progress phase:execution\nGuidance source: NON-CANONICAL FALLBACK.\nNext action: Continue matrix work.\nPlan: not found\nNext step: none\nBlockers: none\nTrust: no trust data available\nACTOR: matrix-actor (explicit-override)\nTo continue (noncanonical fallback): resume this work. Or run pull-work to assess WIP and start new/parallel work.\nCONTEXT MAP: use docs/context-map.md before broad repo rediscovery. If structure, commands, schemas, skills, agents, or packs changed, run `npm run context-map -- --check`.\n---",
+  "true:UserPromptSubmit": "\n\n---\nWORKFLOW STATE: an active task is in progress — re-ground the recorded goal and resume the next step before doing anything else.\nSTATE: matrix is status:in_progress phase:execution. Recorded next_action.summary: \"Continue matrix work.\"\n---",
+  "true:PostToolUse": ""
+}

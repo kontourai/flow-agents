@@ -24,6 +24,40 @@ const KNOWLEDGE_SCHEMA_FILES = [
   "residue.schema.json",
 ];
 
+test("Knowledge adapters retain package self-resolution and bundles ship an ESM marker boundary", async () => {
+  for (const adapter of ["memory-claims", "learning-lifecycle"]) {
+    await import(pathToFileURL(path.resolve("kits/knowledge/adapters", adapter, "index.mjs")).href);
+  }
+  for (const runtime of ["claude-code", "codex"]) {
+    const bundle = path.resolve("dist", runtime);
+    const dest = tempRoot("flow-marker-bundle-");
+    for (const dir of ["scripts/hooks", "scripts/lib", "kits/knowledge"]) {
+      fs.mkdirSync(path.dirname(path.join(dest, dir)), { recursive: true });
+      fs.cpSync(path.join(bundle, dir), path.join(dest, dir), { recursive: true });
+    }
+    fs.copyFileSync(path.join(bundle, "scripts/package.json"), path.join(dest, "scripts/package.json"));
+    const file = path.join(dest, "kits/knowledge/package.json");
+    const probe = childProcess.spawnSync(process.execPath, ["--no-experimental-detect-module", "--input-type=module", "-e", `const m=await import(${JSON.stringify(pathToFileURL(path.join(dest, "kits/knowledge/memory-marker.js")).href)}); if (!m.INJECTED_MEMORY_OPEN) process.exit(1);`], { encoding: "utf8" });
+    assert.equal(probe.status, 0, probe.stderr);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).type, "module");
+  }
+});
+
+test("compiled brief fixture contains only presented claim text", async () => {
+  const { memoryClaim } = await import("../../build/src/memory-claims.js");
+  const { presentMemoryClaims } = await import("../../build/src/memory-routing.js");
+  const template = JSON.parse(fs.readFileSync("src/cli/fixtures/memory-claims/claims-sitting-0.json", "utf8")).claims[0];
+  const { id, schema_version, ...base } = template;
+  const claims = [
+    memoryClaim({ ...base, subject: { id: "violet kestrel", label: "violet kestrel", type: "fixture" }, property: "preferred path", value: "bounded river path" }),
+    memoryClaim({ ...base, subject: { id: "implementation", label: "implementation", type: "fixture" }, property: "verification", value: "check local code before trusting memory" }),
+  ];
+  const { presented, withheld } = presentMemoryClaims(claims);
+  assert.deepEqual(withheld, []);
+  const brief = JSON.parse(fs.readFileSync("evals/fixtures/context-contributors/global.json", "utf8"));
+  assert.deepEqual(brief, { version: 1, entries: presented.map(claim => claim.text) });
+});
+
 test("Knowledge Kit ships exact copies of its canonical root schemas", () => {
   for (const name of KNOWLEDGE_SCHEMA_FILES) {
     assert.equal(
