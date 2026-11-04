@@ -421,7 +421,7 @@ physical line of its authority text, or a complete sentence (or a run of consecu
 heading after the paragraph's hard wraps are joined, ignoring case, whitespace, list and quote markers, inline Markdown and one
 trailing full stop. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot
 read negation, so production callers inject a model or human verifier. Code between backticks is compared exactly as written;
-an unpaired `*` or `_` is a character, not formatting; a heading is a unit of its own; a fenced block is not prose. Stated limits:
+an unpaired `*` or `_` is a character, not formatting; emphasis is stripped in one pass, one level of nesting either way (`**a *b* c**`, `*a **b** c*`), and deeper or adjacent-delimiter nesting (`***a***`) is left as written, so it can only make the verifier abstain; a heading is a unit of its own; a fenced block is not prose. Stated limits:
 the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted initialisms and a short
 abbreviation list exempt), so an abbreviation it does not know can cut a sentence early and a sentence tail would then be
 supported; and every pattern is bounded and a statement is matched by one prefix test per sentence start, because the verifier is
@@ -471,7 +471,7 @@ here, conservatively, and the rules are the contract:
 | `visibility`, `readers` | the host declares who reads the store (`readers`); every record is visible to exactly those. The store carries no per-record visibility, and without `readers` there is no manifest. |
 | `review` | omitted, read as `proposed`: no record carries a per-claim human review. |
 
-Excluded, with a reason (`excluded` in the result): duplicate ids (every copy), a file over `MAX_RECORD_BYTES`, a blank title,
+Excluded, with a reason (`excluded` in the result): duplicate ids (every copy), a file over `MAX_RECORD_BYTES`, a blank or over-long (`MAX_CLAIM_CHARS`) title,
 an id that is not a safe claim id, bytes that are not UTF-8 (never rewritten into text), a path recall cannot carry. `archive/`, dot directories, symlinks and Markdown without record frontmatter are not records
 and are only counted. Distilled memory claims map the same way through `deriveMemoryManifest`
 (`context-check/living-context-memory.mjs`; needs the built package): the text comes from `presentMemoryClaims`, so posture and
