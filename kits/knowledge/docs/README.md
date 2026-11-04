@@ -406,10 +406,7 @@ claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surfa
 claim that would otherwise be current is `unverifiable`, while a superseded one stays `superseded` and
 reports `freshness.stale: true`), `review_posture` (`proposed` unless the manifest names a reviewer),
 `supersession_chain` (only edges this reader may see, whose ends were recorded by `known_at`), and
-`reasons`. The sparse plain `no_answer` entry carries none of these by design: it must say nothing. A requested `claim_ids` list keeps its own order, and `claim_ids` alone is a complete request (no
-`changed_surfaces` or `diff.paths` needed; reconciliation then has no surface to intersect and reports every claim `clean`; a
-request that names none of the three is refused with a message that says so); a default scan lists claims that
-intersect the change first, then by id. Order is the only ranking, and the reasons say why each
+`reasons`. The sparse plain `no_answer` entry carries none of these by design: it must say nothing. A `claim_ids` list keeps its own order. `claim_ids` on its own is a complete request: you do not need `changed_surfaces` or `diff.paths`. With no changed files to compare, every claim reports `clean`. A request with none of the three is refused with a message that names them. A default scan lists claims that intersect the change first, then by id. Order is the only ranking, and the reasons say why each
 result is there.
 
 **Budget.** `budget.max_tokens` is explicit. Each result's cost is `ceil(utf8 bytes / 4)` of its
@@ -422,33 +419,22 @@ hides an affected claim.
 **Abstention is a separate step.** Recall returns evidence and never an answer.
 `answerLivingContext` re-derives recall and sends only a `current` recall, with its authority
 document read at the pinned revision, to an independent `@kontourai/survey` `SupportVerifier`;
-a verifier is a required argument. `createLineSupportVerifier` is a deterministic floor (version 3). The claim is **plain text** and must be a whole
-physical line of its authority text (exactly as in version 2, with no Markdown reading), or a complete sentence (or a run of
-consecutive sentences) of one paragraph, list item or heading of the document **as it displays**, ignoring case, whitespace, a
-leading list or quote marker and one trailing full stop. "As it displays" means hard wraps joined and only the Markdown whose
-meaning needs no judgement rendered: a single-backtick code span, `*x*`, `_x_`, `**x**`, `__x__` and `[x](target)`
-where `x` holds no markup character, the opener follows a space or an opening bracket or quote, and the closer is not followed by
-a letter or digit. Anything else that could be markup (a nested pair, a run of three markers, an unpaired marker, an escape,
-an entity reference, a double-backtick span, an image, HTML, an intraword `*`, GFM strikethrough, which CommonMark lacks) leaves
-the whole paragraph exactly as written, so it matches only a claim that is a verbatim sentence of its source and otherwise the
-verifier abstains. Nothing is rescanned, so removing one marker never turns another
-into formatting. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot read
-negation, so production callers inject a model or human verifier. Block structure is read only for a **flat** document: paragraphs, ATX headings, top-level list items with
-continuation lines, tables and fenced code at column 0 (both skipped) and thematic breaks. A document that has anything whose
-meaning depends on a container or on context further up (a quote, an indented fence, an HTML block, a reference definition, a
-nested list item or a list item whose content is a block, indented code, a setext underline, a lone CR, a NUL) is read one
-physical line per unit, which is exactly the version 2 rule: the sentence reading switches off for that document rather than guess
-at CommonMark's container, laziness and interruption rules. Measured on the real ops Knowledge store at the dogfood pin, 177 of
-205 records are flat; in this repository's `docs/`, 34 of 44. Stated limits: the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted
-initialisms and a short abbreviation list exempt), so an abbreviation it does not know can cut a sentence early and a sentence
-tail would then be supported; the checks are one pass over a paragraph and one prefix test per sentence start, because the
-verifier is synchronous and a timeout cannot interrupt it; a statement is judged the same in a short paragraph and a long
-one; and a passage quoted from a paragraph is checked against the verifier before it is offered (a nested list or a code literal that
-begins with `-`, `>` or `*` may not be found again, and the next passage is offered instead). Only `supported` answers; `contradicted` is
-reported; `not-addressed`, an abstaining, throwing, or timed-out verifier, an unreadable, empty or
-oversized (`MAX_EVIDENCE_BYTES`) authority document, and budget drops all abstain, and any
-abstention makes the set `not_verified`. Each verdict is kept as Survey's immutable
-`CandidateVerification`.
+a verifier is a required argument. `createLineSupportVerifier` uses no model. It accepts a sentence only if one of these is true:
+
+- it is a whole line of the record (as in version 2, with no Markdown reading);
+- it is a full sentence, or a run of back-to-back sentences, of one paragraph, list item or heading, as the page displays it. Line wraps are joined. Simple bold, italic, code and links are read as their text.
+
+It ignores case, extra spaces, a leading `-` or `>`, and one final full stop. It rejects fragments, paraphrases and a sentence cut from a longer one. It cannot see negation ("not"), so a production host passes its own model or human verifier.
+
+How it reads a page:
+
+- It reads a page sentence by sentence only if the page is *flat*: paragraphs, `#` headings, top-level list items with wrapped lines, tables and fenced code at the left margin (both skipped), and rules. On one real store of 205 records, 177 were flat. In this repository's `docs/`, 34 of 44 were.
+- A page with a quote, an indented code fence, an HTML block, a link definition, a nested list or an item that holds another block, indented code, a `===`/`---` heading underline, a tab, an empty list item, a lone carriage return or a NUL byte is read one line at a time (the version 2 rule). The tool does not guess at nesting.
+- Bold, italic, code and link forms are rendered only when they are simple and unambiguous. Anything else (nested pairs, three markers in a row, an unpaired marker, an escape, an `&amp;`-style entity, a double-backtick span, an image, inline HTML, strikethrough) leaves the whole paragraph as written. Then only a claim that is a word-for-word sentence of it can match, and otherwise the verifier abstains.
+- A sentence ends at a full stop, space, then a capital letter, digit or opening quote. A short list of abbreviations is exempt. An abbreviation not on the list can end a sentence early, and the tail would then count as a sentence.
+- A statement over 4,000 characters is never matched as a sentence run. A passage quoted from a page is re-checked against the verifier before it is offered.
+
+Only a *supported* verdict answers. A verdict that contradicts, does not address the sentence, or fails, and a record file that is missing, empty, too large (`MAX_EVIDENCE_BYTES`) or not UTF-8, all abstain. Any abstention makes the set `not_verified`. Each verdict is kept as Survey's `CandidateVerification`.
 
 **Change observation.** `observeRepositoryChange({ repoRoot, base, head })` turns two raw commits
 into the `diff.paths` input. It is a thin shim: Lookout observes registered web, API and
@@ -456,71 +442,109 @@ structured-file sources over guarded HTTP (plus structural and proposal diff hel
 observations) and has no Git-revision source yet. It refuses an empty or oversized
 change (`maxPaths`, default 500) rather than truncating.
 
-### Recall on a real Knowledge store: ask a question
-
-Recall reads a claims manifest and takes claim ids; nothing in a store writes the manifest, and a person has a question
-(flow-agents#1595). Three small pieces close that gap without a new retrieval engine and without a model:
-
-1. **Producer** (`context-check/living-context-store.js`, `deriveStoreManifest`). Derives the manifest from the store's records
-   *as of the pinned commit*, read with the same sanitized `git` reads as recall, never the working tree. It is passed to
-   recall as `derivedManifests: { [rootId]: manifest }` (`runLivingContext`, `answerLivingContext`) in place of the `git show`
-   of `manifest_path`, which then only names it; the store is not modified. The same output can be committed as a file.
-2. **Selection** (`context-check/living-context-select.js`). A deterministic lexical ranker nominates claim ids for a question
-   or declines. It is a function the host can replace (`select`), and it is the only part that is a judgment of relevance.
-3. **Ask** (`context-check/living-context-ask.js`, CLI `context-check/ask-cli.js`). Derives, selects, recalls with the 1.1
-   as-of, reader and budget, and answers by quoting the best passage of each recalled record, asking the caller's verifier
-   whether the record says it.
-
-```bash
-node kits/knowledge/context-check/ask-cli.js --repo <worktree-root> --revision <40-hex> --reader <id> --now 2026-11-04T16:00:00Z \
-  "What is the CI compute policy?"          # read-only; --json for the full result; --manifest prints the derived manifest and exclusions
-```
-
-**What a record becomes.** One claim per record. The store has no per-claim review, validity or visibility, so each is decided
-here, conservatively, and the rules are the contract:
-
-| Manifest field | From the record |
-|---|---|
-| `id`, `claim` | the record id and title (whitespace collapsed). A title labels a record; it is not a verified statement. |
-| `authority`, `owning_source` | the record's file at the pinned revision |
-| `status` | a record that another record `supersedes`, or that its own `superseded-by` log entry names, is `superseded` by it (the Kit derives supersession from the edge, never the stored status). Several successors, or a successor that is not a manifest record (archived, excluded, missing): `unverifiable`. A freshness the record declares but the Kit's reader cannot read: `unverifiable`. Otherwise `active` and `implemented` are `current`; `retired` without a successor and any other status are `unverifiable`. Nothing unrecognised is current. |
-| `slot`, edge | the supersession lineage (`lineage:<smallest id>`); a record in no lineage has its own slot. The edge is a `succession` recorded when the predecessor's own `superseded-by` entry says it was (the first time it was recorded; else the successor's single `supersede` entry; else untimed, and recall says `supersession_time_unknown`). |
-| `recorded_at`, `valid_time.from` | `created_at`. Missing or unreadable: omitted, and recall says `knowledge_time_unknown`. |
-| `expires_at` | the Kit's own reading (`effectiveExpiryMs`) of the record's `expires_at` or `ttl_seconds`. A record without either never goes stale; its `updated_at` is returned for the reader to weigh. |
-| `visibility`, `readers` | the host declares who reads the store (`readers`); every record is visible to exactly those. The store carries no per-record visibility, and without `readers` there is no manifest. |
-| `review` | omitted, read as `proposed`: no record carries a per-claim human review. |
-
-Excluded, with a reason (`excluded` in the result): duplicate ids (every copy), a file over `MAX_RECORD_BYTES`, a blank or over-long (`MAX_CLAIM_CHARS`) title,
-an id that is not a safe claim id, bytes that are not UTF-8 (never rewritten into text), a path recall cannot carry. `archive/`, dot directories, symlinks and Markdown without record frontmatter are not records
-and are only counted. Distilled memory claims map the same way through `deriveMemoryManifest`
-(`context-check/living-context-memory.mjs`; needs the built package): the text comes from `presentMemoryClaims`, so posture and
-review label stay in the claim; only `stated` is `current`; the repository file that grounds each claim and the instant the store
-recorded it are the host's to supply (`authorityFor`, `recordedAtFor`; the turn's own `observedAt` is never used); a claim is
-`reviewed` only when its review is a human promotion *and* the host names the reviewer (`reviewerFor`). Pass the result as
-`additional` to `askLivingContext` to answer from both.
-
-**What selection does, and does not.** Question terms are weighted by rarity across the store's records (a word in every record
-decides nothing), scored by the best field they match (title, then tags and category, then body), and a record is nominated only
-when it carries `minCoverage` (0.6) of the question's weight. A term found in no record counts against every record, so a question
-the store does not discuss nominates nothing and the answer is an abstention (`no_record_covers_question`, with the nearest records
-below the bar listed), not the least-bad record. There is no type or link prior: a raw capture is ranked on its words like a
-compiled note. The store host's own `knowledge_context` adds a link-count prior of up to 20 to a lexical score of at most 4 per
-keyword, which buries a recent, unlinked record under well-linked ones (flow-agents#1595 has the measurement); that tool also has no
-as-of, reader, supersession or abstention.
-
-**Who sees what.** Selection runs only over the claims recall would let this reader see and that are known at `now` (`admittedClaimIds`, the same reader admission, visibility and knowledge-time decisions as recall). A hidden or not-yet-recorded claim is never scored, quoted or named as a nearest miss; a successor is shown only when recall itself reports it for this reader (an edge the reader may not see, or one recorded later, is not followed); an id carried by more than one record is left out rather than matched to a copy; and an unknown reader is refused before anything is selected.
-
-**What `answered` means.** The quoted passage is in the cited record at the pinned revision (the verifier checked it) and the record
-is `current` as of `now`. The passage is chosen from the record's own sentences and is shown only if the passage together with the
-title carries `minPassageCoverage` (0.5) of the question's weight; otherwise the record is reported as nominated and abstained
-(`no_passage_on_question`). It does **not** mean the passage answers the question: word overlap cannot establish that, so the matched
-terms and coverage are returned beside each passage for the reader to judge, and a deployment that needs entailment passes its own
-`select` and a model or human `SupportVerifier`. A superseded record is returned with the record that replaced it, marked
-`superseded`, and is never answered from. Nothing in this path calls a model or needs a credential.
-
 Freshness is Surface's, not a second derivation. Ephemeris is the time actor that wakes a Flow run
 at a claim's deadline (it derives wake-up instants, not a trust or freshness status), so it is not a
 dependency of a synchronous, explicit-`now` check.
+
+### Ask your Knowledge store a question
+
+Ask a question in plain words. You get back the sentence in your store that answers it, the record file it came from, and whether that record is still current. If nothing in the store covers the question, you get "ABSTAINED" and the reason, not a weak guess. If the best match has been replaced, the newer record is listed next to it. It reads one fixed commit, writes nothing, calls no model and needs no credentials.
+
+Run it from the repository that holds your store (after `pnpm install`):
+
+```bash
+node kits/knowledge/context-check/ask-cli.js \
+  --repo . --revision "$(git rev-parse HEAD)" \
+  --reader "$USER" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "What is the CI compute policy?"
+```
+
+- `--now` is the moment you are asking about. Records written after it are hidden. Use the current time unless you want an older view.
+- `--store` is the store folder in the repo (default `knowledge`). `--readers a,b` lists who may read the store; leave it out and only `--reader` may.
+- `--json` prints the full result. `--manifest` prints how each record was read and which were skipped. `--help` lists every option.
+
+#### How to read an answer
+
+```
+Q: What is the CI compute policy?
+   Read "knowledge" at commit 686eaad9d01d as of 2026-11-05T23:00:00Z, for reader me.
+   Searched for: ci, compute, policy. Records: 3 read, 3 known at that time, 0 skipped.
+A: ANSWERED - at least one record states the sentence quoted below.
+  - ANSWERED: CI compute policy: no repository-wide caps
+      from knowledge/records/83b90dc8-....md [current], updated 2026-10-05T11:00:00.000Z
+      matched: ci, compute, policy (covers 1 of the question)
+      "Flow Agents has no repository-wide compute cap. The platform's own runner limit is the only ceiling."
+  - ABSTAINED - not current: CI compute policy: four queue max groups
+      from knowledge/records/68a26dff-....md [superseded], updated 2026-10-01T10:00:00.000Z
+      replaced by "CI compute policy: no repository-wide caps"
+      matched: ci, compute, policy (covers 1 of the question)
+      context only, not an answer: "Flow Agents bounds CI compute with four repository-wide queue groups."
+```
+
+- `Q:` and the two lines under it: your question; the commit, store folder, time and reader used; the words searched for; and how many records were read, existed at that time, or were skipped.
+- `A: ANSWERED` means at least one record answered. `A: ABSTAINED` means none did.
+- Each `-` line is one record: its outcome, the reason when it did not answer, then its title.
+- `from <file> [status]` is the record file. Open it to check the sentence. The status is `current`, `superseded` or `unverifiable`. The date is its last update.
+- `replaced by` names the newer record. It is in the same list, usually as the ANSWERED item.
+- `matched` lists the question words the record contains. `covers` is the share of the question they make up, from 0 to 1.
+- The quoted line is the sentence from the record. Trust it only on an ANSWERED item. On an ABSTAINED item it is context.
+
+**ANSWERED** means the quoted sentence is word for word in the cited record at that commit, and the record is current at `--now`. It does not mean the sentence answers your question: the tool matches words and does not understand them. Read the sentence and judge.
+
+When it abstains, the line after `A: ABSTAINED` gives the reason:
+
+| Reason | What it means | What to do |
+|---|---|---|
+| `no_record_covers_question` | No record has enough of your question's words. The nearest misses are listed. | Use the words your records use. It matches words, not meaning. |
+| `no_record_known_at_now` | No record existed at `--now`. | Set `--now` to a later time. |
+| `no_question_terms` | The question had only common words. | Add the specific nouns. |
+| `no_passage_on_question` | A current record matched, but no single sentence in it does. | Open the file and read it, or ask with words from its body. |
+| `not_current` | The record was replaced, retired, or has an unknown status. | Read the newer record if one is listed. |
+| `dropped_by_budget` | The result was too large for `--budget`. | Raise `--budget`. |
+| `not_addressed`, `evidence_*` | The answer check did not confirm the sentence. | Open the file and read it. |
+
+A line starting `WARNING:` means the list is incomplete (more matches than the limit, or a replacement could not be looked up). Narrow the question.
+
+#### How a record is read
+
+Each record becomes one entry. The store holds no reviews, validity dates or per-record access, so these rules decide. They lean toward "not current".
+
+| You see | It comes from |
+|---|---|
+| title, file | the record's title and file at the commit |
+| `current` | status `active` or `implemented`, and no newer record replaces it |
+| `superseded` | another record says it `supersedes` this one (or its own log says it was superseded). The newer record is listed with it. |
+| `unverifiable` | retired with no replacement, any other status, two replacements, a replacement that is missing or skipped, or an expiry the Kit cannot read |
+| known since | `created_at`. If it is missing, recall says `knowledge_time_unknown`. |
+| expires | the record's `expires_at` or `ttl_seconds`. Without either it never expires, so check `updated_at` yourself. |
+| who may read | everyone in `--readers` and nobody else |
+| review | always "proposed". No record carries a human review. |
+
+Skipped records are listed under `excluded`: repeated ids (every copy), files over `MAX_RECORD_BYTES`, blank or over-long (`MAX_CLAIM_CHARS`) titles, unsafe ids, files that are not UTF-8, and paths recall cannot carry. `archive/`, hidden folders, symlinks and Markdown without record frontmatter are not records and are not counted. A `--store` folder with no Markdown files is an error (`STORE_NOT_FOUND`).
+
+#### How it picks records
+
+Rare words count more than common ones. A word in every record decides nothing. A title match beats a tag or category match, which beats a body match. A record is picked only when it covers 60% of the question (`--min-coverage`). A question word found in no record counts against every record, so an off-topic question picks nothing. A raw note and a compiled note are ranked the same way. A host can replace the picker (`select`).
+
+It only considers records this reader may see and that existed at `--now`. A hidden or later record is never scored, quoted or listed as a near miss.
+
+#### Also answer from distilled memory
+
+`deriveMemoryManifest` (`context-check/living-context-memory.mjs`; run `npm run build` first) turns memory claims into the same kind of entries. Pass its result as `additional` to `askLivingContext`.
+
+- Only *stated* claims are current. Proposed, hypothetical and retracted claims are not.
+- The host supplies the file that backs each claim (`authorityFor`) and when the store recorded it (`recordedAtFor`). The time of the conversation turn is never used.
+- A claim is "reviewed" only if a person promoted it and the host names that person (`reviewerFor`).
+
+#### For developers
+
+`runLivingContext` and `answerLivingContext` take `derivedManifests: { [rootId]: manifest }` in place of reading a committed `claims.json`. `deriveStoreManifest` (`living-context-store.js`) builds one from a store at a pinned commit. `selectClaimsForQuestion` (`living-context-select.js`) picks claim ids for a question. `askLivingContext` (`living-context-ask.js`) does all of it. The `knowledge_context` tool in the store host is not reused: it has no as-of time, reader, replacement or abstention, and its link-count prior can bury a new record.
+
+#### Limits
+
+- It matches words, not meaning. "cleaning up" does not find "removing".
+- The bundled answer check cannot see negation.
+- For production, pass a model or human verifier and, if needed, your own `select`.
 
 ```bash
 node --test kits/knowledge/context-check/living-context.test.js kits/knowledge/context-check/living-context-ask.test.js

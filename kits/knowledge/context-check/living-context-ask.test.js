@@ -320,7 +320,7 @@ describe("#1595: ask a real store a question", () => {
     const base = ["--repo", s.repo, "--revision", s.revision, "--reader", "maintainer", "--now", NOW];
     const answered = spawnSync(process.execPath, [cli, ...base, "Who owns erasure of memory: Station or Corpus?"], { encoding: "utf8" });
     assert.equal(answered.status, 0, answered.stderr);
-    assert.match(answered.stdout, /A: ANSWERED/);
+    assert.match(answered.stdout, /A: ANSWERED - at least one record states the sentence quoted below\./);
     assert.match(answered.stdout, new RegExp(`knowledge/records/${s.ids.raw}\\.md`));
     assert.equal(git(s.repo, ["status", "--porcelain"]), before, "the CLI writes nothing");
     const manifest = spawnSync(process.execPath, [cli, ...base, "--manifest"], { encoding: "utf8" });
@@ -828,11 +828,39 @@ describe("review round 5", () => {
     const base = ["--repo", s.repo, "--revision", s.revision, "--reader", "maintainer", "--now", NOW];
     const plain = spawnSync(process.execPath, [cli, ...base, "What is the CI compute policy?"], { encoding: "utf8" });
     assert.equal(plain.status, 0, plain.stderr);
-    assert.match(plain.stdout, /excluded: .*duplicate_id x2/);
+    assert.match(plain.stdout, /Skipped: .*duplicate_id x2/);
+    assert.match(plain.stdout, /context only, not an answer: "Flow Agents bounds CI compute/);
+    assert.match(plain.stdout, /replaced by "CI compute policy: no repository-wide caps"/);
+    assert.match(plain.stdout, /\[superseded\]/);
+    assert.doesNotMatch(plain.stdout, /current_at_as_of|superseded_by_known_successor/);
     assert.doesNotMatch(plain.stdout, /WARNING/);
     const starved = spawnSync(process.execPath, [cli, ...base, "--nomination-budget", "1", "What is the CI compute policy?"], { encoding: "utf8" });
     assert.equal(starved.status, 0, starved.stderr);
-    assert.match(starved.stdout, /WARNING: replacements could not be looked up/);
+    assert.match(starved.stdout, /WARNING: could not find the newer record for \d+ replaced records/);
+  });
+
+  test("the CLI explains itself: --help, a missing or wrong store, a short commit, an unknown reader, and a time before any record", async () => {
+    const s = await sharedSeed();
+    const cli = path.join(__dirname, "ask-cli.js");
+    const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+    const base = ["--repo", s.repo, "--revision", s.revision, "--reader", "maintainer", "--now", NOW];
+    const help = run("--help");
+    assert.equal(help.status, 0);
+    assert.match(help.stdout, /--revision\s+the 40-character commit to read; use "\$\(git rev-parse HEAD\)"/);
+    assert.match(help.stdout, /--now\s+the moment you ask about/);
+    const shortSha = run("--repo", s.repo, "--revision", "HEAD", "--reader", "r", "--now", NOW, "question");
+    assert.equal(shortSha.status, 2);
+    assert.match(shortSha.stderr, /full 40-character commit id; use "\$\(git rev-parse HEAD\)"/);
+    const noStore = run(...base, "--store", "nope", "any question");
+    assert.equal(noStore.status, 1);
+    assert.match(noStore.stderr, /STORE_NOT_FOUND: no Markdown files under "nope"/);
+    const stranger = run(...base.map((arg) => (arg === "maintainer" ? "stranger" : arg)), "--readers", "maintainer,other", "What is the CI compute policy?");
+    assert.equal(stranger.status, 1);
+    assert.match(stranger.stderr, /reader "stranger" is not in --readers \(maintainer, other\)/);
+    const early = run("--repo", s.repo, "--revision", s.revision, "--reader", "maintainer", "--now", "2020-01-01T00:00:00Z", "What is the CI compute policy?");
+    assert.equal(early.status, 0, early.stderr);
+    assert.match(early.stdout, /A: ABSTAINED - no record existed at --now; set --now to a later time \(no_record_known_at_now\)/);
+    assert.match(early.stdout, /0 known at that time/);
   });
 
   test("exclusions of further sources are reported by reason, without naming the claims", async () => {

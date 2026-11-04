@@ -89,11 +89,7 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
 - **Abstention is a separate step.** Recall returns evidence and never an answer. The answer step
   sends only a `current` recall to an independent `@kontourai/survey` `SupportVerifier` and keeps
   each verdict as Survey's `CandidateVerification`. Only `supported` answers. The verifier is a
-  required argument; the bundled deterministic one (version 3) takes the claim as plain text and matches a whole physical line (as
-  version 2 did) or a complete sentence, or run of sentences, of a hard-wrapped paragraph, list item or heading *as the document displays*:
-  only Markdown forms a CommonMark renderer reads the same way are rendered, anything ambiguous leaves the paragraph as written (so it
-  matches only a claim that is a verbatim sentence of its source), and block structure is read only for a flat document (paragraphs, ATX headings, top-level list items, tables and column-0 fences skipped); anything that
-  depends on a container or on context further up switches the sentence reading off for that document, leaving the version 2 whole-line rule. It cannot read negation. Version 2 matched whole lines only, so natural sentences of wrapped prose always abstained (flow-agents#1597).
+  required argument; the bundled one (version 3) accepts a whole line, as version 2 did, or a full sentence or run of sentences of a wrapped paragraph, list item or heading, read as the page displays it. Only simple Markdown is rendered; anything ambiguous leaves the paragraph as written. A page with a quote, nested list, HTML, indented code or any other layout that depends on context falls back to whole lines. It cannot read negation. Version 2 accepted whole lines only, so wrapped prose always abstained (flow-agents#1597).
   The verifier is the Kit's own: Survey ships the port (`runSupportVerifier`) and no deterministic implementation.
 - **A store is not a manifest, and a question is not a claim id** (flow-agents#1595, #1596). A claims manifest is *derived* from a
   store's records at the pinned commit (`deriveStoreManifest`; distilled memory claims through `deriveMemoryManifest`), with the
@@ -104,8 +100,7 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
   reaches recall through a replaceable selector that nominates claim ids; the bundled one is lexical and declines rather than
   nominate the least-bad record, and a record is quoted only when the quoted passage itself is on the question. `claim_ids`
   alone is a complete request. `answered` means the passage is in the current cited record, not that it answers the question.
-  Selection chooses only among claims recall would show this reader at `now`, so what it returns can never name a claim recall would answer
-  with a plain no-answer.
+  Selection only considers claims this reader may see and that were recorded by `now`, so it never reveals a hidden or future record.
   The store host's own `knowledge_context` is not reused: it belongs to that host, not to the Kit contract, and its link-count prior
   outweighs its lexical score.
 - **Budget keeps or drops whole results.** An explicit `max_tokens` bounds recall results by a

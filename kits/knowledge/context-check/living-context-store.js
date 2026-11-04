@@ -110,10 +110,10 @@ function listStoreFiles(root, revision, store) {
 /**
  * Derive the claims manifest of the store at `storePath` as of the raw commit `revision`.
  *
- * @param {{repoRoot: string, revision: string, storePath?: string, readers: string[], owner?: string}} options
+ * @param {{repoRoot: string, revision: string, storePath?: string, readers: string[], owner?: string, allowEmpty?: boolean}} options (`allowEmpty`: a store folder with no Markdown is not an error)
  * @returns {{manifest: {readers: string[], claims: object[]}, records: object[], excluded: {path: string, id?: string, reason: string}[], stats: object, revision: string, store: string}}
  */
-export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge", readers, owner = "knowledge-store" } = {}) {
+export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge", readers, owner = "knowledge-store", allowEmpty = false } = {}) {
   if (!Array.isArray(readers) || readers.length === 0 || readers.some((reader) => !isIdentity(reader)) || new Set(readers).size !== readers.length) {
     throw error("READERS_REQUIRED", "deriveStoreManifest needs `readers`: the unique, non-blank identities the host declares may read this store (the store itself carries no visibility)");
   }
@@ -124,6 +124,7 @@ export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge
   const parsed = [];
   let skipped = 0;
   const { files, unsafe } = listStoreFiles(root, pinned, store);
+  if (!allowEmpty && files.length === 0 && unsafe.length === 0) throw error("STORE_NOT_FOUND", `no Markdown files under "${store}" at ${pinned.slice(0, 12)}: check --store and --revision`);
   excluded.push(...unsafe);
   const readable = [];
   for (const file of files) {
