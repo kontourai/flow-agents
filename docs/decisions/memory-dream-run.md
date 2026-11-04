@@ -51,16 +51,16 @@ scheduled job of this repository.
   record-before-effect, owner liveness) and is not published, so this repository keeps a
   cursor and Corpus proposals and builds no durability layer beyond them. Adopting
   Monument later makes this repository its first consumer outside Station.
-- Corpus keys a create request by the sitting and the candidate's position in the batch
-  (#1573) and refuses a different candidate at a taken key, but the model is not
+- Corpus keys a create request by the sitting and the candidate's place in the batch
+  (#1573) and refuses a different candidate at a taken key, and the model is not
   deterministic, so every proposal of a sitting carries the sitting's whole plan. A retry
   reads the plan back from the store and creates only what is missing, with no new model
-  call. It still hands the bridge the whole plan in order, each claim already proposed
-  as Corpus stored it (Corpus answers that with the proposal it holds, in any state), so a
-  position never moves and a key is never taken by the wrong claim. The bridge takes an
-  optional `requestScope` (an additive change to `promote/store-target.js`); the dream
-  passes the plan's digest, so a different plan for the same sitting (another visibility)
-  has its own keys. A receipt that does not verify stops the run instead of being skipped.
+  call. A claim already proposed is never sent again, so nothing about it (its provenance,
+  its routing) can conflict. Each claim sent says where it sits in the whole plan, through
+  an optional `positions` argument to `promote/store-target.js`, and the dream passes the
+  plan's digest as an optional `requestScope`, so a changed plan for the same sitting takes
+  its own keys. Both are additive: absent, the bridge's keys are unchanged. A receipt that
+  does not verify stops the run instead of being skipped.
 - Gate evaluation belongs to the host's Flow run. The dream declares the gates and calls
   `onStage` at each boundary; it does not evaluate them.
 - Brief budgets (6144 bytes global, 2048 per project) and the ranking rule are defaults
