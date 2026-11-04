@@ -4,13 +4,58 @@ title: CI Compute Budget
 
 # CI Compute Budget
 
-Flow Agents uses two repository-wide native job concurrency groups:
-`flow-agents-compute-1` and `flow-agents-compute-2`. Every participating job
-sets `queue: max` and `cancel-in-progress: false`. The names contain no PR,
-ref, head, run or attempt identifier. Admission happens in GitHub Actions,
-before a runner is assigned; there is no runner-held acquisition loop.
+Flow Agents uses four repository-wide native job concurrency groups: two
+slots, each split into two lanes. The groups are
+`flow-agents-compute-v2-1-a`, `flow-agents-compute-v2-1-b`,
+`flow-agents-compute-v2-2-a` and `flow-agents-compute-v2-2-b`. Every
+participating job sets `queue: max` and `cancel-in-progress: false`. The names
+contain no PR, ref, head or attempt identifier; the only run-derived input is
+the lane, described below. Admission happens in GitHub Actions, before a runner
+is assigned; there is no runner-held acquisition loop.
+
+## Why there are four groups, named `-v2-`
+
+On 2026-11-03 a stalled queue head in the single-occupancy groups
+`flow-agents-compute-1` and `flow-agents-compute-2` blocked every participating
+run for about an hour. About 41 runs across all workflows sat `pending` while no
+run was `in_progress`, `queued`, `waiting` or `action_required`. The queue
+resumed after the stuck head was cancelled; it was head-of-line blockage, not a
+permanent lock. The lesson is structural: with one occupant per group, one stuck
+run blocks the whole repository.
+
+The repository owner decided (2026-11-03) to split each slot into two lanes,
+allowing two concurrent admission units per slot and raising the repository-wide
+peak from 2 to 4 runners. That halves the nominal admission capacity a single stalled
+run can remove (one of four groups, not one of two; the share of work actually
+delayed depends on how run IDs fall across lanes) and doubles admission capacity (actual throughput still depends on the workload and on how
+run IDs fall across lanes). The groups were renamed to `flow-agents-compute-v2-…` so that runs
+created under the old workflow revisions, which may still be pending in the
+retired groups, cannot share a queue with the new ones; the policy refuses the
+retired names if they reappear.
+
+### Lane assignment
+
+A slot's lane is chosen per run, without arithmetic, from the parity of
+`github.run_id`:
+
+```yaml
+group: flow-agents-compute-v2-<slot>-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
+```
+
+An even run ID selects lane `a`; an odd one selects lane `b`. All jobs of one
+run therefore land in the same lane of their respective slots, and a re-run of
+that run keeps the lane. The expression reads only `github.run_id`: it embeds no
+PR number, ref, head SHA or run attempt, so distinct PRs and branches share the
+same four groups. Nothing in the name is per PR or per head, so no PR gets a private group; distinct runs of one head can occupy both lanes of a slot. Lanes are
+statistical, not balanced; consecutive runs can land in the same lane.
+`scripts/ci/compute-policy.mjs` accepts exactly this string for slots 1 and 2
+and refuses every other group name, a fifth group, a changed expression, a
+missing `queue: max` and `cancel-in-progress: true`.
 
 ## Participating inventory
+
+Slot numbers below are the assignment in `scripts/ci/compute-policy.mjs`; each
+slot has lanes `a` and `b` as described above.
 
 | Workflow | Caller job or matrix child | Slot | Expanded runners |
 | --- | --- | --- | --- |
@@ -31,18 +76,19 @@ before a runner is assigned; there is no runner-held acquisition loop.
 | Kit Gates Demo | release-evidence-gate-demo | 1 | 1 |
 
 This is 15 admission units covering 16 expanded runner jobs. At most one
-admission unit runs in each slot, and each unit holds at most one runner at a
-time. Therefore the participating peak across **all PRs and compatibility
-runs together** is `1 × 1 + 1 × 1 = 2` runners. Matrix children each contend
-for their assigned slot; a per-run `max-parallel` would not establish this
-repository-wide bound. A caller holding a slot while Pages changes stages
+admission unit runs in each group, there are `2 slots × 2 lanes = 4` groups, and
+each unit holds at most one runner at a time. Therefore the participating peak
+across **all PRs and compatibility runs together** is
+`2 × 2 × 1 = 4` runners (it was `2` before the lane split). Matrix children each
+contend for their assigned group; a per-run `max-parallel` would not establish
+this repository-wide bound. A caller holding a slot while Pages changes stages
 can reduce utilization, but cannot increase the peak.
 
 Promptfoo offline compatibility is a step inside the existing Workflow Contracts
 job, so it shares slot 1 rather than creating another admission unit or runner.
 Its verification command is registered in the baseline check inventory, the
 workflow-contracts lane and that job's steps together. Adding a check within a
-job can increase its slot occupancy time; it does not change the two-slot peak.
+job can increase its slot occupancy time; it does not change the four-group peak.
 Changes that add a job or expand a reusable caller instead require a new
 participation and runner-width review.
 
@@ -63,12 +109,12 @@ callee snapshots and SHA-256 digests are retained under
 workflow implementations. The source validator rejects mutable or unknown
 pins, nested reusable calls, matrices in callees, and any pair of callee jobs
 without an ordering dependency. Pages' separate deployment concurrency group
-does not match either caller slot, avoiding same-group caller/callee nesting.
+does not match any caller group, avoiding same-group caller/callee nesting.
 Updating a pin requires retaining and reviewing its new expansion.
 
 The bound applies to runs using these workflow revisions. Already-created runs
 and older PR workflow revisions are not retroactively enrolled. During rollout,
-legacy work can overlap the participating jobs and exceed two total runners;
+legacy work (including runs still pending in the retired `flow-agents-compute-1`/`-2` groups) can overlap the participating jobs and exceed four total runners;
 this source change alone is not proof of a live repository-wide ceiling.
 This is a cooperative repository source policy, not an organization security
 boundary: a writer who can change workflows can also propose changing the budget.
@@ -89,7 +135,7 @@ The remaining checks took 23 seconds in the preceding successful main
 with about two more seconds for finalization and upload. Combining those
 measurements projects roughly 15m24s, leaving about 14m36s under the new limit.
 This is a budget estimate, not proof that the repaired head passes hosted CI.
-The change preserves every check and the two-slot concurrency bound; a longer
+The change preserves every check and the slot/lane concurrency bound; a longer
 deadline can increase slot occupancy without increasing peak runners.
 
 ## Queue and cancellation limits
@@ -97,9 +143,9 @@ deadline can increase slot occupancy without increasing peak runners.
 GitHub allows one running admission and up to 100 pending entries per group.
 FIFO is by arrival at that group, not PR creation time or workflow start time.
 An additional entry at a full queue is cancelled; that is a nonpassing result,
-not evidence that its checks ran. Each group orders independently. This does
-not promise globally balanced service, equal PR shares, or a maximum wait.
-A busy slot can have a backlog while the other is idle.
+not evidence that its checks ran. Each of the four groups orders independently.
+This does not promise globally balanced service, equal PR shares, or a maximum
+wait. A busy group can have a backlog while the others are idle.
 
 CI retains its existing per-ref workflow concurrency and latest-head
 cancellation. A new CI run can cancel older CI work for the same ref, including
@@ -114,7 +160,7 @@ The `publish-npm.yml` verification and publication jobs, the `release-please.yml
 release controller, and the `add-to-project.yml` issue automation caller are
 outside this participating budget. They retain their existing ownership and
 triggers. Total repository compute, organization capacity, and other repositories
-can exceed two. This policy reserves no organization slots and requires no paid
+can exceed four. This policy reserves no organization slots and requires no paid
 capacity. A new workflow or job fails classification until its participation or
 exception is reviewed; the current excluded workflows cannot acquire PR triggers
 without changing the policy.
@@ -124,10 +170,16 @@ without changing the policy.
 `bash evals/static/test_ci_compute_policy.sh` runs through the existing static
 suite and required CI evidence path. It validates original YAML, immutable
 callee expansion, all matrix children, and mutation cases for a third group,
-ref splitting, missing jobs/admission/queue, cross-PR cancellation, mutable pins,
-unclassified PR compute and callee growth. Its finite model exhausts every
-completion interleaving in 12 scenarios containing two PR graphs and runtime
-compatibility, with both job orders and all six caller-batch arrival orders.
+ref splitting, the retired group names, a fifth group (third slot or third
+lane), a changed or inverted parity expression, lane inputs drawn from PR, ref,
+head SHA or run attempt, missing jobs/admission/queue, cross-PR cancellation,
+mutable pins, unclassified PR compute and callee growth. It also pins the
+parity expression and checks that it maps run IDs to exactly two lanes. Its
+finite model exhausts every completion interleaving in 132 scenarios containing
+two PR graphs and runtime compatibility, with both job orders, all six
+caller-batch arrival orders and eleven lane assignments (eight with one lane per
+owner, three giving each workflow run of an owner its own lane), and asserts a
+model peak of exactly four concurrent runners.
 Separate model cases cover FIFO, overflow, duplicate work and cross-head
 cancellation. This is bounded model evidence, not exhaustive platform evidence.
 

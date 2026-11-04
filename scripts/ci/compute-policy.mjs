@@ -15,6 +15,15 @@ export const assignments = {
   'docs.yml': { gate: 1, pages: 2 },
   'kit-gates-demo.yml': { 'release-evidence-gate-demo': 1 },
 };
+// Each slot splits into two lanes (4 native groups repo-wide, peak 4 runners).
+// The lane is run-ID parity, chosen without arithmetic: all jobs of one run share
+// a lane per slot, and the expression embeds no PR, ref, head or attempt identity.
+// The base name is `-v2-` so it cannot collide with the retired
+// `flow-agents-compute-1`/`-2` groups, whose queue head stalled on 2026-11-03.
+export const laneExpression = [0, 2, 4, 6, 8].map(d => `endsWith(github.run_id, '${d}')`).join(' || ');
+export const lanes = ['a', 'b'];
+export const admissionGroup = slot => `flow-agents-compute-v2-${slot}-\${{ (${laneExpression}) && 'a' || 'b' }}`;
+export const slots = [1, 2];
 // These controllers are outside the participating budget. New workflows/jobs must
 // receive an explicit classification, rather than silently escaping the bound.
 export const exclusions = {
@@ -54,7 +63,10 @@ export function validate(workflows = loadWorkflows(), fixtureDirectory = join(ro
     `${file}: workflow cancellation changed`);
     for (const [id, job] of Object.entries(workflow.jobs)) {
       const slot = assignments[file][id];
-      assert.deepEqual(job.concurrency, { group: `flow-agents-compute-${slot}`, queue: 'max', 'cancel-in-progress': false }, `${file}/${id}: admission shape`);
+      assert.ok(slots.includes(slot), `${file}/${id}: unknown slot`);
+      // Exact string equality: any other group name, a third slot, a different
+      // lane expression or an embedded PR/ref/head identifier is refused.
+      assert.deepEqual(job.concurrency, { group: admissionGroup(slot), queue: 'max', 'cancel-in-progress': false }, `${file}/${id}: admission shape`);
       const children = matrixChildren(job);
       if (file === 'runtime-compat.yml' && id === 'harness-canary') {
         assert.deepEqual(children.map(x => x.runtime), ['opencode', 'pi'], 'review matrix child budget');
@@ -95,5 +107,5 @@ export function validate(workflows = loadWorkflows(), fixtureDirectory = join(ro
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const expanded = validate();
-  console.log(JSON.stringify({ admissionUnits: expanded.length, expandedRunnerJobs: expanded.reduce((n, x) => n + x.runners.length, 0), slots: 2, expanded }, null, 2));
+  console.log(JSON.stringify({ admissionUnits: expanded.length, expandedRunnerJobs: expanded.reduce((n, x) => n + x.runners.length, 0), slots: slots.length, lanes: lanes.length, groups: slots.length * lanes.length, expanded }, null, 2));
 }
