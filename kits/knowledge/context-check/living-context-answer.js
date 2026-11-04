@@ -13,7 +13,7 @@
 import { runSupportVerifier, validateCandidateVerification } from "@kontourai/survey";
 import { error, gitRaw } from "./index.js";
 import { deriveLivingContext, parseInstant } from "./living-context.js";
-import { cleanStatement, documentUnits } from "./living-context-text.js";
+import { cleanStatement, documentUnits, statementInUnits } from "./living-context-text.js";
 
 /** An authority document larger than this is refused (abstain), never truncated into a verifier. */
 export const MAX_EVIDENCE_BYTES = 65536;
@@ -39,17 +39,8 @@ export function createLineSupportVerifier() {
     async verify(input) {
       const statement = cleanStatement(String(input.value));
       if (statement === "") return { result: "abstain", abstainReason: "malformed" };
-      const supported = input.evidence.some((item) => {
-        if (item.excerpt.split(/\r?\n/).some((line) => cleanStatement(line) === statement)) return true;
-        return documentUnits(item.excerpt).some(({ sentences }) => {
-          for (let from = 0; from < sentences.length; from++) {
-            for (let to = from; to < sentences.length; to++) {
-              if (cleanStatement(sentences.slice(from, to + 1).join(" ")) === statement) return true;
-            }
-          }
-          return false;
-        });
-      });
+      const supported = input.evidence.some((item) => item.excerpt.split(/\r?\n/).some((line) => cleanStatement(line) === statement)
+        || statementInUnits(documentUnits(item.excerpt), String(input.value)));
       return { result: supported ? "supported" : "not-addressed" };
     },
   };

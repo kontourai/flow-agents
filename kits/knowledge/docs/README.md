@@ -420,7 +420,12 @@ a verifier is a required argument. `createLineSupportVerifier` is a deterministi
 physical line of its authority text, or a complete sentence (or a run of consecutive sentences) of one paragraph, list item or
 heading after the paragraph's hard wraps are joined, ignoring case, whitespace, list and quote markers, inline Markdown and one
 trailing full stop. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot
-read negation, so production callers inject a model or human verifier. Only `supported` answers; `contradicted` is
+read negation, so production callers inject a model or human verifier. Code between backticks is compared exactly as written;
+an unpaired `*` or `_` is a character, not formatting; a heading is a unit of its own; a fenced block is not prose. Stated limits:
+the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted initialisms and a short
+abbreviation list exempt), so an abbreviation it does not know can cut a sentence early and a sentence tail would then be
+supported; and a paragraph over 4,000 characters is compared without Markdown stripping, which keeps the work linear because the
+verifier is synchronous and a timeout cannot interrupt it. Only `supported` answers; `contradicted` is
 reported; `not-addressed`, an abstaining, throwing, or timed-out verifier, an unreadable, empty or
 oversized (`MAX_EVIDENCE_BYTES`) authority document, and budget drops all abstain, and any
 abstention makes the set `not_verified`. Each verdict is kept as Survey's immutable
@@ -459,15 +464,15 @@ here, conservatively, and the rules are the contract:
 |---|---|
 | `id`, `claim` | the record id and title (whitespace collapsed). A title labels a record; it is not a verified statement. |
 | `authority`, `owning_source` | the record's file at the pinned revision |
-| `status` | a record that another record `supersedes` is `superseded` by it (the Kit derives supersession from the edge, never the stored status); several successors: `unverifiable`. Otherwise `active` and `implemented` are `current`; `retired` without a successor and any other status are `unverifiable`. Nothing unrecognised is current. |
-| `slot`, edge | the supersession lineage (`lineage:<smallest id>`); a record in no lineage has its own slot. The edge is a `succession` recorded when the successor's `supersede` was logged. |
+| `status` | a record that another record `supersedes`, or that its own `superseded-by` log entry names, is `superseded` by it (the Kit derives supersession from the edge, never the stored status). Several successors, or a successor that is not a manifest record (archived, excluded, missing): `unverifiable`. A freshness the record declares but the Kit's reader cannot read: `unverifiable`. Otherwise `active` and `implemented` are `current`; `retired` without a successor and any other status are `unverifiable`. Nothing unrecognised is current. |
+| `slot`, edge | the supersession lineage (`lineage:<smallest id>`); a record in no lineage has its own slot. The edge is a `succession` recorded when the predecessor's own `superseded-by` entry says it was (else the successor's single `supersede` entry; else untimed, and recall says `supersession_time_unknown`). |
 | `recorded_at`, `valid_time.from` | `created_at`. Missing or unreadable: omitted, and recall says `knowledge_time_unknown`. |
-| `expires_at`, `ttl_seconds` | the record's own, if any. A record without them never goes stale; its `updated_at` is returned for the reader to weigh. |
+| `expires_at` | the Kit's own reading (`effectiveExpiryMs`) of the record's `expires_at` or `ttl_seconds`. A record without either never goes stale; its `updated_at` is returned for the reader to weigh. |
 | `visibility`, `readers` | the host declares who reads the store (`readers`); every record is visible to exactly those. The store carries no per-record visibility, and without `readers` there is no manifest. |
 | `review` | omitted, read as `proposed`: no record carries a per-claim human review. |
 
 Excluded, with a reason (`excluded` in the result): duplicate ids (every copy), a file over `MAX_RECORD_BYTES`, a blank title,
-an id that is not a safe claim id. `archive/`, dot directories, symlinks and Markdown without record frontmatter are not records
+an id that is not a safe claim id, bytes that are not UTF-8 (never rewritten into text), a path recall cannot carry. `archive/`, dot directories, symlinks and Markdown without record frontmatter are not records
 and are only counted. Distilled memory claims map the same way through `deriveMemoryManifest`
 (`context-check/living-context-memory.mjs`; needs the built package): the text comes from `presentMemoryClaims`, so posture and
 review label stay in the claim; only `stated` is `current`; the repository file that grounds each claim and the instant the store
@@ -483,6 +488,8 @@ below the bar listed), not the least-bad record. There is no type or link prior:
 compiled note. The store host's own `knowledge_context` adds a link-count prior of up to 20 to a lexical score of at most 4 per
 keyword, which buries a recent, unlinked record under well-linked ones (flow-agents#1595 has the measurement); that tool also has no
 as-of, reader, supersession or abstention.
+
+**Who sees what.** Selection runs only over the claims recall would let this reader see and that are known at `now` (`admittedClaimIds`, the same reader admission, visibility and knowledge-time decisions as recall). A hidden or not-yet-recorded claim is never scored, quoted, named as a nearest miss, or followed as a successor, and an unknown reader is refused before anything is selected.
 
 **What `answered` means.** The quoted passage is in the cited record at the pinned revision (the verifier checked it) and the record
 is `current` as of `now`. The passage is chosen from the record's own sentences and is shown only if the passage together with the

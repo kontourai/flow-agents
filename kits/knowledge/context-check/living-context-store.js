@@ -13,31 +13,35 @@
  *   claim                the record title, whitespace collapsed. A title labels the record; it is not a verified
  *                        statement. An answer quotes the record body (see living-context-ask.js). Blank: `blank_title`.
  *   authority            the record's file at the pinned revision; owning source is `{ owner, path: <same file> }`.
- *   status               a record some other record `supersedes` is `superseded` by it (the Kit's derived rule: the
- *                        edge, never the stored status); with several successors it is `unverifiable`
- *                        (`multiple_successors`). Otherwise `active` and `implemented` are `current`, and every other
- *                        status (`retired` without a successor included) is `unverifiable`. Nothing unknown is current.
+ *   status               a record that another record `supersedes`, or that its own `superseded-by` log entry names, is
+ *                        `superseded` by it (the Kit's derived rule: the edge, never the stored status). Several successors,
+ *                        or a successor that is not a manifest record (archived, excluded, missing): `unverifiable`
+ *                        (`multiple_successors`, `successor_unavailable`). A freshness the record declares but the Kit's
+ *                        reader cannot read: `unverifiable` (`unreadable_freshness`). Otherwise `active` and `implemented`
+ *                        are `current`, and every other status (`retired` without a successor included) is `unverifiable`.
+ *                        Nothing unknown is current.
  *   slot                 the supersession lineage a record belongs to (`lineage:<smallest id>`); a record in no lineage
  *                        has a slot of its own (`record:<id>`), so no unrelated pair is ever treated as a replacement.
  *   recorded_at          the record `created_at` (when the store received it). Absent or unreadable: omitted, and recall
  *                        reports `knowledge_time_unknown` rather than guessing.
  *   valid_time           `{ from: created_at }`. A record asserts nothing about when it stops being true.
- *   supersession edge    `succession`, recorded at the successor's `supersede` log entry (else its `updated_at`).
- *   expires_at/ttl       the record's own `expires_at` / `ttl_seconds` when it has them; otherwise a record never expires
- *                        (its age is the reader's to judge: `updated_at` is returned with the record).
+ *   supersession edge    `succession`, recorded when the predecessor's own `superseded-by` entry says it was; else the
+ *                        successor's `supersede` entry if it has exactly one; else untimed (recall: `supersession_time_unknown`).
+ *   expires_at           the Kit's own reading of the record's `expires_at` / `ttl_seconds` (`effectiveExpiryMs`); a record
+ *                        without either never expires (its age is the reader's to judge: `updated_at` is returned).
  *   visibility           the store has no per-record visibility, so the host declares who reads the store (`readers`)
  *                        and every record is visible to exactly those readers. No `readers`, no manifest.
  *   review               omitted, which recall reads as `proposed`: no record carries a per-claim human review.
  *
  * Excluded, with a reason (never silently dropped): duplicate ids (all copies), over-size files, blank titles,
- * unsafe ids. Files under `archive/` or a dot directory, symlinks, and Markdown without a record's `id` and `category`
+ * unsafe ids, bytes that are not UTF-8 (never rewritten into text), paths recall cannot carry. Files under `archive/` or a dot directory, symlinks, and Markdown without a record's `id` and `category`
  * frontmatter are not records and are only counted.
  *
  * @module living-context-store
  */
 
 import * as path from "node:path";
-import { parseMarkdown } from "../adapters/shared/codec.js";
+import { decodeFreshnessFields, effectiveExpiryMs, parseMarkdown } from "../adapters/shared/codec.js";
 import { error, gitRaw, isIdentity, resolveRevisionBoundRepository, safeClaimId, safeRelativePath } from "./index.js";
 
 /** A record file larger than this is excluded rather than read: the answer step also refuses an authority over 64 KiB, so a bigger record could never be answered from. */
@@ -62,7 +66,9 @@ export function storeKnowledgeRoot(storePath = "knowledge", id = DEFAULT_STORE_R
   return { id, provider: "git-repo", manifest_path: `${safeRelativePath(storePath, "storePath").replace(/\/+$/, "")}/derived-claims.json` };
 }
 
-/** Blob contents by object id, in order, from one `git cat-file --batch` (sizes are in bytes, so the output is parsed as bytes). */
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
+
+/** Blob contents by object id, in order, from one `git cat-file --batch` (sizes are in bytes, so the output is parsed as bytes). Bytes that are not UTF-8 give `null`: they are never rewritten into text. */
 function readBlobs(root, objects) {
   if (objects.length === 0) return [];
   const out = gitRaw(root, ["cat-file", "--batch"], { input: `${objects.join("\n")}\n`, buffer: true });
@@ -73,7 +79,7 @@ function readBlobs(root, objects) {
     const header = out.subarray(offset, end).toString("utf8").split(" ");
     if (header[0] !== object || header[1] !== "blob") throw error("REVISION_READ_FAILED", "Context Check could not read a record blob from the pinned revision");
     const size = Number(header[2]);
-    texts.push(out.subarray(end + 1, end + 1 + size).toString("utf8"));
+    try { texts.push(STRICT_UTF8.decode(out.subarray(end + 1, end + 1 + size))); } catch { texts.push(null); }
     offset = end + 1 + size + 1;
   }
   return texts;
@@ -82,6 +88,7 @@ function readBlobs(root, objects) {
 function listStoreFiles(root, revision, store) {
   const out = gitRaw(root, ["ls-tree", "-r", "-z", "--long", revision, "--", store]);
   const files = [];
+  const unsafe = [];
   for (const line of out.split("\0")) {
     if (line === "") continue;
     const match = LS_TREE_ENTRY.exec(line);
@@ -91,9 +98,11 @@ function listStoreFiles(root, revision, store) {
     const segments = relative.split("/");
     if (type !== "blob" || mode === "120000" || !file.endsWith(".md")) continue;
     if (segments.some((segment) => segment === "archive" || segment.startsWith("."))) continue;
+    // A path recall cannot carry (control characters, traversal) is a named exclusion, not a reason to read nothing.
+    try { safeRelativePath(file, "record path"); } catch { unsafe.push({ path: file, reason: "unsafe_path" }); continue; }
     files.push({ path: file, object, size: size === "-" ? 0 : Number(size) });
   }
-  return files.sort((a, b) => a.path.localeCompare(b.path));
+  return { files: files.sort((a, b) => a.path.localeCompare(b.path)), unsafe };
 }
 
 /**
@@ -112,13 +121,15 @@ export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge
   const excluded = [];
   const parsed = [];
   let skipped = 0;
-  const files = listStoreFiles(root, pinned, store);
+  const { files, unsafe } = listStoreFiles(root, pinned, store);
+  excluded.push(...unsafe);
   const readable = [];
   for (const file of files) {
     if (file.size > MAX_RECORD_BYTES) excluded.push({ path: file.path, reason: "too_large" }); else readable.push(file);
   }
   const texts = readBlobs(root, readable.map((file) => file.object));
   for (const [index, file] of readable.entries()) {
+    if (texts[index] === null) { excluded.push({ path: file.path, reason: "invalid_utf8" }); continue; }
     const { meta, body } = parseMarkdown(texts[index]);
     if (typeof meta?.id !== "string" || !meta.id || typeof meta.category !== "string" || !meta.category) { skipped++; continue; }
     parsed.push({ file, meta, body });
@@ -138,26 +149,47 @@ export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge
   records.sort((a, b) => a.id.localeCompare(b.id));
   const byId = new Map(records.map((record) => [record.id, record]));
 
-  // A record that another record `supersedes` is superseded by it. Targets that are not manifest records (a filename, an excluded record) are no edge.
-  const successors = new Map();
+  // A record is superseded by every record that links `supersedes` to it, and by every record its own `superseded-by` log entries name
+  // (the writer records both). A successor that is not a manifest record (archived, excluded, missing) leaves the predecessor unresolved:
+  // the store says it was replaced by something this manifest cannot show, so it is not called current.
+  const successors = new Map(records.map((record) => [record.id, new Set()]));
+  const unresolved = new Map(records.map((record) => [record.id, new Set()]));
+  const edgeTimes = new Map();
+  const edge = (old, next, at) => {
+    if (next === old) return;
+    if (byId.has(next)) successors.get(old).add(next); else unresolved.get(old).add(next);
+    if (at && (!edgeTimes.has(`${old}>${next}`) || at > edgeTimes.get(`${old}>${next}`))) edgeTimes.set(`${old}>${next}`, at);
+  };
   for (const record of records) {
     for (const link of asList(record.meta.links)) {
-      if (link?.kind !== "supersedes" || typeof link.target_id !== "string" || !byId.has(link.target_id) || link.target_id === record.id) continue;
-      successors.set(link.target_id, new Set([...(successors.get(link.target_id) ?? []), record.id]));
+      if (link?.kind === "supersedes" && typeof link.target_id === "string" && byId.has(link.target_id)) edge(link.target_id, record.id);
+    }
+    for (const entry of asList(record.meta.mutation_log)) {
+      if (entry?.op === "superseded-by" && typeof entry.new_id === "string") edge(record.id, entry.new_id, instantOf(entry.at));
     }
   }
+  // Where the predecessor logged no time for an edge, the successor's single `supersede` entry dates it; several entries cannot say which edge, so none is guessed.
+  const supersedeTimes = (record) => asList(record.meta.mutation_log).filter((entry) => entry?.op === "supersede").map((entry) => instantOf(entry.at)).filter(Boolean);
+  const edgeRecordedAt = (old, next) => edgeTimes.get(`${old}>${next}`) ?? (supersedeTimes(byId.get(next)).length === 1 ? supersedeTimes(byId.get(next))[0] : undefined);
+
   // Slots: connected components of the supersession graph, so only records of one lineage can replace each other.
   const parent = new Map(records.map((record) => [record.id, record.id]));
   const find = (id) => { let current = id; while (parent.get(current) !== current) current = parent.get(current); return current; };
   for (const [old, news] of successors) for (const next of news) {
-    const [a, b] = [find(old), find(next)];
-    if (a !== b) parent.set(a < b ? b : a, a < b ? a : b);
+    const [x, y] = [find(old), find(next)];
+    if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
   }
-  const slotOf = (id) => { const rootId = find(id); const members = records.filter((record) => find(record.id) === rootId); return members.length > 1 ? `lineage:${rootId}` : `record:${id}`; };
+  const lineageSize = new Map();
+  for (const record of records) lineageSize.set(find(record.id), (lineageSize.get(find(record.id)) ?? 0) + 1);
+  const slotOf = (id) => (lineageSize.get(find(id)) > 1 ? `lineage:${find(id)}` : `record:${id}`);
 
-  const edgeRecordedAt = (successor) => {
-    const logged = asList(successor.meta.mutation_log).filter((entry) => entry?.op === "supersede").map((entry) => instantOf(entry.at)).filter(Boolean).sort();
-    return logged.at(-1) ?? instantOf(successor.meta.updated_at);
+  /** A freshness the record declares but the Kit's own reader cannot read is not "never expires". */
+  const freshnessOf = (meta) => {
+    const declared = meta.expires_at !== undefined || meta.ttl_seconds !== undefined;
+    if (!declared) return { declared };
+    const expiryMs = effectiveExpiryMs(decodeFreshnessFields({ ...meta }));
+    const unreadable = expiryMs === null || (meta.expires_at !== undefined && Number.isNaN(Date.parse(meta.expires_at))) || (meta.ttl_seconds !== undefined && !Number.isFinite(Number(meta.ttl_seconds)));
+    return { declared, unreadable, ...(expiryMs === null ? {} : { expiresAt: new Date(expiryMs).toISOString() }) };
   };
 
   const claims = [];
@@ -165,29 +197,30 @@ export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge
   const visibility = { audiences: [...readers] };
   for (const record of records) {
     const recordedAt = instantOf(record.meta.created_at);
-    const successorIds = [...(successors.get(record.id) ?? [])].sort();
-    let status, mapping, edge = {};
-    if (successorIds.length === 1) {
+    const successorIds = [...successors.get(record.id)].sort();
+    const fresh = freshnessOf(record.meta);
+    let status, mapping, edgeFields = {};
+    if (unresolved.get(record.id).size > 0) { status = "unverifiable"; mapping = "successor_unavailable"; }
+    else if (successorIds.length === 1) {
       status = "superseded";
       mapping = "superseded_by_record";
-      edge = { superseded_by: successorIds[0], supersession_kind: "succession", ...(edgeRecordedAt(byId.get(successorIds[0])) ? { supersession_recorded_at: edgeRecordedAt(byId.get(successorIds[0])) } : {}) };
+      const at = edgeRecordedAt(record.id, successorIds[0]);
+      edgeFields = { superseded_by: successorIds[0], supersession_kind: "succession", ...(at ? { supersession_recorded_at: at } : {}) };
     } else if (successorIds.length > 1) { status = "unverifiable"; mapping = "multiple_successors"; }
+    else if (fresh.unreadable) { status = "unverifiable"; mapping = "unreadable_freshness"; }
     else if (SERVED_STATUSES.has(record.status)) { status = "current"; mapping = `status:${record.status}`; }
     else { status = "unverifiable"; mapping = record.status === "retired" ? "retired_without_successor" : `unrecognised_status:${record.status}`; }
-    const expiresAt = instantOf(record.meta.expires_at);
-    const ttl = Number(record.meta.ttl_seconds);
     claims.push({
       id: record.id,
       claim: record.title,
       status,
-      ...edge,
+      ...edgeFields,
       authority: { path: record.path, citation: `${record.category} record ${record.id}` },
       owning_source: { owner, path: record.path },
       affected_surfaces: [record.path],
       visibility,
       ...(recordedAt ? { recorded_at: recordedAt, valid_time: { from: recordedAt } } : {}),
-      ...(expiresAt ? { expires_at: expiresAt } : {}),
-      ...(record.meta.ttl_seconds !== undefined && Number.isFinite(ttl) && ttl >= 0 ? { ttl_seconds: ttl } : {}),
+      ...(fresh.expiresAt ? { expires_at: fresh.expiresAt } : {}),
       slot: slotOf(record.id),
     });
     described.push({ claim_id: record.id, path: record.path, title: record.title, type: record.type, category: record.category, tags: record.tags, record_status: record.status, mapping, created_at: record.meta.created_at, updated_at: record.meta.updated_at, body: record.body });

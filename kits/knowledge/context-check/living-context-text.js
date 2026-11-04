@@ -3,27 +3,56 @@
  * whether a statement is in an authority document) and by question answering (which quotes a passage of a record). Sharing
  * it is what keeps the two honest with each other: a passage that is quoted is always a statement the verifier can find.
  *
- * Dependency-free on purpose, like `index.js`.
+ * Dependency-free on purpose, like `index.js`. Every step is linear in the text or bounded by `MAX_INLINE_CHARS`, because the
+ * verifier runs synchronously and a timeout cannot interrupt it.
+ *
+ * Stated limits: the sentence cut is a heuristic (a full stop, space, then a capital, digit or opening quote). An abbreviation
+ * it does not know can cut a sentence early, and then a sentence tail is supported as if it were a sentence. Negation is not read.
  *
  * @module living-context-text
  */
 
-const BLOCK_MARKER = /^\s*(?:[-*+>]|\d{1,3}[.)]|#{1,6})\s+/;
-// `Mr`, `e.g` and the like end in a full stop without ending a sentence. A cut that is missed makes the verifier stricter (a sentence
-// run it cannot see); a cut at an abbreviation this list lacks makes a sentence tail look like a sentence, so the list errs long.
-const ABBREVIATION = /(?:^|\s)(?:e\.g|i\.e|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd|[a-z])\.$/i;
+/** Longer than this, a unit is compared as written: inline Markdown is not stripped (on either side), so cost stays bounded. */
+export const MAX_INLINE_CHARS = 4000;
 
-/** Inline Markdown that is formatting, not wording: links keep their text; emphasis and code markers go. Applied to claim and document alike. */
-export function stripInlineMarkdown(text) {
+const BLOCK_MARKER = /^\s*(?:[-*+>]|\d{1,3}[.)]|#{1,6})\s+/;
+const HEADING = /^\s*#{1,6}\s/;
+// Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`).
+const ABBREVIATION = /(?:^|\s)(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
+const CODE_SPAN = /(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+
+/** Emphasis and links that are formatting. Markers without a partner are characters and stay. */
+function stripFormatting(text) {
   return text
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\*\*|__|~~|`/g, "")
-    .replace(/(^|[\s(])[*_](?=\S)/g, "$1")
-    .replace(/(?<=\S)[*_](?=[\s).,;:!?]|$)/g, "");
+    .replace(/!?\[([^\]\n]{0,300})\]\([^)\n]{0,500}\)/g, "$1")
+    .replace(/\*\*(?=\S)([^*\n]{1,2000}?)(?<=\S)\*\*/g, "$1")
+    .replace(/(^|[^\w])__(?=\S)([^_\n]{1,2000}?)(?<=\S)__(?!\w)/g, "$1$2")
+    .replace(/~~(?=\S)([^~\n]{1,2000}?)(?<=\S)~~/g, "$1")
+    .replace(/(^|[^\w*])\*(?=[^\s*])([^*\n]{1,2000}?)(?<=[^\s*])\*(?![\w*])/g, "$1$2")
+    .replace(/(^|[^\w])_(?=[^\s_])([^_\n]{1,2000}?)(?<=[^\s_])_(?!\w)/g, "$1$2");
 }
 
-/** Lower-cased, whitespace-collapsed, markdown- and marker-free, without one trailing full stop: the form two statements are compared in. */
-export const cleanStatement = (text) => stripInlineMarkdown(text.replace(/^[\s>*+-]+/, "")).replace(/\s+/g, " ").trim().toLowerCase().replace(/\.$/, "");
+/**
+ * Inline Markdown that is formatting, not wording: links keep their text, paired emphasis goes, and the backticks around code go
+ * while the code between them is kept exactly as written (a marker inside a code span is a character, never emphasis).
+ */
+export function stripInlineMarkdown(text) {
+  if (text.length > MAX_INLINE_CHARS) return text;
+  let out = "";
+  let last = 0;
+  for (const span of text.matchAll(CODE_SPAN)) {
+    out += stripFormatting(text.slice(last, span.index)) + span[2];
+    last = span.index + span[0].length;
+  }
+  return out + stripFormatting(text.slice(last));
+}
+
+const squash = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
+/** The form a statement is compared in, before the closing full stop is considered. */
+export const comparable = (text) => squash(stripInlineMarkdown(text.replace(/^[\s>*+-]+/, "")));
+const withoutFinalStop = (text) => text.replace(/\.$/, "");
+/** Lower-cased, whitespace-collapsed, markup- and marker-free, without one trailing full stop: the form two statements are compared in. */
+export const cleanStatement = (text) => withoutFinalStop(comparable(text));
 
 function splitSentences(text) {
   const sentences = [];
@@ -41,8 +70,8 @@ function splitSentences(text) {
 /**
  * The statements a document makes, as complete sentences. A document is read the way a person reads it: a blank line, a list
  * item, a quote or a heading starts a new unit, and a line without one continues the unit above, so a hard-wrapped paragraph is
- * one unit. Each unit is cut into sentences at `. `, `! ` or `? ` before a capital, digit or opening quote (case is kept until
- * after the cut so the capital can be seen). Fenced code and front matter are not prose and yield no unit.
+ * one unit; a heading is one line. Each unit is cut into sentences at `. `, `! ` or `? ` before a capital, digit or opening quote
+ * (case is kept until after the cut so the capital can be seen). Fenced code and front matter are not prose and yield no unit.
  *
  * @returns {{kind: "heading"|"item"|"paragraph", sentences: string[]}[]}
  */
@@ -58,17 +87,40 @@ export function documentUnits(text) {
   }
   for (; index < lines.length; index++) {
     const line = lines[index];
-    const marker = /^\s*(```+|~~~+)/.exec(line);
-    if (fence) { if (marker && marker[1].startsWith(fence)) fence = undefined; continue; }
-    if (marker) { fence = marker[1][0].repeat(3); current = undefined; continue; }
+    if (fence) {
+      const closing = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
+      if (closing && closing[1][0] === fence.char && closing[1].length >= fence.length) fence = undefined;
+      continue;
+    }
+    const opening = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (opening) { fence = { char: opening[1][0], length: opening[1].length }; current = undefined; continue; }
     if (line.trim() === "") { current = undefined; continue; }
-    const body = stripInlineMarkdown(line.replace(BLOCK_MARKER, "")).replace(/\s+/g, " ").trim();
+    const body = line.replace(BLOCK_MARKER, "").replace(/\s+/g, " ").trim();
     const starts = BLOCK_MARKER.test(line);
     if (starts || current === undefined) {
-      const kind = /^\s*#{1,6}\s/.test(line) ? "heading" : starts ? "item" : "paragraph";
+      const kind = HEADING.test(line) ? "heading" : starts ? "item" : "paragraph";
       current = { kind, parts: [body] };
       units.push(current);
+      if (kind === "heading") current = undefined;
     } else current.parts.push(body);
   }
-  return units.map(({ kind, parts }) => ({ kind, sentences: splitSentences(parts.join(" ")).map((sentence) => sentence.trim()).filter(Boolean) }));
+  return units.map(({ kind, parts }) => ({ kind, sentences: splitSentences(stripInlineMarkdown(parts.join(" "))).map((sentence) => sentence.trim()).filter(Boolean) }));
+}
+
+/** Whether `statement` is one sentence, or consecutive whole sentences, of one unit. Linear in the unit: a start is only extended while it is still a prefix. */
+export function statementInUnits(units, statement) {
+  const target = comparable(statement);
+  const wanted = withoutFinalStop(target);
+  for (const { sentences } of units) {
+    const keys = sentences.map(squash);
+    for (let from = 0; from < keys.length; from++) {
+      let run = "";
+      for (let to = from; to < keys.length; to++) {
+        run = to === from ? keys[to] : `${run} ${keys[to]}`;
+        if (withoutFinalStop(run) === wanted) return true;
+        if (!`${wanted}.`.startsWith(run) && !wanted.startsWith(run)) break;
+      }
+    }
+  }
+  return false;
 }

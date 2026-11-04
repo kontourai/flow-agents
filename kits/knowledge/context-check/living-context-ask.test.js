@@ -408,3 +408,165 @@ describe("#1597: the deterministic verifier reads prose the way it is written", 
     remove(repo);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Review round 1 on #1601 (every case below was reproduced against the first head before it was fixed).
+
+async function mini(build) {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "living-context-mini-")));
+  git(repo, ["init", "-q"]);
+  git(repo, ["config", "user.email", "fixture@example.test"]);
+  git(repo, ["config", "user.name", "Fixture"]);
+  const store = new ClockStore({ storeRoot: path.join(repo, "knowledge") });
+  const make = async (at, input) => { store.at = at; return store.create({ provenance: { agent: "fixture" }, type: "raw", category: "decision.mini", tags: [], ...input }); };
+  const put = (relative, content) => { const file = path.join(repo, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, content); };
+  const ids = await build({ store, make, put, repo });
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "seed"]); // a host-wide commit hook must not see the invalid bytes one case commits
+  return { repo, revision: git(repo, ["rev-parse", "HEAD"]), ids };
+}
+const minis = [];
+const track = async (build) => { const built = await mini(build); minis.push(built.repo); return built; };
+after(() => { for (const repo of minis) remove(repo); });
+
+describe("review: what ask returns respects the reader and the knowledge instant", () => {
+  const CANARY = "Secret canary acquisition costs 43 million.";
+  const memoryRecord = (id, audiences, recordedAt = "2026-10-01T00:00:00Z") => ({
+    manifest: { readers: ["alice", "bob"], claims: [{ id, claim: "Canary acquisition cost", status: "current", authority: { path: "docs/secret.md", citation: "secret" }, owning_source: { owner: "o", path: "docs/secret.md" }, affected_surfaces: ["docs/secret.md"], visibility: { audiences }, recorded_at: recordedAt, slot: id }] },
+    records: [{ claim_id: id, path: "docs/secret.md", title: "Canary acquisition cost", type: "memory-claim", category: "memory.claim", tags: [], record_status: "stated", created_at: recordedAt, updated_at: recordedAt, body: CANARY }],
+  });
+  const leaks = (result) => JSON.stringify({ results: result.results, below: result.below_threshold }).match(/canary|43 million|secret\.md|mem-secret/i);
+
+  test("a claim restricted to another reader is neither answered nor named, and the owner still gets it", async () => {
+    const m = await track(async ({ make, put }) => { put("docs/secret.md", `${CANARY}\n`); return { filler: await make("2026-10-01T00:00:00.000Z", { title: "Filler note", body: "Nothing relevant.\n" }) }; });
+    const secret = memoryRecord("mem-secret", ["alice"]);
+    const question = "Secret canary acquisition costs?";
+    const bob = await askLivingContext({ repoRoot: m.repo, revision: m.revision, question, reader: "bob", readers: ["alice", "bob"], now: NOW, verifier, additional: [secret] });
+    assert.equal(bob.outcome, "abstained");
+    assert.equal(leaks(bob), null, JSON.stringify(bob.results));
+    const alice = await askLivingContext({ repoRoot: m.repo, revision: m.revision, question, reader: "alice", readers: ["alice", "bob"], now: NOW, verifier, additional: [secret] });
+    assert.equal(alice.outcome, "answered");
+    assert.equal(alice.results[0].passage, CANARY);
+  });
+
+  test("a claim recorded after the as-of instant does not exist yet: nothing of it is returned", async () => {
+    const m = await track(async ({ put }) => { put("docs/secret.md", `${CANARY}\n`); return {}; });
+    const future = memoryRecord("mem-secret", ["alice", "bob"], "2026-12-01T00:00:00Z");
+    const result = await askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "Secret canary acquisition costs?", reader: "bob", readers: ["alice", "bob"], now: NOW, verifier, additional: [future] });
+    assert.equal(leaks(result), null, JSON.stringify(result.results));
+    assert.equal(result.outcome, "abstained");
+  });
+
+  test("a reader the host did not declare is refused before any selection", async () => {
+    const m = await track(async ({ make }) => ({ a: await make("2026-10-01T00:00:00.000Z", { title: "Canary note", body: "Canary details.\n" }) }));
+    await assert.rejects(askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "canary details", reader: "stranger", readers: ["alice"], now: NOW, verifier }), (cause) => cause.code === "UNKNOWN_READER_IDENTITY");
+  });
+});
+
+describe("review: the producer keeps what the store recorded", () => {
+  const askOne = (m, question, extra = {}) => ask({ repoRoot: m.repo, revision: m.revision, question, ...extra });
+
+  test("a date-only expires_at, which the store accepts, expires the record; an unreadable freshness makes it unverifiable", async () => {
+    const m = await track(async ({ make }) => ({
+      dated: await make("2026-09-01T00:00:00.000Z", { title: "Rotation window for tokens", body: "Tokens rotate in the autumn window.\n", expires_at: "2026-10-02" }),
+      ttl: await make("2026-09-01T00:00:00.000Z", { title: "Rotation window for passwords", body: "Passwords rotate in the autumn window.\n", ttl_seconds: 3600 }),
+    }));
+    const derived = deriveStoreManifest({ repoRoot: m.repo, revision: m.revision, readers: ["maintainer"] });
+    assert.equal(claimOf(derived, m.ids.dated).expires_at, "2026-10-02T00:00:00.000Z");
+    const result = await askOne(m, "Rotation window autumn tokens passwords");
+    const by = Object.fromEntries(result.results.map((entry) => [entry.claim_id, entry]));
+    for (const id of [m.ids.dated, m.ids.ttl]) {
+      assert.equal(by[id].status, "unverifiable", id);
+      assert.deepEqual(by[id].reasons, ["stale_at_as_of"]);
+      assert.equal(by[id].outcome, "abstained");
+    }
+    const bad = await track(async ({ put }) => { put("knowledge/topic/soon.md", "---\nid: soon\ntype: raw\ntitle: \"Expires someday\"\ncategory: decision.odd\nstatus: active\nexpires_at: someday\ncreated_at: \"2026-10-01T00:00:00.000Z\"\nupdated_at: \"2026-10-01T00:00:00.000Z\"\nlinks: []\nmutation_log: []\n---\n\nBody.\n"); return {}; });
+    const unreadable = deriveStoreManifest({ repoRoot: bad.repo, revision: bad.revision, readers: ["maintainer"] });
+    assert.equal(claimOf(unreadable, "soon").status, "unverifiable");
+    assert.equal(unreadable.records[0].mapping, "unreadable_freshness");
+  });
+
+  test("each supersession edge is recorded when that edge was, not when the successor last superseded something", async () => {
+    const m = await track(async ({ store, make }) => {
+      const old = await make("2026-10-01T00:00:00.000Z", { title: "Alpha policy", body: "Alpha policy v1.\n" });
+      const other = await make("2026-10-01T00:00:00.000Z", { title: "Beta policy", body: "Beta policy v1.\n" });
+      const next = await make("2026-10-01T12:00:00.000Z", { title: "Gamma policy", body: "Gamma policy v2.\n" });
+      store.at = "2026-10-02T00:00:00.000Z";
+      await store.supersede(next, [old], { agent: "fixture", rationale: "first" });
+      store.at = "2026-10-04T00:00:00.000Z";
+      await store.supersede(next, [other], { agent: "fixture", rationale: "second" });
+      return { old, other, next };
+    });
+    const derived = deriveStoreManifest({ repoRoot: m.repo, revision: m.revision, readers: ["maintainer"] });
+    assert.equal(claimOf(derived, m.ids.old).supersession_recorded_at, "2026-10-02T00:00:00.000Z");
+    assert.equal(claimOf(derived, m.ids.other).supersession_recorded_at, "2026-10-04T00:00:00.000Z");
+    const midway = await ask({ repoRoot: m.repo, revision: m.revision, question: "Alpha policy", now: "2026-10-03T00:00:00Z" });
+    assert.equal(midway.results.find((entry) => entry.claim_id === m.ids.old).status, "superseded", "the edge existed on October 3");
+  });
+
+  test("a record whose successor is not in the manifest is not current", async () => {
+    const m = await track(async ({ store, make, repo }) => {
+      const old = await make("2026-10-01T00:00:00.000Z", { title: "Delta policy", body: "Delta policy v1.\n" });
+      const next = await make("2026-10-02T00:00:00.000Z", { title: "Epsilon policy", body: "Epsilon policy v2.\n" });
+      store.at = "2026-10-03T00:00:00.000Z";
+      await store.supersede(next, [old], { agent: "fixture", rationale: "replace" });
+      fs.mkdirSync(path.join(repo, "knowledge/archive"), { recursive: true });
+      fs.renameSync(path.join(repo, "knowledge/records", `${next}.md`), path.join(repo, "knowledge/archive", `${next}.md`));
+      return { old, next };
+    });
+    const derived = deriveStoreManifest({ repoRoot: m.repo, revision: m.revision, readers: ["maintainer"] });
+    assert.equal(claimOf(derived, m.ids.old).status, "unverifiable");
+    assert.equal(derived.records.find((record) => record.claim_id === m.ids.old).mapping, "successor_unavailable");
+    const result = await ask({ repoRoot: m.repo, revision: m.revision, question: "Delta policy" });
+    assert.notEqual(result.results[0].outcome, "answered");
+  });
+
+  test("bytes that are not UTF-8 and paths that are not safe are named exclusions, not rewritten text or an abort", async () => {
+    const m = await track(async ({ make, put, repo }) => {
+      await make("2026-10-01T00:00:00.000Z", { title: "Fine record", body: "Fine body.\n" });
+      fs.mkdirSync(path.join(repo, "knowledge/topic"), { recursive: true });
+      const good = "---\nid: bytes\ntype: raw\ntitle: \"Bad bytes\"\ncategory: decision.odd\nstatus: active\ncreated_at: \"2026-10-01T00:00:00.000Z\"\nupdated_at: \"2026-10-01T00:00:00.000Z\"\nlinks: []\nmutation_log: []\n---\n\nGrant ";
+      fs.writeFileSync(path.join(repo, "knowledge/topic/bytes.md"), Buffer.concat([Buffer.from(good), Buffer.from([0xff]), Buffer.from(" access.\n")]));
+      put("knowledge/topic/line\nbreak.md", "---\nid: nl\ntype: raw\ntitle: \"N\"\ncategory: decision.odd\nstatus: active\n---\n\nBody.\n");
+      return {};
+    });
+    const derived = deriveStoreManifest({ repoRoot: m.repo, revision: m.revision, readers: ["maintainer"] });
+    assert.deepEqual(derived.excluded.map((entry) => entry.reason).sort(), ["invalid_utf8", "unsafe_path"]);
+    assert.equal(derived.stats.claims, 1);
+  });
+});
+
+describe("review: the verifier supports only what the document says", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("literal code is compared as written: markers inside a code span are not emphasis", async () => {
+    assert.equal(await verdict("Set `allow` to true.", "Set `_allow` to true."), "not-addressed");
+    assert.equal(await verdict("Rotate api_key", "Rotate `api_key_`."), "not-addressed");
+    assert.equal(await verdict("Use admin as the prefix.", "Use *admin as the prefix."), "not-addressed", "an unpaired marker is a character, not formatting");
+    assert.equal(await verdict("Set `_allow` to true.", "Set `_allow` to true."), "supported");
+    assert.equal(await verdict("Run `rm *`.", "Run `rm *`"), "supported", "a whole line supported in version 2 is still supported");
+    assert.equal(await verdict("A bold word.", "A **bold** word."), "supported");
+    assert.equal(await verdict("A bold word here.", "A **bold\nword** here."), "supported", "emphasis may span a hard wrap");
+  });
+
+  test("a heading is not joined to the paragraph under it, a sentence is not cut inside an initialism, and a longer fence stays open", async () => {
+    assert.equal(await verdict("No access Production grants access.", "# No access\nProduction grants access.\n"), "not-addressed");
+    assert.equal(await verdict("Production grants access.", "# No access\nProduction grants access.\n"), "supported");
+    assert.equal(await verdict("Government may approve access.", "Only the U.S. Government may approve access.\n"), "not-addressed");
+    assert.equal(await verdict("Only the U.S. Government may approve access.", "Only the U.S. Government may approve access.\n"), "supported");
+    assert.equal(await verdict("Grant access.", "````\nGrant\n```\naccess.\n````\n"), "not-addressed", "prose inside a four-backtick fence is not a paragraph");
+  });
+
+  test("the cost of judging a statement is bounded by the document, not quadratic in it", async () => {
+    const sentences = Array.from({ length: 800 }, (_, i) => `Item ${i} stays.`).join(" ");
+    let started = Date.now();
+    assert.equal(await verdict("Nothing here matches this at all.", sentences), "not-addressed");
+    assert.ok(Date.now() - started < 2000, `800 sentences took ${Date.now() - started} ms`);
+    started = Date.now();
+    assert.equal(await verdict("No match.", `${"[a ".repeat(20000)}\n`), "not-addressed");
+    assert.ok(Date.now() - started < 2000, `unmatched brackets took ${Date.now() - started} ms`);
+    assert.equal(await verdict("Item 799 stays.", sentences), "supported");
+    assert.equal(await verdict("Item 3 stays. Item 4 stays. Item 5 stays.", sentences), "supported");
+    assert.equal(await verdict("Item 3 stays. Item 5 stays.", sentences), "not-addressed");
+  });
+});

@@ -17,7 +17,7 @@
  */
 
 import { error, isIdentity } from "./index.js";
-import { runLivingContext, parseInstant } from "./living-context.js";
+import { admittedClaimIds, runLivingContext, parseInstant } from "./living-context.js";
 import { answerLivingContext } from "./living-context-answer.js";
 import { deriveStoreManifest, storeKnowledgeRoot, DEFAULT_STORE_ROOT_ID } from "./living-context-store.js";
 import { DEFAULT_LIMIT, DEFAULT_MIN_COVERAGE, DEFAULT_MIN_PASSAGE_COVERAGE, bestPassage, passageCoverage, selectClaimsForQuestion } from "./living-context-select.js";
@@ -54,7 +54,16 @@ export async function askLivingContext({
     records: [...derivedStore.records, ...additional.flatMap((source) => source.records)],
   };
   const root = storeKnowledgeRoot(storePath, DEFAULT_STORE_ROOT_ID);
-  const documents = store.records.map((record) => ({ id: record.claim_id, title: record.title, tags: record.tags, category: record.category, body: record.body, updated_at: record.updated_at }));
+  const input = {
+    schema_version: "1.1", workspace, repository, revision: store.revision, target_audience: audience, reader,
+    as_of: { now }, budget: { max_tokens: budgetTokens }, knowledge_roots: [root],
+  };
+  const derivedManifests = { [root.id]: store.manifest };
+  // Only claims this reader may see, known at `now`, are ever scored or named: a score, a nearest miss or a successor link would
+  // otherwise disclose what recall answers with a plain no-answer. The same admission refuses an unknown reader first.
+  const admitted = admittedClaimIds({ repoRoot, input, derivedManifests });
+  const visibleRecords = store.records.filter((record) => admitted.has(record.claim_id));
+  const documents = visibleRecords.map((record) => ({ id: record.claim_id, title: record.title, tags: record.tags, category: record.category, body: record.body, updated_at: record.updated_at }));
   const selection = select({ question, documents, limit, minCoverage, minPassageCoverage });
   const base = { question, revision: store.revision, store: store.store, reader, as_of: now, store_stats: store.stats, excluded: store.excluded, terms: selection.terms, below_threshold: selection.below_threshold };
 
@@ -67,23 +76,17 @@ export async function askLivingContext({
   const nominated = selection.selected.map((entry) => ({ ...entry }));
   for (const entry of [...nominated]) {
     for (let id = claimBy.get(entry.id)?.superseded_by, hops = 0; id && claimBy.has(id) && hops < 8; id = claimBy.get(id).superseded_by, hops++) {
-      if (nominated.some((other) => other.id === id)) continue;
+      if (!admitted.has(id) || nominated.some((other) => other.id === id)) continue;
       const record = recordBy.get(id);
       const candidate = bestPassage(record.body, selection.terms);
       nominated.push({ id, via: `successor_of:${entry.id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
     }
   }
 
-  const input = {
-    schema_version: "1.1", workspace, repository, revision: store.revision, target_audience: audience, reader,
-    as_of: { now }, budget: { max_tokens: budgetTokens },
-    claim_ids: nominated.map((entry) => entry.id),
-    knowledge_roots: [root],
-  };
-  const derivedManifests = { [root.id]: store.manifest };
+  const requested = { ...input, claim_ids: nominated.map((entry) => entry.id) };
   const statements = Object.fromEntries(nominated.filter((entry) => entry.passage).map((entry) => [entry.id, entry.passage]));
-  const recall = runLivingContext({ repoRoot, input, derivedManifests, write: false });
-  const answer = await answerLivingContext({ repoRoot, input, derivedManifests, statements, verifier });
+  const recall = runLivingContext({ repoRoot, input: requested, derivedManifests, write: false });
+  const answer = await answerLivingContext({ repoRoot, input: requested, derivedManifests, statements, verifier });
 
   const recallBy = new Map(recall.recalls.map((entry) => [entry.claim_id, entry]));
   const answerBy = new Map(answer.answers.map((entry) => [entry.claim_id, entry]));

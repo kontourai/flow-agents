@@ -102,6 +102,8 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
   reaches recall through a replaceable selector that nominates claim ids; the bundled one is lexical and declines rather than
   nominate the least-bad record, and a record is quoted only when the quoted passage itself is on the question. `claim_ids`
   alone is a complete request. `answered` means the passage is in the current cited record, not that it answers the question.
+  Selection chooses only among claims recall would show this reader at `now`, so what it returns can never name a claim recall would answer
+  with a plain no-answer.
   The store host's own `knowledge_context` is not reused: it belongs to that host, not to the Kit contract, and its link-count prior
   outweighs its lexical score.
 - **Budget keeps or drops whole results.** An explicit `max_tokens` bounds recall results by a

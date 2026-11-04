@@ -484,6 +484,31 @@ function orderedRequestIds(input, byId, changedSurfaces, ctx) {
 }
 
 /**
+ * The ids of the claims this reader may see and that are known at `known_at`, after the same reader admission, parsing and
+ * duplicate handling as recall. A caller that selects claims for a question must choose only among these: the choice itself
+ * (a score, a nearest miss) would otherwise disclose a claim that recall answers with a plain no-answer. `input` is a Living
+ * Context input without its request selector (`claim_ids`, `changed_surfaces`, `diff`).
+ */
+export function admittedClaimIds({ repoRoot, input, derivedManifests }) {
+  assertSurfaceVisibility();
+  const inputErrors = validateLivingContextInput({ ...input, claim_ids: ["admission-probe"] });
+  if (inputErrors.length) {
+    const identityMissing = inputErrors.some((message) => /missing required property 'reader'|\$\/reader/.test(message));
+    throw error(identityMissing ? "READER_IDENTITY_REQUIRED" : "INVALID_CONTEXT_CHECK_INPUT", inputErrors.join("; "));
+  }
+  const ctx = buildContext(input);
+  const { root: resolvedRoot, revision } = resolveRevisionBoundRepository(repoRoot, input.revision);
+  if (new Set(input.knowledge_roots.map((knowledgeRoot) => knowledgeRoot.id)).size !== input.knowledge_roots.length) {
+    throw error("DUPLICATE_KNOWLEDGE_ROOT_ID", "selected Knowledge root ids must be unique");
+  }
+  const extension = extensionFor(input.reader, ctx.knownAt);
+  const documents = input.knowledge_roots.map((knowledgeRoot) => readManifestDocument(resolvedRoot, revision, knowledgeRoot, extension, derivedManifests?.[knowledgeRoot.id]));
+  const manifests = documents.map((document, index) => normalizeManifestClaims(document, input.knowledge_roots[index], extension));
+  const { byId } = indexClaims(manifests, ctx);
+  return new Set([...byId.values()].filter((claim) => isVisible(claim, ctx) && isKnown(claim, ctx)).map((claim) => claim.id));
+}
+
+/**
  * Pure Living Context derivation (no writes). Exposed so the answer step re-derives recall itself
  * instead of trusting a caller-supplied result.
  */
