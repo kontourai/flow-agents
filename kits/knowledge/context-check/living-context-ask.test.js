@@ -917,6 +917,7 @@ describe("review round 7: only prose is prose, and entity references are not tex
       ["The *allow* operator is reserved.", "| a | b |\n|---|---|\n| The `*allow*` operator | is reserved. |\n"],
       ["| The *allow* operator is reserved. |", "| a |\n|---|\n| The `*allow*` operator is reserved. |\n"],
       ["The *allow* operator is reserved.", "| a |\n|---|\nThe `*allow*` operator is reserved.\n"],
+      ["| The *allow* operator is reserved. |", "| The `*allow*` operator is reserved. |\n"],
       ["The *allow* operator is reserved.", "<div>\nThe `*allow*` operator is reserved.\n"],
       ["The *allow* operator is reserved.", "<!--\n\nThe `*allow*` operator is reserved.\n\n-->\n"],
       ["The *allow* operator is reserved.", "<pre>\n\nThe `*allow*` operator is reserved.\n\n</pre>\n"],
