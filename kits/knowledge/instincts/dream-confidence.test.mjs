@@ -22,9 +22,14 @@ test('out of bounds confidence cannot be read as a verified envelope', () => {
   for (const value of [-1, 1.1, '0.8', null]) assert.equal(decodeEnvelope(sample(value)), null);
 });
 
- test('legacy and confidence envelopes use distinct readable versions', () => {
+test('legacy and confidence envelopes use distinct readable versions', () => {
   const value = JSON.parse(sample(0.8));
   assert.equal(value.dream, '1.3');
+  const legacy = JSON.parse(sample(undefined));
+  assert.equal(legacy.dream, '1.2');
+  assert.notEqual(decodeEnvelope(JSON.stringify(legacy)), null);
+  legacy.dream = '1.3';
+  assert.equal(decodeEnvelope(JSON.stringify(legacy)), null);
   value.dream = '1.2';
   assert.equal(decodeEnvelope(JSON.stringify(value)), null);
 });

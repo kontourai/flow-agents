@@ -25,6 +25,6 @@ test('the adapter rejects an oversized batch before consuming it', async () => {
   await assert.rejects(readObservationResidues({ read: () => ({ residues: Array(1001).fill(fixture), cursor: {} }) }), /adapter result/);
 });
 test('a valid non-runtime residue is not an observation', async () => {
-  const sidecar = { sessionDir: 'fixture', sessionMarkdown: null, slug: 'fixture', repo: null, status: null, phase: null, planSummary: '', definitionOfDone: '', decisions: [], learnings: [], evidence: null, critiqueSummary: '', transcriptRefs: [], touchedFiles: [] };
+  const sidecar = { sessionDir: 'fixture', sessionMarkdown: null, slug: 'fixture', repo: null, status: null, phase: null, planSummary: '', definitionOfDone: '', decisions: [], learnings: [], evidence: null, critiqueSummary: null, transcriptRefs: [], touchedFiles: [] };
   await assert.rejects(readObservationResidues({ read: () => ({ residues: [sidecar], cursor: {} }) }), /invalid/);
 });
