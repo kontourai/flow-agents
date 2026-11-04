@@ -19,6 +19,7 @@ import { runLivingContext, validateLivingContextInput } from "./living-context.j
 import { answerLivingContext as answerWith, createLineSupportVerifier } from "./living-context-answer.js";
 import { deriveStoreManifest, storeKnowledgeRoot, MAX_RECORD_BYTES, MAX_CLAIM_CHARS } from "./living-context-store.js";
 import { selectClaimsForQuestion, bestPassage, terms } from "./living-context-select.js";
+import { renderInline } from "./living-context-text.js";
 import { askLivingContext } from "./living-context-ask.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -679,7 +680,7 @@ describe("review round 2: the verifier judges a statement the same at any length
     }
     assert.equal(await verdict("Admin is allowed.", "*Admin is allowed.\n"), "not-addressed");
     assert.equal(await verdict("Admin is allowed.", "* Admin is allowed.\n"), "supported", "a list marker followed by a space is a marker");
-    assert.equal(await verdict("Use alpha beta here.", "Use **alpha *beta*\nhere**.\nContinue safely.\n"), "supported");
+    assert.equal(await verdict("Use alpha beta here.", "Use **alpha *beta*\nhere**.\nContinue safely.\n"), "not-addressed", "a nested pair is left as written: the verifier abstains rather than guess");
   });
 
   test("repeated prefixes cost one prefix test per sentence, not a rescan of the unit", async () => {
@@ -708,14 +709,14 @@ describe("review round 3", () => {
       assert.ok(Date.now() - started < 1500, `${excerpt.length} chars took ${Date.now() - started} ms`);
     }
     assert.equal(await verdict("Use ``a`b`` here.", "Use ``a`b`` here."), "supported");
-    assert.equal(await verdict("Use a`b here.", "Use ``a`b`` here."), "supported", "a longer run closes only on a run of the same length");
+    assert.equal(await verdict("Use a`b here.", "Use ``a`b`` here."), "not-addressed", "a double-backtick span is left as written");
     assert.equal(await verdict("Use ab here.", "Use ``a`b`` here."), "not-addressed");
     assert.equal(await verdict("Use `x here.", "Use `x here."), "supported", "an opener without a closer is a character");
   });
 
-  test("emphasis nests in either direction, and a quote marker needs no space", async () => {
-    assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*."), "supported");
-    assert.equal(await verdict("Use alpha beta here.", "Use _alpha __beta__ here_."), "supported");
+  test("nested emphasis is left as written, and a quote marker needs no space", async () => {
+    assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*."), "not-addressed");
+    assert.equal(await verdict("Use alpha beta here.", "Use _alpha __beta__ here_."), "not-addressed");
     assert.equal(await verdict("Use alpha.", "Use ***alpha***."), "not-addressed", "adjacent delimiters are left as written: the verifier abstains rather than guess");
     assert.equal(await verdict("Admin is allowed.", ">Admin is allowed.\n"), "supported");
     assert.equal(await verdict("Admin is allowed.", ">> Admin is allowed.\n"), "supported");
@@ -761,8 +762,8 @@ describe("review round 4", () => {
     assert.equal(await verdict("Use allow here.", "Use _*allow_* here.\n"), "not-addressed");
     assert.equal(await verdict("Use *allow* here.", "Use _*allow_* here.\n"), "not-addressed", "a claim is read as Markdown too, so its asterisks are emphasis: abstaining is the safe side");
     assert.equal(await verdict("allow", "[[allow](x)](y)\n"), "not-addressed");
-    assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*.\n"), "supported", "one level of nesting either way");
-    assert.equal(await verdict("Use alpha beta here.", "Use **alpha *beta* here**.\n"), "supported");
+    assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*.\n"), "not-addressed", "nesting is left as written");
+    assert.equal(await verdict("Use alpha beta here.", "Use **alpha *beta* here**.\n"), "not-addressed");
   });
 
   test("a title longer than a claim may be is a named exclusion, so one result stays small", async () => {
@@ -841,5 +842,55 @@ describe("review round 5", () => {
     assert.deepEqual(result.excluded, [{ source: "additional", reason: "claim_too_long" }]);
     assert.equal(result.store_stats.excluded, 1);
     assert.equal(JSON.stringify(result).includes("hidden-id"), false);
+  });
+});
+
+describe("review round 6: a claim is plain text, a document is rendered only where every renderer agrees", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("crossing, escaped and bracket-through-code markers never become support for a different statement", async () => {
+    const cases = [
+      ["Use \\*\\*allow\\*\\* here.", "Use **_allow**_ here."],
+      ["Use allow\\ here.", "Use *allow\\* here."],
+      ["Use `allow` here.", "Use [`allow](target)` here."],
+      ["Use `x `allow` here.", "Use \\`x `*allow*` here."],
+      ["Use allow here.", "Use \\*allow\\* here."],
+      ["Use allow here.", "Use <b>allow</b> here."],
+      ["Use allow here.", "Use ![allow](pic.png) here."],
+    ];
+    for (const [claim, doc] of cases) assert.equal(await verdict(claim, `${doc}\n`), "not-addressed", `${claim} <- ${doc}`);
+    // A claim written exactly as the document wrote it is still the document's own statement.
+    assert.equal(await verdict("Use **_allow**_ here.", "Use **_allow**_ here.\n"), "supported");
+  });
+
+  test("a claim is plain text: markers in a claim are characters, so a literal claim does not match a formatted document", async () => {
+    assert.equal(await verdict("Use *allow* here.", "Use allow here.\n"), "not-addressed");
+    assert.equal(await verdict("Use *allow* here.", "Use *allow* here.\n"), "supported", "identical text, however marked up, is the document's statement");
+    assert.equal(await verdict("Use allow here.", "Use *allow* here.\n"), "supported", "the displayed text of a simple emphasis");
+  });
+
+  test("rendering is the identity unless every marker is a simple well-formed pair, and is idempotent on its own output", () => {
+    const identity = ["a **b *c* d** e", "**a** and **b *c***", "x ***y*** z", "a * b *c", "a\\b", "a <b> c", "a ![i](u) b", "a [b] c", "a [b](u c) d", "a `` b `` c", "a ` b ` c", "a _b c", "a **b c", "a~b", "a ~~b~ c"];
+    for (const text of identity) assert.equal(renderInline(text), text, text);
+    assert.equal(renderInline("a * b"), "a * b", "a lone marker between spaces is text");
+    assert.equal(renderInline("snake_case and __init__ and **Note:** *x* _y_ ~~z~~ `c` [l](http://u/p)"), "snake_case and init and Note: x y z c l");
+    const words = ["alpha", "b2", "gamma-delta", "e.f", "42"];
+    const wraps = [(w) => `**${w}**`, (w) => `__${w}__`, (w) => `*${w}*`, (w) => `_${w}_`, (w) => `~~${w}~~`, (w) => `\`${w}\``, (w) => `[${w}](http://example.test/${w})`, (w) => w];
+    let seed = 7;
+    const next = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    for (let round = 0; round < 500; round++) {
+      const picked = Array.from({ length: 1 + next(6) }, () => ({ word: words[next(words.length)], wrap: wraps[next(wraps.length)] }));
+      const marked = picked.map(({ word, wrap }) => wrap(word)).join(" ");
+      const plain = picked.map(({ word }) => word).join(" ");
+      assert.equal(renderInline(marked), plain, marked);
+      assert.equal(renderInline(renderInline(marked)), renderInline(marked), "idempotent");
+    }
+  });
+
+  test("a passage with escaped punctuation is quoted and found again", async () => {
+    const m = await track(async ({ make }) => ({ esc: await make("2026-10-01T00:00:00.000Z", { title: "Literal operator note", body: "The literal operator is \\*allow\\* and is not a wildcard.\n" }) }));
+    const result = await ask({ repoRoot: m.repo, revision: m.revision, question: "literal operator wildcard allow" });
+    assert.equal(result.outcome, "answered", JSON.stringify(result.results));
+    assert.equal(result.results[0].passage, "The literal operator is \\*allow\\* and is not a wildcard.");
   });
 });

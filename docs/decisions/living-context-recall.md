@@ -89,9 +89,10 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
 - **Abstention is a separate step.** Recall returns evidence and never an answer. The answer step
   sends only a `current` recall to an independent `@kontourai/survey` `SupportVerifier` and keeps
   each verdict as Survey's `CandidateVerification`. Only `supported` answers. The verifier is a
-  required argument; the bundled deterministic one (version 3) matches a whole physical line or a complete
-  sentence, or run of sentences, of a hard-wrapped paragraph, list item or heading, ignoring case, whitespace and inline Markdown, and
-  cannot read negation. Version 2 matched whole lines only, so natural sentences of wrapped prose always abstained (flow-agents#1597).
+  required argument; the bundled deterministic one (version 3) takes the claim as plain text and matches a whole physical line (as
+  version 2 did) or a complete sentence, or run of sentences, of a hard-wrapped paragraph, list item or heading *as the document displays*:
+  only Markdown forms any renderer reads the same way are rendered, and anything ambiguous leaves the paragraph as written so it can only
+  abstain. It cannot read negation. Version 2 matched whole lines only, so natural sentences of wrapped prose always abstained (flow-agents#1597).
   The verifier is the Kit's own: Survey ships the port (`runSupportVerifier`) and no deterministic implementation.
 - **A store is not a manifest, and a question is not a claim id** (flow-agents#1595, #1596). A claims manifest is *derived* from a
   store's records at the pinned commit (`deriveStoreManifest`; distilled memory claims through `deriveMemoryManifest`), with the

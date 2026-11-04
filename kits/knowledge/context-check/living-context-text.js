@@ -3,10 +3,23 @@
  * whether a statement is in an authority document) and by question answering (which quotes a passage of a record). Sharing
  * it is what keeps the two honest with each other: a passage that is quoted is always a statement the verifier can find.
  *
- * Dependency-free on purpose, like `index.js`. Inline Markdown is removed by one bounded scan that never rescans its own output
- * (a marker exposed by removing another stays text), and sentence matching is a prefix test per sentence start (native string
- * comparison; 26 ms on a 52 KB unit of repeated prefixes), because the verifier runs synchronously and a timeout cannot interrupt
- * it. The same normalisation applies to a unit of any length, so a statement is judged the same in a short paragraph and a long one.
+ * Dependency-free on purpose, like `index.js`.
+ *
+ * The contract: a CLAIM is plain text, compared as written (case, whitespace, a leading list or quote marker and one closing full
+ * stop aside). A DOCUMENT is read as a person sees it: hard wraps are joined, and a small set of Markdown forms is rendered to the
+ * text they display. The set is deliberately the part of Markdown whose meaning needs no judgement:
+ *
+ *   `code`            a single-backtick span, no backtick inside, no space at either edge, shown as its content
+ *   **x** __x__ ~~x~~ strong or struck text, shown as x
+ *   *x* _x_           emphasis, shown as x
+ *   [x](target)       a link, shown as x
+ *
+ * and only where x holds NO markup character (`* _ ~ ` [ ] \ < >`), the opener follows a space or an opening bracket or quote, and
+ * the closer is not followed by a letter or digit, so that any CommonMark renderer reads it the same way. Everything else that
+ * could be markup (a nested pair, a run of three markers, an unpaired marker, an escape, a double-backtick span, an image,
+ * HTML, an intraword `*`) makes the WHOLE paragraph be taken exactly as written, so it can only be matched by a claim written the same
+ * way and otherwise abstains. Nothing is ever rescanned, so removing one marker cannot turn another into formatting. A lone `_` inside
+ * a word (`snake_case`) and a lone `*` between spaces are text, as in CommonMark. The scan is one pass over the paragraph.
  *
  * Stated limits: the sentence cut is a heuristic (a full stop, space, then a capital, digit or opening quote). An abbreviation
  * it does not know can cut a sentence early, and then a sentence tail is supported as if it were a sentence. Negation is not read.
@@ -20,111 +33,68 @@ const HEADING = /^\s*#{1,6}\s/;
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`).
 const ABBREVIATION = /(?:^|\s)(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
 
-/**
- * Code spans in one linear scan: a run of N backticks opens a span that the next run of exactly N backticks closes (CommonMark); an
- * opener with no such run is literal text. No pattern is used, because an unbounded pattern backtracks across unmatched runs.
- */
-function codeSpans(text) {
-  const runs = [];
-  for (let i = 0; i < text.length;) {
-    if (text[i] !== "`") { i++; continue; }
-    let j = i;
-    while (text[j] === "`") j++;
-    runs.push({ start: i, end: j, length: j - i });
-    i = j;
-  }
-  const nextSame = new Array(runs.length).fill(-1);
-  const seen = new Map();
-  for (let r = runs.length - 1; r >= 0; r--) {
-    nextSame[r] = seen.get(runs[r].length) ?? -1;
-    seen.set(runs[r].length, r);
-  }
-  const spans = [];
-  for (let r = 0; r < runs.length; r++) {
-    const closer = nextSame[r];
-    if (closer === -1) continue;
-    spans.push({ index: runs[r].start, length: runs[closer].end - runs[r].start, content: text.slice(runs[r].end, runs[closer].start) });
-    r = closer;
-  }
-  return spans;
-}
-
-const MAX_SPAN = 2000;
-const MAX_DEPTH = 3;
-const MAX_CANDIDATES = 50;
-const isWord = (c) => c !== undefined && /\w/.test(c);
+const MARKUP = /[*_~`[\]\\<>]/;
+const isAlnum = (c) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
 const isSpace = (c) => c === undefined || /\s/.test(c);
+const OPENS_AFTER = new Set([" ", "(", "[", "{", "\"", "'"]);
 
 /**
- * One left-to-right scan that consumes formatting and never rescans its own output, so a marker exposed by removing another stays text:
- * a code span is kept exactly as written; `[label](target)` keeps its label; `**x**`, `__x__`, `~~x~~`, `*x*` and `_x_` keep their
- * inner text, which is scanned once more at the next depth (so `**a *b* c**` and `*a **b** c*` both strip). A marker with no
- * partner within MAX_SPAN characters, a run of three or more, an intraword `_` or `*`, and anything deeper than MAX_DEPTH is text.
- * A closer is looked for among at most MAX_CANDIDATES later runs of the same marker within MAX_SPAN characters, so the cost is at most
- * the text length times MAX_CANDIDATES (dense openers have dense runs, sparse ones few openers). A backslash before punctuation keeps
- * the punctuation as a character.
+ * The text a paragraph displays, for the forms in the module comment; the paragraph itself, unchanged, when it holds anything else
+ * that could be markup. Never returns text that a CommonMark renderer would display differently.
  */
-function inline(text, depth) {
-  if (depth > MAX_DEPTH) return text;
-  const spans = new Map();
-  const inCode = new Uint8Array(text.length);
-  for (const span of codeSpans(text)) { spans.set(span.index, span); inCode.fill(1, span.index, span.index + span.length); }
+export function renderInline(text) {
   let out = "";
   for (let i = 0; i < text.length;) {
     const c = text[i];
-    const span = spans.get(i);
-    if (span) { out += span.content; i += span.length; continue; }
-    if (c === "\\" && i + 1 < text.length && /[!-/:-@[-`{-~]/.test(text[i + 1])) { out += text[i + 1]; i += 2; continue; }
-    if (c === "[" || (c === "!" && text[i + 1] === "[")) {
-      const open = c === "!" ? i + 1 : i;
-      const labelEnd = text.slice(open + 1, open + 302).indexOf("]");
-      if (labelEnd !== -1 && text[open + 1 + labelEnd + 1] === "(") {
-        const close = open + 1 + labelEnd;
-        const targetEnd = text.slice(close + 2, close + 503).indexOf(")");
-        if (targetEnd !== -1) { out += inline(text.slice(open + 1, close), depth + 1); i = close + 2 + targetEnd + 1; continue; }
-      }
+    if (!MARKUP.test(c) && c !== "!") { out += c; i++; continue; }
+    if (c === "!") {
+      if (text[i + 1] === "[") return text; // an image displays its alt text, not "!"
+      out += c; i++; continue;
+    }
+    if (c === "`") {
+      if (text[i + 1] === "`") return text;
+      const close = text.indexOf("`", i + 1);
+      const content = close === -1 ? "" : text.slice(i + 1, close);
+      if (close === -1 || content === "" || text[close + 1] === "`" || /^\s|\s$/.test(content)) return text;
+      out += content; i = close + 1; continue;
+    }
+    if (c === "[") {
+      const close = text.indexOf("]", i + 1);
+      const label = close === -1 ? "" : text.slice(i + 1, close);
+      if (close === -1 || label === "" || MARKUP.test(label) || text[close + 1] !== "(") return text;
+      const end = text.indexOf(")", close + 2);
+      const target = end === -1 ? "" : text.slice(close + 2, end);
+      if (end === -1 || !/^[^\s()\\<>`*_[\]]*$/.test(target)) return text;
+      out += label; i = end + 1; continue;
     }
     if (c === "*" || c === "_" || c === "~") {
       let run = 1;
       while (text[i + run] === c) run++;
+      const prev = text[i - 1];
+      const next = text[i + run];
+      // Text, as in CommonMark: a lone `_` inside a word, and a lone marker between spaces.
+      if (run === 1 && ((c === "_" && isAlnum(prev) && isAlnum(next)) || (isSpace(prev) && isSpace(next)))) { out += c; i++; continue; }
       const width = c === "~" ? (run === 2 ? 2 : 0) : (run === 1 || run === 2 ? run : 0);
-      if (width > 0 && !isSpace(text[i + width]) && !isWord(text[i - 1])) {
-        const limit = Math.min(text.length, i + width + MAX_SPAN);
-        let closer = -1;
-        let candidates = 0;
-        for (let k = i + width; k < limit;) {
-          if (inCode[k]) { k++; continue; }
-          if (text[k] !== c) { k++; continue; }
-          let length = 1;
-          while (text[k + length] === c) length++;
-          if (++candidates > MAX_CANDIDATES) break;
-          if (length === width && !isSpace(text[k - 1]) && !isWord(text[k + length]) && text[k + length] !== c) { closer = k; break; }
-          k += length;
-        }
-        if (closer !== -1) { out += inline(text.slice(i + width, closer), depth + 1); i = closer + width; continue; }
-      }
-      out += text.slice(i, i + run);
-      i += run;
-      continue;
+      if (width === 0 || (prev !== undefined && !OPENS_AFTER.has(prev)) || !isAlnum(next)) return text;
+      const close = text.indexOf(c, i + width);
+      if (close === -1) return text;
+      let closeRun = 1;
+      while (text[close + closeRun] === c) closeRun++;
+      const content = text.slice(i + width, close);
+      if (closeRun !== width || MARKUP.test(content) || isSpace(content[content.length - 1]) || isAlnum(text[close + width])) return text;
+      out += content; i = close + width; continue;
     }
-    out += c;
-    i++;
+    return text; // `\`, `<`, `>`, `]`: an escape, HTML, a quote marker or a stray bracket
   }
   return out;
 }
 
-/** Inline Markdown that is formatting, not wording, removed from `text` (see `inline`). Applied to claim and document alike. */
-export function stripInlineMarkdown(text) {
-  return inline(text, 0);
-}
-
 const squash = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
-/** The form a statement is compared in, before the closing full stop is considered. */
 // A list marker is a marker only when whitespace follows it (`*Admin` and `-5` begin with a character of the statement); a quote marker needs none.
-export const comparable = (text) => squash(stripInlineMarkdown(text.replace(/^(?:\s*(?:>|[*+-](?=\s)))+/, "")));
+const withoutMarker = (text) => text.replace(/^(?:\s*(?:>|[*+-](?=\s)))+/, "");
 const withoutFinalStop = (text) => text.replace(/\.$/, "");
-/** Lower-cased, whitespace-collapsed, markup- and marker-free, without one trailing full stop: the form two statements are compared in. */
-export const cleanStatement = (text) => withoutFinalStop(comparable(text));
+/** Lower-cased, whitespace-collapsed, without a leading list or quote marker or one closing full stop: the form a claim, or a physical line, is compared in. */
+export const cleanStatement = (text) => withoutFinalStop(squash(withoutMarker(text)));
 
 function splitSentences(text) {
   const sentences = [];
@@ -142,8 +112,9 @@ function splitSentences(text) {
 /**
  * The statements a document makes, as complete sentences. A document is read the way a person reads it: a blank line, a list
  * item, a quote or a heading starts a new unit, and a line without one continues the unit above, so a hard-wrapped paragraph is
- * one unit; a heading is one line. Each unit is cut into sentences at `. `, `! ` or `? ` before a capital, digit or opening quote
- * (case is kept until after the cut so the capital can be seen). Fenced code and front matter are not prose and yield no unit.
+ * one unit; a heading is one line. A unit is rendered (`renderInline`) and then cut into sentences at `. `, `! ` or `? ` before a
+ * capital, digit or opening quote (case is kept until after the cut so the capital can be seen). Fenced code and front matter are
+ * not prose and yield no unit.
  *
  * @returns {{kind: "heading"|"item"|"paragraph", sentences: string[]}[]}
  */
@@ -176,16 +147,16 @@ export function documentUnits(text) {
       if (kind === "heading") current = undefined;
     } else current.parts.push(body);
   }
-  return units.map(({ kind, parts }) => ({ kind, sentences: splitSentences(stripInlineMarkdown(parts.join(" "))).map((sentence) => sentence.trim()).filter(Boolean) }));
+  return units.map(({ kind, parts }) => ({ kind, sentences: splitSentences(renderInline(parts.join(" "))).map((sentence) => sentence.trim()).filter(Boolean) }));
 }
 
 /**
- * Whether `statement` is one sentence, or consecutive whole sentences, of one unit. The unit's sentences are joined once; the statement
- * must begin where a sentence begins and end where a sentence ends (with or without its final full stop). Work is one prefix test per
- * sentence start, so it is bounded by the unit size times the number of sentences in it at worst and in practice by a single pass.
+ * Whether `statement` (plain text) is one sentence, or consecutive whole sentences, of one unit. The unit's sentences are joined once;
+ * the statement must begin where a sentence begins and end where a sentence ends (with or without its final full stop). Work is one
+ * prefix test per sentence start (native string comparison; 26 ms on a 52 KB unit of repeated prefixes).
  */
 export function statementInUnits(units, statement) {
-  const wanted = withoutFinalStop(comparable(statement));
+  const wanted = cleanStatement(statement);
   if (wanted === "") return false;
   for (const { sentences } of units) {
     const keys = sentences.map(squash);

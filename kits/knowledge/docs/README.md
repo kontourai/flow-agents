@@ -416,16 +416,22 @@ hides an affected claim.
 **Abstention is a separate step.** Recall returns evidence and never an answer.
 `answerLivingContext` re-derives recall and sends only a `current` recall, with its authority
 document read at the pinned revision, to an independent `@kontourai/survey` `SupportVerifier`;
-a verifier is a required argument. `createLineSupportVerifier` is a deterministic floor (version 3): the claim must be a whole
-physical line of its authority text, or a complete sentence (or a run of consecutive sentences) of one paragraph, list item or
-heading after the paragraph's hard wraps are joined, ignoring case, whitespace, list and quote markers, inline Markdown and one
-trailing full stop. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot
-read negation, so production callers inject a model or human verifier. Code between backticks is compared exactly as written;
-an unpaired `*` or `_` is a character, not formatting; inline Markdown is removed by one scan that never rescans its own output (a marker exposed by removing another stays text), nesting to three levels is stripped (`**a *b* c**`, `*a **b** c*`), and a run of three or more markers, an intraword `_`, or a marker with no partner nearby (at most 50 later runs within 2,000 characters) is left as written, so these can only make the verifier abstain; a heading is a unit of its own; a fenced block is not prose. Stated limits:
-the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted initialisms and a short
-abbreviation list exempt), so an abbreviation it does not know can cut a sentence early and a sentence tail would then be
-supported; and every pattern is bounded and a statement is matched by one prefix test per sentence start, because the verifier is
-synchronous and a timeout cannot interrupt it; a statement is judged the same in a short paragraph and a long one. Only `supported` answers; `contradicted` is
+a verifier is a required argument. `createLineSupportVerifier` is a deterministic floor (version 3). The claim is **plain text** and must be a whole
+physical line of its authority text (exactly as in version 2, with no Markdown reading), or a complete sentence (or a run of
+consecutive sentences) of one paragraph, list item or heading of the document **as it displays**, ignoring case, whitespace, a
+leading list or quote marker and one trailing full stop. "As it displays" means hard wraps joined and only the Markdown whose
+meaning needs no judgement rendered: a single-backtick code span, `*x*`, `_x_`, `**x**`, `__x__`, `~~x~~` and `[x](target)`
+where `x` holds no markup character, the opener follows a space or an opening bracket or quote, and the closer is not followed by
+a letter or digit. Anything else that could be markup (a nested pair, a run of three markers, an unpaired marker, an escape,
+a double-backtick span, an image, HTML, an intraword `*`) leaves the whole paragraph exactly as written, so only a claim written
+the same way matches it and otherwise the verifier abstains. Nothing is rescanned, so removing one marker never turns another
+into formatting. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot read
+negation, so production callers inject a model or human verifier. A heading is a unit of its own and a fenced block is not
+prose. Stated limits: the sentence cut is a heuristic (full stop, space, then a capital, digit or opening quote, with dotted
+initialisms and a short abbreviation list exempt), so an abbreviation it does not know can cut a sentence early and a sentence
+tail would then be supported; the checks are one pass over a paragraph and one prefix test per sentence start, because the
+verifier is synchronous and a timeout cannot interrupt it; and a statement is judged the same in a short paragraph and a long
+one. Only `supported` answers; `contradicted` is
 reported; `not-addressed`, an abstaining, throwing, or timed-out verifier, an unreadable, empty or
 oversized (`MAX_EVIDENCE_BYTES`) authority document, and budget drops all abstain, and any
 abstention makes the set `not_verified`. Each verdict is kept as Survey's immutable
