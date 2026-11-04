@@ -20,6 +20,10 @@ it.
 | Model calls | `@kontourai/datum`, `@kontourai/dispatch`, `@kontourai/relay` | A Datum role resolves to a provider and model, Dispatch routes and budgets the call, a Relay `ModelRuntime` makes it. |
 | Extraction | `@kontourai/traverse` | Grounds each claim in a verbatim excerpt. |
 
+## Temporary instinct confidence carrier
+
+Until [Corpus #68](https://github.com/kontourai/corpus/issues/68) provides confidence frontmatter, a dream proposal plan may carry an optional `instinctConfidence` number between 0 and 1. The plan digest binds it to the proposal; invalid or altered values fail envelope verification. Brief ranking uses the value within the existing applied and pending score bands, without changing visibility, contest, or review eligibility. This carrier alone does not import instincts, invoke consolidation, or create compiled records. Remove it when the upstream store contract and migration are in place.
+
 ## The run
 
 ```

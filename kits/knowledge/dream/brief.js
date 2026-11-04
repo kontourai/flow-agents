@@ -206,7 +206,9 @@ export function isEligible(item, { includeUnreviewed = false } = {}) {
 
 export function confidenceOf(item) {
   const agreement = item.agreement && item.agreement.passes > 0 ? Math.min(1, item.agreement.agreeing / item.agreement.passes) : 0;
-  return item.state === "applied" ? 0.55 + 0.45 * agreement : 0.5 * agreement;
+  // Temporary claim-envelope carrier until kontourai/corpus#68. Review still outranks pending input.
+  const confidence = typeof item.instinctConfidence === "number" && Number.isFinite(item.instinctConfidence) && item.instinctConfidence >= 0 && item.instinctConfidence <= 1 ? item.instinctConfidence : agreement;
+  return item.state === "applied" ? 0.55 + 0.45 * confidence : 0.5 * confidence;
 }
 
 function scopeMatch(item, project) {

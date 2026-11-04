@@ -72,6 +72,7 @@ export function encodeEnvelope({ plan, index, decision, sitting }) {
     dream: ENVELOPE_VERSION,
     claim: entry.claim,
     agreement: entry.agreement,
+    ...(entry.instinctConfidence === undefined ? {} : { instinctConfidence: entry.instinctConfidence }),
     decision,
     project: entry.project,
     sitting: { id: sitting.id, contentHash: sitting.contentHash, visibilityKey: sitting.visibilityKey, index, planDigest: planDigest(plan) },
@@ -146,6 +147,8 @@ export function verifyEntry(entry) {
     return false;
   }
   if (!validAgreement(entry.agreement)) return false;
+  // Temporary confidence carrier until Corpus supports confidence frontmatter: kontourai/corpus#68.
+  if (entry.instinctConfidence !== undefined && (typeof entry.instinctConfidence !== "number" || !Number.isFinite(entry.instinctConfidence) || entry.instinctConfidence < 0 || entry.instinctConfidence > 1)) return false;
   return entry.project === null || typeof entry.project === "string";
 }
 
@@ -165,7 +168,7 @@ export function decodeEnvelope(body) {
     if (!sitting || typeof sitting.id !== "string" || typeof sitting.contentHash !== "string" || typeof sitting.visibilityKey !== "string" || typeof sitting.planDigest !== "string" || !isCount(sitting.index)) return null;
     if (sitting.planDigest !== planDigest(plan)) return null;
     const own = plan[sitting.index];
-    if (!own || canonicalJson(own) !== canonicalJson({ claim: value.claim, agreement: value.agreement, project: value.project })) return null;
+    if (!own || canonicalJson(own) !== canonicalJson({ claim: value.claim, agreement: value.agreement, project: value.project, ...(value.instinctConfidence === undefined ? {} : { instinctConfidence: value.instinctConfidence }) })) return null;
     if (!verifyEntry(own) || !verifyDecision(value.decision, value.claim)) return null;
     // A claim over the bound could not have been written by this module, and would make a decision too large to store.
     if (plan.some((entry) => Buffer.byteLength(canonicalJson(entry.claim)) > MAX_CLAIM_BYTES)) return null;

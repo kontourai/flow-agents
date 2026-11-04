@@ -112,7 +112,7 @@ async function briefItems(store, index, proposerId) {
         continue;
       }
     }
-    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, state: proposal.state, routing: envelope.decision });
+    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, ...(envelope.instinctConfidence === undefined ? {} : { instinctConfidence: envelope.instinctConfidence }), state: proposal.state, routing: envelope.decision });
   }
   return { items, excluded };
 }
