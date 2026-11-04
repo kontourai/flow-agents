@@ -26,7 +26,7 @@
  * @module living-context-select
  */
 
-import { documentUnits } from "./living-context-text.js";
+import { documentUnits, statementInUnits } from "./living-context-text.js";
 
 export const DEFAULT_MIN_COVERAGE = 0.6;
 export const DEFAULT_LIMIT = 5;
@@ -65,28 +65,36 @@ const WIKILINK = /\[\[[^\]]*\]\]/g;
 export function bestPassage(body, questionTerms, maxChars = DEFAULT_PASSAGE_CHARS) {
   const wanted = new Set(questionTerms);
   const matches = (text) => { let n = 0; for (const t of termSet(text)) if (wanted.has(t)) n++; return n; };
-  let best;
-  for (const unit of documentUnits(body)) {
+  const units = documentUnits(body);
+  const scored = [];
+  for (const unit of units) {
     if (unit.kind === "heading") continue;
     const text = unit.sentences.join(" ");
     // A list of links is an index, not a statement: its words are slugs of other records.
     if ((text.match(WIKILINK) ?? []).join("").length > text.length / 2) continue;
     const score = matches(text);
-    if (score > 0 && (!best || score > best.score)) best = { unit, score };
+    if (score > 0) scored.push({ unit, score });
   }
-  if (!best) return "";
-  const whole = best.unit.sentences.join(" ");
-  if (whole.length <= maxChars) return whole;
-  let start = 0;
-  let top = -1;
-  best.unit.sentences.forEach((sentence, index) => { const score = matches(sentence); if (score > top) { top = score; start = index; } });
-  let passage = "";
-  for (const sentence of best.unit.sentences.slice(start)) {
-    const next = passage ? `${passage} ${sentence}` : sentence;
-    if (next.length > maxChars) break;
-    passage = next;
+  scored.sort((a, b) => b.score - a.score); // stable: the earlier unit wins a tie
+  // A passage is only offered if the verifier will find it again in this document (a nested list or a code literal that starts with a
+  // marker character may not be); the next best unit is tried instead of quoting something that cannot be checked.
+  for (const { unit } of scored.slice(0, 5)) {
+    const whole = unit.sentences.join(" ");
+    let passage = whole;
+    if (whole.length > maxChars) {
+      let start = 0;
+      let top = -1;
+      unit.sentences.forEach((sentence, index) => { const score = matches(sentence); if (score > top) { top = score; start = index; } });
+      passage = "";
+      for (const sentence of unit.sentences.slice(start)) {
+        const next = passage ? `${passage} ${sentence}` : sentence;
+        if (next.length > maxChars) break;
+        passage = next;
+      }
+    }
+    if (passage && statementInUnits(units, passage)) return passage;
   }
-  return passage;
+  return "";
 }
 
 /** The share of the question's weight that a passage (read together with its record title) carries. */

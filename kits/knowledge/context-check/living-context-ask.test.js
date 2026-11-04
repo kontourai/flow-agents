@@ -783,7 +783,7 @@ describe("review round 5", () => {
       assert.equal(await verdict("Use allow here.", `${excerpt}\n`), "not-addressed", excerpt);
     }
     assert.equal(await verdict("Use allow here.", "Use _allow_ here.\n"), "supported");
-    assert.equal(await verdict("Use allow here.", "Use ~~allow~~ here.\n"), "supported");
+    assert.equal(await verdict("Use allow here.", "Use ~~allow~~ here.\n"), "not-addressed", "strikethrough is a GFM extension, not rendered");
     assert.equal(await verdict("Use snake_case_name here.", "Use snake_case_name here.\n"), "supported", "an intraword underscore is text");
     assert.equal(await verdict("Total is 2*3*4.", "Total is 2*3*4.\n"), "supported", "intraword asterisks are text on both sides");
     assert.equal(await verdict("Use *not* here.", "Use \\*not\\* here.\n"), "not-addressed", "an escaped marker is a character; the claim's own markers are formatting");
@@ -871,12 +871,12 @@ describe("review round 6: a claim is plain text, a document is rendered only whe
   });
 
   test("rendering is the identity unless every marker is a simple well-formed pair, and is idempotent on its own output", () => {
-    const identity = ["a **b *c* d** e", "**a** and **b *c***", "x ***y*** z", "a * b *c", "a\\b", "a <b> c", "a ![i](u) b", "a [b] c", "a [b](u c) d", "a `` b `` c", "a ` b ` c", "a _b c", "a **b c", "a~b", "a ~~b~ c", "foo*bar* baz", "well-**known** thing", "**x** a\\b", "**x** 5\\% off", "**x** <b>y</b>", "**x** y] z", "**x** a > b"];
+    const identity = ["a **b *c* d** e", "**a** and **b *c***", "x ***y*** z", "a * b *c", "a\\b", "a <b> c", "a ![i](u) b", "a [b] c", "a [b](u c) d", "a `` b `` c", "a ` b ` c", "a _b c", "a **b c", "a~b", "a ~~b~ c", "a ~~b~~ c", "foo*bar* baz", "well-**known** thing", "**x** a\\b", "**x** 5\\% off", "**x** <b>y</b>", "**x** y] z", "**x** a > b"];
     for (const text of identity) assert.equal(renderInline(text), text, text);
     assert.equal(renderInline("a * b"), "a * b", "a lone marker between spaces is text");
-    assert.equal(renderInline("snake_case and __init__ and **Note:** *x* _y_ ~~z~~ `c` [l](http://u/p)"), "snake_case and init and Note: x y z c l");
+    assert.equal(renderInline("snake_case and __init__ and **Note:** *x* _y_ `c` [l](http://u/p)"), "snake_case and init and Note: x y c l");
     const words = ["alpha", "b2", "gamma-delta", "e.f", "42"];
-    const wraps = [(w) => `**${w}**`, (w) => `__${w}__`, (w) => `*${w}*`, (w) => `_${w}_`, (w) => `~~${w}~~`, (w) => `\`${w}\``, (w) => `[${w}](http://example.test/${w})`, (w) => w];
+    const wraps = [(w) => `**${w}**`, (w) => `__${w}__`, (w) => `*${w}*`, (w) => `_${w}_`, (w) => `\`${w}\``, (w) => `[${w}](http://example.test/${w})`, (w) => w];
     let seed = 7;
     const next = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
     for (let round = 0; round < 500; round++) {
@@ -893,5 +893,47 @@ describe("review round 6: a claim is plain text, a document is rendered only whe
     const result = await ask({ repoRoot: m.repo, revision: m.revision, question: "literal operator wildcard allow" });
     assert.equal(result.outcome, "answered", JSON.stringify(result.results));
     assert.equal(result.results[0].passage, "The literal operator is \\*allow\\* and is not a wildcard.");
+  });
+});
+
+describe("review round 7: only prose is prose, and entity references are not text", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("an entity reference leaves the paragraph as written", async () => {
+    assert.equal(await verdict("Use *allow* &amp; record the result.", "Use `*allow*` &amp;\nrecord the result.\n"), "not-addressed");
+    assert.equal(await verdict("Use *allow* & record the result.", "Use `*allow*` &amp;\nrecord the result.\n"), "not-addressed");
+    assert.equal(await verdict("Use *allow* & record the result.", "Use `*allow*` & record the result.\n"), "supported", "a bare ampersand is text");
+    assert.equal(renderInline("a &#42; b **c**"), "a &#42; b **c**");
+    assert.equal(renderInline("a &copy; b **c**"), "a &copy; b **c**");
+  });
+
+  test("code blocks, tables, HTML blocks, thematic breaks, setext underlines and link definitions are not prose", async () => {
+    const cases = [
+      ["The *allow* operator is reserved.", "    The `*allow*` operator is\n    reserved.\n"],
+      ["The *allow* operator is reserved.", "> ```\n> The `*allow*` operator is\n> reserved.\n> ```\n"],
+      ["The *allow* operator ---", "The `*allow*` operator\n---\n"],
+      ["--- The *allow* operator is reserved.", "---\nThe `*allow*` operator is reserved.\n"],
+      ["The *allow* operator is reserved.", "| a | b |\n|---|---|\n| The `*allow*` operator | is reserved. |\n"],
+      ["The *allow* operator is reserved.", "<div>\nThe `*allow*` operator is reserved.\n</div>\n"],
+    ];
+    for (const [claim, doc] of cases) assert.equal(await verdict(claim, doc), "not-addressed", JSON.stringify(doc));
+    // ...while the same words as prose, a setext heading, or a list item still are.
+    assert.equal(await verdict("The *allow* operator is reserved.", "The `*allow*` operator is\nreserved.\n"), "supported");
+    assert.equal(await verdict("The *allow* operator", "The `*allow*` operator\n---\n"), "supported", "a setext heading displays its text");
+    assert.equal(await verdict("indented continuation The operator is reserved.", "Intro line\n    indented continuation\nThe operator is reserved.\n"), "not-addressed", "a lazy continuation joins the paragraph: a fragment of the joined sentence is not a sentence");
+    assert.equal(await verdict("Intro line indented continuation The operator is reserved.", "Intro line\n    indented continuation\nThe operator is reserved.\n"), "supported");
+  });
+
+  test("sentence cutting is linear in the paragraph, abbreviations included", async () => {
+    const started = Date.now();
+    assert.equal(await verdict("Nothing matches this.", "a. A. ".repeat(10000)), "not-addressed");
+    assert.ok(Date.now() - started < 500, `${Date.now() - started} ms`);
+  });
+
+  test("a passage the verifier could not find again is not offered; the next best passage is", () => {
+    const body = "`- operator` reserved item nested\n\nThe operator is reserved for maintainers only.\n";
+    const passage = bestPassage(body, ["operator", "reserved", "item", "nested"]);
+    assert.equal(passage, "The operator is reserved for maintainers only.");
+    assert.equal(bestPassage("`- literal` only\n", ["literal"]), "", "nothing else to offer: no passage");
   });
 });

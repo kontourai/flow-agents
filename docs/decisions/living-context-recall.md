@@ -91,8 +91,8 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
   each verdict as Survey's `CandidateVerification`. Only `supported` answers. The verifier is a
   required argument; the bundled deterministic one (version 3) takes the claim as plain text and matches a whole physical line (as
   version 2 did) or a complete sentence, or run of sentences, of a hard-wrapped paragraph, list item or heading *as the document displays*:
-  only Markdown forms any renderer reads the same way are rendered, and anything ambiguous leaves the paragraph as written so it can only
-  abstain. It cannot read negation. Version 2 matched whole lines only, so natural sentences of wrapped prose always abstained (flow-agents#1597).
+  only Markdown forms a CommonMark renderer reads the same way are rendered, anything ambiguous leaves the paragraph as written (so it
+  matches only a claim that is a verbatim sentence of its source), and only paragraphs, list items and headings are prose. It cannot read negation. Version 2 matched whole lines only, so natural sentences of wrapped prose always abstained (flow-agents#1597).
   The verifier is the Kit's own: Survey ships the port (`runSupportVerifier`) and no deterministic implementation.
 - **A store is not a manifest, and a question is not a claim id** (flow-agents#1595, #1596). A claims manifest is *derived* from a
   store's records at the pinned commit (`deriveStoreManifest`; distilled memory claims through `deriveMemoryManifest`), with the
