@@ -76,9 +76,11 @@ export async function askLivingContext({
 
   const recordBy = new Map(store.records.map((record) => [record.claim_id, record]));
   const nominated = selection.selected.filter((entry) => answerable.has(entry.id)).map((entry) => ({ ...entry }));
+  if (nominated.length === 0) return { ...base, outcome: "abstained", abstained: "nothing_answerable_nominated", results: [] };
   // A superseded record is shown with the record that replaced it. The successor is the one recall reports for this reader at this
   // instant (an edge the reader may not see, or one recorded later, is not followed), and only one that may be answered from.
-  const first = runLivingContext({ repoRoot, input: { ...input, claim_ids: nominated.map((entry) => entry.id) }, derivedManifests, write: false });
+  // The nomination pass is not budgeted: it only reads which successors recall reports, and a budget drop here would hide one.
+  const first = runLivingContext({ repoRoot, input: { ...input, budget: { max_tokens: 1000000 }, claim_ids: nominated.map((entry) => entry.id) }, derivedManifests, write: false });
   for (const recalled of first.recalls) {
     for (const link of recalled.supersession_chain ?? []) {
       if (link.relation !== "superseded_by" || link.active !== true || !answerable.has(link.claim_id) || nominated.some((other) => other.id === link.claim_id)) continue;

@@ -694,3 +694,58 @@ describe("review round 2: the verifier judges a statement the same at any length
     assert.ok(Date.now() - started < 2000);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Review round 3 on #1601.
+
+describe("review round 3", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("unmatched backtick runs cost one scan, and code spans still pair by run length", async () => {
+    for (const excerpt of ["`".repeat(60000), "` ``".repeat(15000), `${"`a``".repeat(12000)}\n`]) {
+      const started = Date.now();
+      assert.equal(await verdict("Nothing matches this.", excerpt), "not-addressed");
+      assert.ok(Date.now() - started < 1500, `${excerpt.length} chars took ${Date.now() - started} ms`);
+    }
+    assert.equal(await verdict("Use ``a`b`` here.", "Use ``a`b`` here."), "supported");
+    assert.equal(await verdict("Use a`b here.", "Use ``a`b`` here."), "supported", "a longer run closes only on a run of the same length");
+    assert.equal(await verdict("Use ab here.", "Use ``a`b`` here."), "not-addressed");
+    assert.equal(await verdict("Use `x here.", "Use `x here."), "supported", "an opener without a closer is a character");
+  });
+
+  test("emphasis nests in either direction, and a quote marker needs no space", async () => {
+    assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*."), "supported");
+    assert.equal(await verdict("Use alpha beta here.", "Use _alpha __beta__ here_."), "supported");
+    assert.equal(await verdict("Use alpha.", "Use ***alpha***."), "supported");
+    assert.equal(await verdict("Admin is allowed.", ">Admin is allowed.\n"), "supported");
+    assert.equal(await verdict("Admin is allowed.", ">> Admin is allowed.\n"), "supported");
+    assert.equal(await verdict("Admin is allowed.", ">- Admin is allowed.\n"), "supported");
+    assert.equal(await verdict("Admin is allowed.", "-Admin is allowed.\n"), "not-addressed", "a list marker needs a space after it");
+  });
+});
+
+describe("review round 3: ask", () => {
+  test("a budget that drops the nominated predecessor still shows the successor recall reports for it", async () => {
+    const m = await track(async ({ store, make }) => {
+      const old = await make("2026-10-01T00:00:00.000Z", { title: "Jasper policy", body: "Jasper policy v1 applies to every region and every team without exception.\n", tags: ["jasper"] });
+      const next = await make("2026-10-02T00:00:00.000Z", { title: "Jasper policy revised", body: "Jasper policy v2.\n", tags: ["jasper"] });
+      store.at = "2026-10-03T00:00:00.000Z";
+      await store.supersede(next, [old], { agent: "fixture", rationale: "revise" });
+      return { old, next };
+    });
+    const only = (id) => () => ({ terms: ["jasper", "policy"], weights: new Map([["jasper", 1], ["policy", 1]]), selected: [{ id, score: 1, coverage: 1, matched: ["jasper", "policy"], passage: "Jasper policy v1 applies to every region and every team without exception." }], below_threshold: [] });
+    const roomy = await ask({ repoRoot: m.repo, revision: m.revision, question: "Jasper policy", select: only(m.ids.old) });
+    assert.deepEqual(roomy.results.map((entry) => entry.claim_id).sort(), [m.ids.next, m.ids.old].sort());
+    const tight = await ask({ repoRoot: m.repo, revision: m.revision, question: "Jasper policy", select: only(m.ids.old), budgetTokens: 330 });
+    const dropped = tight.results.filter((entry) => entry.reason === "dropped_by_budget").map((entry) => entry.claim_id);
+    assert.ok(tight.results.some((entry) => entry.claim_id === m.ids.next), "the successor was nominated although the predecessor does not fit");
+    assert.ok(dropped.length >= 1, JSON.stringify(tight.results.map((entry) => [entry.claim_id, entry.reason])));
+  });
+
+  test("a host selector that nominates nothing answerable gets an abstention, not an input error", async () => {
+    const m = await track(async ({ make }) => ({ a: await make("2026-10-01T00:00:00.000Z", { title: "Kyanite note", body: "Kyanite note.\n" }) }));
+    const result = await ask({ repoRoot: m.repo, revision: m.revision, question: "kyanite", select: () => ({ terms: ["kyanite"], weights: new Map([["kyanite", 1]]), selected: [{ id: "not-a-claim", score: 1, coverage: 1, matched: ["kyanite"], passage: "Kyanite note." }], below_threshold: [] }) });
+    assert.equal(result.outcome, "abstained");
+    assert.equal(result.abstained, "nothing_answerable_nominated");
+  });
+});

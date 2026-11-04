@@ -3,9 +3,9 @@
  * whether a statement is in an authority document) and by question answering (which quotes a passage of a record). Sharing
  * it is what keeps the two honest with each other: a passage that is quoted is always a statement the verifier can find.
  *
- * Dependency-free on purpose, like `index.js`. Every pattern is bounded (a marker looks at most a few hundred or thousand characters
- * ahead) and sentence matching is a prefix test per sentence start, because the verifier runs synchronously and a timeout cannot
- * interrupt it. The same normalisation is applied to a unit of any length, so a statement is judged the same in a short paragraph
+ * Dependency-free on purpose, like `index.js`. Code spans are found by one scan, every pattern is bounded (a marker looks at most a
+ * few hundred or thousand characters ahead) and sentence matching is a prefix test per sentence start (native string comparison;
+ * 26 ms on a 52 KB unit of repeated prefixes), because the verifier runs synchronously and a timeout cannot interrupt it. The same normalisation is applied to a unit of any length, so a statement is judged the same in a short paragraph
  * and in a long one.
  *
  * Stated limits: the sentence cut is a heuristic (a full stop, space, then a capital, digit or opening quote). An abbreviation
@@ -14,11 +14,11 @@
  * @module living-context-text
  */
 
-const BLOCK_MARKER = /^\s*(?:[-*+>]|\d{1,3}[.)]|#{1,6})\s+/;
+// A quote marker (`>`, `>>`, `> >`) needs no space after it; a list marker or heading needs one.
+const BLOCK_MARKER = /^\s*(?:(?:>\s*)+|(?:[-*+]|\d{1,3}[.)]|#{1,6})\s+)/;
 const HEADING = /^\s*#{1,6}\s/;
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`).
 const ABBREVIATION = /(?:^|\s)(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
-const CODE_SPAN = /(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
 
 const EMPHASIS = [
   [/!?\[([^\]\n]{0,300})\]\([^)\n]{0,500}\)/g, "$1"],
@@ -32,8 +32,41 @@ const EMPHASIS = [
 /** Emphasis and links that are formatting. Markers without a partner are characters and stay. Single-marker emphasis goes before double, so a nested pair is stripped in one pass. */
 function stripFormatting(text) {
   let current = text;
-  for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
+  for (let pass = 0; pass < 3; pass++) {
+    const before = current;
+    for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
+    if (current === before) break;
+  }
   return current;
+}
+
+/**
+ * Code spans in one linear scan: a run of N backticks opens a span that the next run of exactly N backticks closes (CommonMark); an
+ * opener with no such run is literal text. No pattern is used, because an unbounded pattern backtracks across unmatched runs.
+ */
+function codeSpans(text) {
+  const runs = [];
+  for (let i = 0; i < text.length;) {
+    if (text[i] !== "`") { i++; continue; }
+    let j = i;
+    while (text[j] === "`") j++;
+    runs.push({ start: i, end: j, length: j - i });
+    i = j;
+  }
+  const nextSame = new Array(runs.length).fill(-1);
+  const seen = new Map();
+  for (let r = runs.length - 1; r >= 0; r--) {
+    nextSame[r] = seen.get(runs[r].length) ?? -1;
+    seen.set(runs[r].length, r);
+  }
+  const spans = [];
+  for (let r = 0; r < runs.length; r++) {
+    const closer = nextSame[r];
+    if (closer === -1) continue;
+    spans.push({ index: runs[r].start, length: runs[closer].end - runs[r].start, content: text.slice(runs[r].end, runs[closer].start) });
+    r = closer;
+  }
+  return spans;
 }
 
 /**
@@ -43,17 +76,17 @@ function stripFormatting(text) {
 export function stripInlineMarkdown(text) {
   let out = "";
   let last = 0;
-  for (const span of text.matchAll(CODE_SPAN)) {
-    out += stripFormatting(text.slice(last, span.index)) + span[2];
-    last = span.index + span[0].length;
+  for (const span of codeSpans(text)) {
+    out += stripFormatting(text.slice(last, span.index)) + span.content;
+    last = span.index + span.length;
   }
   return out + stripFormatting(text.slice(last));
 }
 
 const squash = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
 /** The form a statement is compared in, before the closing full stop is considered. */
-// A list or quote marker is a marker only when whitespace follows it: `*Admin` and `-5` begin with a character of the statement.
-export const comparable = (text) => squash(stripInlineMarkdown(text.replace(/^(?:\s*[>*+-](?=\s))+/, "")));
+// A list marker is a marker only when whitespace follows it (`*Admin` and `-5` begin with a character of the statement); a quote marker needs none.
+export const comparable = (text) => squash(stripInlineMarkdown(text.replace(/^(?:\s*(?:>|[*+-](?=\s)))+/, "")));
 const withoutFinalStop = (text) => text.replace(/\.$/, "");
 /** Lower-cased, whitespace-collapsed, markup- and marker-free, without one trailing full stop: the form two statements are compared in. */
 export const cleanStatement = (text) => withoutFinalStop(comparable(text));
