@@ -122,7 +122,7 @@ const descriptorFallbackPaths = new Map();
 
 // Linux writes below an opened directory descriptor. Darwin's Node runtime has
 // no openat-style child path, so it verifies the opened descriptor and
-// physical directory identity around every operation. That prevents untrusted
+// physical directory identity during publication. That prevents untrusted
 // artifact-path traversal and detects replacement; it cannot defend against an
 // already-compromised same-UID process, which can mutate the session directly.
 function descriptorPath(fd) {
@@ -130,7 +130,7 @@ function descriptorPath(fd) {
   if (process.platform === "darwin") {
     // Darwin cannot resolve child paths below directory descriptors. Avoid
     // /dev/fd lookups, which can spuriously fail under concurrent processes;
-    // validate the descriptor and its physical path around each operation.
+    // validate the descriptor and its physical path during publication.
     if (!fs.fstatSync(fd).isDirectory()) throw new Error(`Darwin descriptor is not a directory: ${fd}`);
     const fallback = descriptorFallbackPaths.get(fd);
     if (!fallback) throw new Error(`no physical path registered for directory descriptor ${fd}`);
@@ -365,7 +365,7 @@ function publishProposals(sessionDir, requestedOutDir, linked, healthResult, res
  * @param {string} [opts.outDir]              new proposals dir beneath sessionDir; its parent must already exist (default <sessionDir>/proposals).
  * @param {string} [opts.decided]             ISO date stamped on drafts.
  * @param {string} [opts.agent]
- * @param {boolean} [opts.write=true]         write drafts to disk (still only under outDir).
+ * @param {boolean} [opts.write=true]         publish drafts; temporary staging and lock entries use outDir's parent.
  * @returns {Promise<object>} the promote result.
  */
 export async function runPromote(opts = {}) {

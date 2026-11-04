@@ -56,6 +56,33 @@ const PROVENANCE = {
 };
 
 describe("AC1: real completed session -> schema-valid draft delta with provenance", () => {
+  test("Darwin refuses a replaced output parent before publishing proposals", { skip: process.platform !== "darwin" }, async () => {
+    const { root, session } = tmpSession("darwin-parent-swap");
+    const parent = path.join(session, "publish-parent");
+    const parked = path.join(session, "publish-parent-original");
+    fs.mkdirSync(parent);
+    const originalMkdir = fsDefault.mkdirSync;
+    let swapped = false;
+    fsDefault.mkdirSync = (name, ...args) => {
+      if (!swapped && path.basename(String(name)).startsWith(".promote-stage-")) {
+        swapped = true;
+        fs.renameSync(parent, parked);
+        originalMkdir(parent);
+      }
+      return originalMkdir(name, ...args);
+    };
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(runPromote({ sessionDir: session, repoRoot: CLEAN_REPO, provenance: PROVENANCE, outDir: path.join(parent, "proposals") }), /parent changed directory identity/);
+      assert.equal(swapped, true);
+      assert.equal(fs.existsSync(path.join(parent, "proposals")), false);
+    } finally {
+      fsDefault.mkdirSync = originalMkdir;
+      syncBuiltinESMExports();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("Darwin publication does not depend on the racy dev-fd path", { skip: process.platform !== "darwin" }, async () => {
     const { root, session } = tmpSession("darwin-fd");
     const originalStat = fsDefault.statSync;
