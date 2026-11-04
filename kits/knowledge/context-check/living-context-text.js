@@ -51,6 +51,7 @@ function codeSpans(text) {
 
 const MAX_SPAN = 2000;
 const MAX_DEPTH = 3;
+const MAX_CANDIDATES = 50;
 const isWord = (c) => c !== undefined && /\w/.test(c);
 const isSpace = (c) => c === undefined || /\s/.test(c);
 
@@ -59,7 +60,8 @@ const isSpace = (c) => c === undefined || /\s/.test(c);
  * a code span is kept exactly as written; `[label](target)` keeps its label; `**x**`, `__x__`, `~~x~~`, `*x*` and `_x_` keep their
  * inner text, which is scanned once more at the next depth (so `**a *b* c**` and `*a **b** c*` both strip). A marker with no
  * partner within MAX_SPAN characters, a run of three or more, an intraword `_` or `*`, and anything deeper than MAX_DEPTH is text.
- * Every search is bounded by MAX_SPAN, so the cost is at most the text length times that bound. A backslash before punctuation keeps
+ * A closer is looked for among at most MAX_CANDIDATES later runs of the same marker within MAX_SPAN characters, so the cost is at most
+ * the text length times MAX_CANDIDATES (dense openers have dense runs, sparse ones few openers). A backslash before punctuation keeps
  * the punctuation as a character.
  */
 function inline(text, depth) {
@@ -89,11 +91,13 @@ function inline(text, depth) {
       if (width > 0 && !isSpace(text[i + width]) && !isWord(text[i - 1])) {
         const limit = Math.min(text.length, i + width + MAX_SPAN);
         let closer = -1;
+        let candidates = 0;
         for (let k = i + width; k < limit;) {
           if (inCode[k]) { k++; continue; }
           if (text[k] !== c) { k++; continue; }
           let length = 1;
           while (text[k + length] === c) length++;
+          if (++candidates > MAX_CANDIDATES) break;
           if (length === width && !isSpace(text[k - 1]) && !isWord(text[k + length]) && text[k + length] !== c) { closer = k; break; }
           k += length;
         }

@@ -790,13 +790,13 @@ describe("review round 5", () => {
 
   test("the stripper's cost is bounded by the text times a constant on adversarial input", async () => {
     const worst = [];
-    for (const unit of ["*a **", "**a *", "_a __", "[a ", "![a](", "~~a ", "`a``", "*a_ ", "*", "_", "a**b**"]) {
+    for (const unit of ["*a **", "**a *", "_a __", "[a ", "![a](", "~~a ", "`a``", "*a_ ", "*", "_", "a**b**", "*a ", "_a "]) {
       const excerpt = unit.repeat(Math.floor(60000 / unit.length));
       const started = Date.now();
       assert.equal(await verdict("Nothing matches this.", excerpt), "not-addressed");
       worst.push([unit, Date.now() - started]);
     }
-    for (const [unit, ms] of worst) assert.ok(ms < 1500, `${JSON.stringify(unit)} took ${ms} ms`);
+    for (const [unit, ms] of worst) assert.ok(ms < 500, `${JSON.stringify(unit)} took ${ms} ms`);
   });
 
   test("more nominations than the cap are cut visibly, and the shortfall of successor lookup is reported", async () => {
