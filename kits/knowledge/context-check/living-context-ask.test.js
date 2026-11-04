@@ -464,7 +464,7 @@ describe("review: what ask returns respects the reader and the knowledge instant
     const source = {
       manifest: { readers: ["alice", "bob"], claims: [
         claim("mem-a", { visibility: { audiences: ["alice", "bob"] }, status: "superseded", superseded_by: "mem-z", supersession_kind: "succession", supersession_recorded_at: "2026-10-02T00:00:00Z" }),
-        claim("mem-z", { visibility: { audiences: ["alice"] }, recorded_at: "2026-10-02T00:00:00Z" }),
+        claim("mem-z", { visibility: { audiences: ["alice"] }, recorded_at: "2026-10-02T00:00:00Z", valid_time: { from: "2026-10-02T00:00:00Z" } }),
       ] },
       records: [record("mem-a", "Quartz pricing is flat.\n", "Quartz pricing"), record("mem-z", "Zirconium pricing is tiered.\n", "Hidden successor title")],
     };
