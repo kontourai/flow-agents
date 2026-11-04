@@ -355,7 +355,15 @@
       "section": "Decisions"
     },
     {
+      "source": "docs/decisions/living-context-recall.md",
+      "section": "Decisions"
+    },
+    {
       "source": "docs/decisions/mcp-posture.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/memory-claim-routing.md",
       "section": "Decisions"
     },
     {
@@ -634,7 +642,9 @@
     "decisions/knowledge-promote-sub-flow.html": "docs/decisions/knowledge-promote-sub-flow.md",
     "decisions/knowledge-store-provider.html": "docs/decisions/knowledge-store-provider.md",
     "decisions/kontour-resource-contract.html": "docs/decisions/kontour-resource-contract.md",
+    "decisions/living-context-recall.html": "docs/decisions/living-context-recall.md",
     "decisions/mcp-posture.html": "docs/decisions/mcp-posture.md",
+    "decisions/memory-claim-routing.html": "docs/decisions/memory-claim-routing.md",
     "decisions/model-routing.html": "docs/decisions/model-routing.md",
     "decisions/portable-host-integration.html": "docs/decisions/portable-host-integration.md",
     "decisions/promotion-gate.html": "docs/decisions/promotion-gate.md",

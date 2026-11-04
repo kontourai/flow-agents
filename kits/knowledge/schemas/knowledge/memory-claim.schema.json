@@ -1,0 +1,207 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/memory-claim.schema.json",
+  "title": "Knowledge Memory Claim",
+  "description": "One immutable, identified assertion distilled from a conversation or record: subject, property, value, valid time, speaker/source and epistemic posture as typed fields. `posture` is how the speaker asserted it (stated / proposed / hypothetical / retracted); it is not the claim's review state, which is derived from its routing decision and any Survey review (see memory-routing-decision.schema.json). Field names follow the Surface knowledge-accumulation decision (kontourai/surface@7486c6d, docs/decisions/knowledge-accumulation.md): a subject is a (type, id) reference; a property slot is the subject plus `claimType`, `property` (Surface's `fieldOrBehavior`) and canonical `qualifiers`; `validTime` is a half-open interval [from, until) that is neither Surface's inclusive authority-trace `validUntil` nor `expiresAt` freshness; `supersedes` edges are `correction` or `succession` with a reason. Those interval and edge shapes are proposed there pending Hachure, so this schema carries them as caller-owned fields and is not a Hachure bundle. `id` is the sha256 digest of every other field, provenance included (audience sets are ordered first), recomputed on read; the same id means the same content, so an edited excerpt or timestamp is a different claim. Values compare by structural JSON equality, so a different spelling is a different claim. A revision is a new claim with a new id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "subject",
+    "claimType",
+    "property",
+    "value",
+    "speaker",
+    "source",
+    "posture"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "claimType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Surface's claimType. The Kit assigns knowledge.memory-claim."
+    },
+    "property": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Surface's fieldOrBehavior."
+    },
+    "qualifiers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Surface canonical qualifiers; part of the slot. The extractor does not produce them yet, so slots are coarser than Surface's and conflict more readily."
+    },
+    "value": {
+      "description": "Any JSON value. Equality is structural JSON equality."
+    },
+    "validTime": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Half-open interval [from, until) of when the assertion says the value held in the world. Absent bounds are unbounded; an absent validTime asserts no bound. The Kit stores instants as UTC ISO 8601 date-times; an empty, unparseable or off-calendar interval is rejected, never guessed.",
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "until": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "speaker": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Who asserted it, as named in the source."
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "locator",
+        "excerpt",
+        "observedAt"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable source identity, for example a sitting id."
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "chars:<start>-<end> within the extracted text."
+        },
+        "excerpt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Verbatim quote the extractor grounded the claim in."
+        },
+        "observedAt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extractor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ],
+          "description": "Role of the turn the claim was grounded in."
+        }
+      }
+    },
+    "posture": {
+      "enum": [
+        "stated",
+        "proposed",
+        "hypothetical",
+        "retracted"
+      ]
+    },
+    "supersedes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claimId",
+          "kind",
+          "reason"
+        ],
+        "properties": {
+          "claimId": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "kind": {
+            "enum": [
+              "correction",
+              "succession"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "visibility": {
+      "description": "Surface's visibility lattice (kontourai/surface src/visibility.ts, surface#356): public, or restricted to named audiences (opaque strings the owning store resolves). Restricted with none is sealed. Absent reads as sealed, never as inherited or public, so omission cannot widen access; the distill step stamps the sitting's visibility on every claim.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "public"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "audiences"
+          ],
+          "properties": {
+            "kind": {
+              "const": "restricted"
+            },
+            "audiences": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

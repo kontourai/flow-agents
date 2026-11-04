@@ -1,0 +1,900 @@
+{
+  "policy": {
+    "consequential": {
+      "properties": [
+        "primary database"
+      ],
+      "subjectTypes": []
+    }
+  },
+  "sitting0": [
+    {
+      "changeId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:58425b38b057f967752618db7e0ee75ce66c5045b3db22a8886aaf93cd45b4ff",
+      "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "primary database",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": [
+            "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+          ]
+        },
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+          "posture": "stated",
+          "property": "primary database",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+            "extractor": "scripted-replay",
+            "locator": "chars:32-94",
+            "observedAt": "2026-10-28T09:00:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "PostgreSQL 15",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:3bc2598b3052c043a2e83369015ce5ac6dc43ac860dfe5624954ba3c6e0b6020",
+      "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "on-call owner",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": [
+            "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb"
+          ]
+        },
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+          "posture": "stated",
+          "property": "on-call owner",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+            "extractor": "scripted-replay",
+            "locator": "chars:220-279",
+            "observedAt": "2026-10-28T09:01:10.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "Maya Chen",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:7b8bfa85235ea4f7518a6919d5f02391fb2ac65097574c9770619675447e7801",
+      "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "retry budget",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": [
+            "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02"
+          ]
+        },
+        "agreement": {
+          "agreeing": 1,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+          "posture": "stated",
+          "property": "retry budget",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Our retry budget is 5 attempts per request.",
+            "extractor": "scripted-replay",
+            "locator": "chars:280-323",
+            "observedAt": "2026-10-28T09:01:10.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "5 attempts per request",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "agreeing": 1,
+            "minAgreement": 1,
+            "passes": 2,
+            "reason": "disagreement"
+          },
+          "rule": "low-extraction-agreement"
+        }
+      ],
+      "schema_version": "1.0"
+    }
+  ],
+  "sitting1": [
+    {
+      "changeId": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:c5e8f706eb8e2fe6eb7e8fb7228090f1b175e3db1d4a7ae61fd6054b059b6636",
+      "input": {
+        "accumulation": {
+          "candidateClaimIds": [
+            "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+            "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+          ],
+          "gapCodes": [
+            "contested-value",
+            "supersession-pending"
+          ],
+          "outcome": "contested",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "primary database",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": []
+        },
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          },
+          {
+            "ref": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+          "posture": "stated",
+          "property": "primary database",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+            "extractor": "scripted-replay",
+            "locator": "chars:32-128",
+            "observedAt": "2026-10-30T14:00:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "supersedes": [
+            {
+              "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+              "kind": "succession",
+              "reason": "the speaker presented the value as replacing the earlier one"
+            }
+          ],
+          "validTime": {
+            "from": "2026-10-30T00:00:00.000Z"
+          },
+          "value": "PostgreSQL 16",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [
+          {
+            "claimType": "knowledge.memory-claim",
+            "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+            "posture": "stated",
+            "property": "primary database",
+            "schema_version": "1.0",
+            "source": {
+              "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+              "extractor": "scripted-replay",
+              "locator": "chars:32-94",
+              "observedAt": "2026-10-28T09:00:00.000Z",
+              "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "role": "user"
+            },
+            "speaker": "user",
+            "subject": {
+              "id": "widget service",
+              "label": "widget service",
+              "type": "service"
+            },
+            "value": "PostgreSQL 15",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "candidateClaimIds": [
+              "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
+              "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+            ],
+            "gapCodes": [
+              "contested-value",
+              "supersession-pending"
+            ],
+            "outcome": "contested"
+          },
+          "rule": "contested-by-accumulation"
+        },
+        {
+          "detail": {
+            "property": "primary database",
+            "subjectType": "service",
+            "supersedes": [
+              {
+                "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+                "kind": "succession"
+              }
+            ]
+          },
+          "rule": "consequential-supersession"
+        }
+      ],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:652e4bdd592f05bb1061d6e2be4e5792307e605af58ef6305c91f60ba89ab85c",
+      "input": {
+        "accumulation": {
+          "candidateClaimIds": [
+            "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+            "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
+          ],
+          "gapCodes": [
+            "contested-value"
+          ],
+          "outcome": "contested",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "retry budget",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": []
+        },
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          },
+          {
+            "ref": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
+          "posture": "stated",
+          "property": "retry budget",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Actually the retry budget is 8 attempts per request.",
+            "extractor": "scripted-replay",
+            "locator": "chars:253-305",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "8 attempts per request",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [
+          {
+            "claimType": "knowledge.memory-claim",
+            "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+            "posture": "stated",
+            "property": "retry budget",
+            "schema_version": "1.0",
+            "source": {
+              "excerpt": "Our retry budget is 5 attempts per request.",
+              "extractor": "scripted-replay",
+              "locator": "chars:280-323",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "role": "user"
+            },
+            "speaker": "user",
+            "subject": {
+              "id": "widget service",
+              "label": "widget service",
+              "type": "service"
+            },
+            "value": "5 attempts per request",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "candidateClaimIds": [
+              "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+              "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd"
+            ],
+            "gapCodes": [
+              "contested-value"
+            ],
+            "outcome": "contested"
+          },
+          "rule": "contested-by-accumulation"
+        }
+      ],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:38ae6607b0b8241de84370217179fddb13a5b352faa0f2970c023536c992ba10",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:39a5a364ebbae9bf23adb28dcf200c6fcb5cb174f1884f7f4b2b930b05128753",
+      "input": {
+        "accumulation": null,
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          },
+          {
+            "ref": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:38ae6607b0b8241de84370217179fddb13a5b352faa0f2970c023536c992ba10",
+          "posture": "retracted",
+          "property": "on-call owner",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Maya Chen no longer owns the on-call rotation for the widget service, drop that.",
+            "extractor": "scripted-replay",
+            "locator": "chars:306-386",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "supersedes": [
+            {
+              "claimId": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+              "kind": "correction",
+              "reason": "the speaker retracted this assertion"
+            }
+          ],
+          "value": "Maya Chen",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [
+          {
+            "claimType": "knowledge.memory-claim",
+            "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+            "posture": "stated",
+            "property": "on-call owner",
+            "schema_version": "1.0",
+            "source": {
+              "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+              "extractor": "scripted-replay",
+              "locator": "chars:220-279",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "role": "user"
+            },
+            "speaker": "user",
+            "subject": {
+              "id": "widget service",
+              "label": "widget service",
+              "type": "service"
+            },
+            "value": "Maya Chen",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:ed6ab984be69638e48b319194044e042256a15e2c2eeba588e08ee130db0dd40",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:cfe002abd94b5c483b621fa9e3a778b3c71ae4af05005c2071b2c8387193193f",
+      "input": {
+        "accumulation": null,
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:ed6ab984be69638e48b319194044e042256a15e2c2eeba588e08ee130db0dd40",
+          "posture": "hypothetical",
+          "property": "sharding technology",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "If we ever shard the database we would probably use Citus.",
+            "extractor": "scripted-replay",
+            "locator": "chars:387-445",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "Citus",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "contested-by-accumulation",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:c2fa8aca8be7b426300005d5ec7bb2c0eff9d96f9c400ae1e8681c2be10230a6",
+      "input": {
+        "accumulation": {
+          "candidateClaimIds": [],
+          "gapCodes": [],
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "lead",
+            "subjectId": "platform team",
+            "subjectType": "team"
+          },
+          "supportingClaimIds": [
+            "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c"
+          ]
+        },
+        "agreement": {
+          "agreeing": 1,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "ref": "source",
+            "visibility": {
+              "audiences": [
+                "user:fixture"
+              ],
+              "kind": "restricted"
+            }
+          }
+        ],
+        "claim": {
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
+          "posture": "stated",
+          "property": "lead",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Priya Rao leads the platform team.",
+            "extractor": "scripted-replay",
+            "locator": "chars:446-480",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "platform team",
+            "label": "platform team",
+            "type": "team"
+          },
+          "value": "Priya Rao",
+          "visibility": {
+            "audiences": [
+              "user:fixture"
+            ],
+            "kind": "restricted"
+          }
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "agreeing": 1,
+            "minAgreement": 1,
+            "passes": 2,
+            "reason": "disagreement"
+          },
+          "rule": "low-extraction-agreement"
+        }
+      ],
+      "schema_version": "1.0"
+    }
+  ]
+}
