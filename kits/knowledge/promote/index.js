@@ -1,12 +1,12 @@
 /**
  * Knowledge promote sub-flow — orchestrator (the "flow within a flow").
  *
- * Runs ingest -> distill -> link -> health over a completed session directory
- * and lands every output as a DRAFT under `<session>/proposals/` for the promote
- * step's human/agent to apply. PROPOSALS-ONLY (R4): this module writes ONLY under
- * `outDir` (default `<session>/proposals`) — never into docs/, CONTEXT.md, or any
- * path outside the session directory. The Builder promote step names this sub-flow
- * as its assisted path; the `promote` CLI stays the recording mechanism.
+ * The default `repo-docs` target runs ingest -> distill -> link -> health and
+ * writes drafts only under a new session descendant (default `<session>/proposals`)
+ * for review. The `store` target submits candidates to a host-supplied Corpus
+ * adapter. Runtime-session ingest is read-only; the separately exported cursor
+ * commit writes to the path supplied by its caller. The Builder promote step
+ * names this sub-flow as its assisted path.
  *
  * FlowDefinition: flows/promote.flow.json (id `knowledge.promote`).
  * See context/contracts/knowledge-store-contract.md and
@@ -121,19 +121,17 @@ function sameDirectory(left, right) {
 const descriptorFallbackPaths = new Map();
 
 // Linux writes below an opened directory descriptor. Darwin's Node runtime has
-// no openat-style child path, so it validates the /dev/fd anchor and verifies
+// no openat-style child path, so it verifies the opened descriptor and
 // physical directory identity around every operation. That prevents untrusted
 // artifact-path traversal and detects replacement; it cannot defend against an
 // already-compromised same-UID process, which can mutate the session directly.
 function descriptorPath(fd) {
   if (process.platform === "linux") return `/proc/self/fd/${fd}`;
   if (process.platform === "darwin") {
-    // Darwin exposes the opened directory through /dev/fd, but Node cannot
-    // resolve a child below that descriptor as openat(2) can on Linux. Probe
-    // the real descriptor and use its physical path only with fstat/lstat
-    // identity checks before and after every operation below.
-    const anchor = `/dev/fd/${fd}`;
-    if (!fs.statSync(anchor).isDirectory()) throw new Error(`Darwin descriptor anchor is not a directory: ${anchor}`);
+    // Darwin cannot resolve child paths below directory descriptors. Avoid
+    // /dev/fd lookups, which can spuriously fail under concurrent processes;
+    // validate the descriptor and its physical path around each operation.
+    if (!fs.fstatSync(fd).isDirectory()) throw new Error(`Darwin descriptor is not a directory: ${fd}`);
     const fallback = descriptorFallbackPaths.get(fd);
     if (!fallback) throw new Error(`no physical path registered for directory descriptor ${fd}`);
     return fallback;

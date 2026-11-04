@@ -56,6 +56,29 @@ const PROVENANCE = {
 };
 
 describe("AC1: real completed session -> schema-valid draft delta with provenance", () => {
+  test("Darwin publication does not depend on the racy dev-fd path", { skip: process.platform !== "darwin" }, async () => {
+    const { root, session } = tmpSession("darwin-fd");
+    const originalStat = fsDefault.statSync;
+    fsDefault.statSync = (name, ...args) => {
+      if (typeof name === "string" && /^\/dev\/fd\/\d+$/.test(name)) {
+        const err = new Error("injected dev-fd race");
+        err.code = "EBADF";
+        throw err;
+      }
+      return originalStat(name, ...args);
+    };
+    syncBuiltinESMExports();
+    try {
+      const result = await runPromote({ sessionDir: session, repoRoot: CLEAN_REPO, provenance: PROVENANCE });
+      assert.ok(result.decisions.length > 0);
+      assert.ok(fs.existsSync(path.join(session, "proposals", "README.md")));
+    } finally {
+      fsDefault.statSync = originalStat;
+      syncBuiltinESMExports();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("emits >=1 decision delta carrying PR + merge SHA + session-archive links", async () => {
     const { root, session } = tmpSession("ac1");
     const outDir = path.join(session, "proposals-ac1");
