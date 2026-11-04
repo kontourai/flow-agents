@@ -1,24 +1,20 @@
-// The dream run against the REAL Corpus store (kontourai/corpus#42), not the in-test store the other suites use.
-// Opt-in until @kontourai/corpus-store is published: build Corpus at the #42 head and set CORPUS_STORE_ENTRY to the
-// absolute path of packages/store/dist/index.js. Without it these tests report skipped; they claim nothing.
+// The dream run against the REAL Corpus store (the published @kontourai/corpus-store, pinned in package.json), not the
+// in-test store the other suites use. Always on: the package is a dev dependency.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { KitDefaultStoreAdapter, standaloneFileMutationLock } from "@kontourai/corpus-store";
 import { runDream } from "../../kits/knowledge/dream/run.js";
 import { FakeCorpusStore, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
 
-const entry = process.env.CORPUS_STORE_ENTRY;
-const skip = entry ? false : "set CORPUS_STORE_ENTRY to a built @kontourai/corpus-store (corpus main at f81d86f, from corpus#42) to run";
 
 async function realStore(ws) {
-  const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import(pathToFileURL(entry).href);
   fs.mkdirSync(ws.memoryRoot, { recursive: true });
   return new KitDefaultStoreAdapter({ storeRoot: ws.memoryRoot, coordinationDirectory: path.join(ws.root, "coordination"), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
 }
 
-test("real Corpus: the run proposes, a replay is a no-op, and only a distinct reviewer's apply reaches the brief", { skip }, async (t) => {
+test("real Corpus: the run proposes, a replay is a no-op, and only a distinct reviewer's apply reaches the brief", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
   const store = await realStore(ws);
@@ -47,7 +43,7 @@ test("real Corpus: the run proposes, a replay is a no-op, and only a distinct re
   assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, [], "a retired record leaves the brief");
 });
 
-test("real Corpus: a proposeCreate whose reply is lost leaves the proposal, and the retry reuses it", { skip }, async (t) => {
+test("real Corpus: a proposeCreate whose reply is lost leaves the proposal, and the retry reuses it", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
   const store = await realStore(ws);
@@ -75,7 +71,7 @@ test("real Corpus: a proposeCreate whose reply is lost leaves the proposal, and 
   assert.equal((await store.listProposals()).length, 2, "reused, not duplicated");
 });
 
-test("the in-test store has the proposal shape the real store writes", { skip }, async (t) => {
+test("the in-test store has the proposal shape the real store writes", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
   const real = await realStore(ws);
