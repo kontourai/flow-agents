@@ -276,9 +276,10 @@ Surface dependency, including when that differs from Flow Agents' direct pin.
 The shared workflow trust gates retain Surface 5 and its status-function behavior.
 Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
 through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
-and accumulation. Standalone Knowledge projection and recall can use a compatible
-Surface package under its ordinary name; the packaged memory modules include their
-alias through Flow Agents. Survey is pinned to 8.4.0.
+and accumulation. Standalone Knowledge projection can use an erasure-capable
+Surface under its ordinary name; recall requires Surface 6.3.0 or later with derived
+visibility. Packaged memory modules include their alias through Flow Agents. Survey
+is pinned to 8.4.0.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;

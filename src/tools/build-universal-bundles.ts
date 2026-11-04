@@ -906,7 +906,6 @@ function writeBundledSurvey(targetRoot:string):void {
 export function matchesDeclaredRuntimePackage(key: string, declared: string | undefined, actual: { name: string; version: string }): boolean {
   if (!declared) return false;
   const alias = /^npm:(@[^/@]+\/[^/@]+|[^/@]+)@([^@]+)$/.exec(declared);
-  if (declared.startsWith("npm:") && !alias) return false;
   return actual.name === (alias?.[1] ?? key) && actual.version === (alias?.[2] ?? declared);
 }
 
@@ -1032,7 +1031,7 @@ function writeBundledRuntimeImports(targetRoot: string): void {
         }
       }
       writeText(path.join(path.dirname(vendorFile), `${bundleName}.runtime.bundle.json`), `${JSON.stringify({
-        schema_version: "1.0", entry_package: entryPackage.name, entry_specifier: packageName, entry_version: entryPackage.version,
+        schema_version: "1.0", entry_package: entryPackage.name, entry_specifier: specifier, entry_version: entryPackage.version,
         bundle_digest: `sha256:${crypto.createHash("sha256").update(output.text).digest("hex")}`,
         packages: [...packaged.values()].sort((first, second) => `${first.name}@${first.version}`.localeCompare(`${second.name}@${second.version}`)),
       }, null, 2)}\n`);
