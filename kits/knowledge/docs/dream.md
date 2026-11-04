@@ -26,7 +26,9 @@ An instinct is a learned pattern. The dream run does not yet write an instinct c
 
 Proposals with a score use envelope version 1.3; existing proposals without one remain version 1.2. A version that only reads 1.2 cannot read a 1.3 proposal unless that proposal is rejected. Applied 1.3 proposals may prevent rollback; the path for resolving an applied proposal has not been verified. Do not roll back until an operator has checked every 1.3 proposal and confirmed a recovery path. This temporary field does not migrate instincts or create compiled records. Remove it after the upstream store contract and migration are in place.
 
-The temporary observation adapter (`instincts/observation-source.js`) follows the `importObservations(data, { sourceId, cursor, maxMalformed })` API merged in [Thread #81](https://github.com/kontourai/thread/pull/81). It currently uses a fixture importer in tests and cannot read observation files. The host must save the returned cursor atomically with downstream effects. Once the Ferry release is published, replace the fixture seam with that importer and connect its events and cursor to the dream transaction.
+`instincts/observation-source.js` is a temporary wrapper around an importer supplied by the caller. Its options match Ferry’s `importObservations` API in [Thread #81](https://github.com/kontourai/thread/pull/81). Tests use a stand-in; nothing reads observation files through this wrapper yet. Give each log file a stable, distinct `sourceId` and save the returned cursor in the same transaction as the results it produced. An unfinished last line remains for the next run. When a log rotates, finish the archived file with its original ID and cursor before reading the new file under a new ID. Too many malformed lines cause the importer to fail without returning results.
+
+Once Ferry publishes the API, pass in the real importer. Its tool events are not dream session records; the mapping from events to dream input and the cursor commit path still need to be built and tested.
 
 ## The run
 

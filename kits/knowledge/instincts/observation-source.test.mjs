@@ -7,7 +7,7 @@ function fixtureImporter(data, options) {
   assert.equal(data, 'fixture input');
   return { events: [{ id: 'event-id', sourceId: options.sourceId, ordinal: 1, timestamp: '2026-01-01T00:00:00Z', session: 'session', projectId: 'project', projectName: 'project', event: 'tool_start', tool: 'tool' }], malformed: 0, partial: 0, cursor: { version: 1, sourceId: options.sourceId, lines: 1, digest: 'a'.repeat(64) } };
 }
-test('the fixture importer uses the merged Ferry API shape', () => {
+test('the stand-in importer returns a fixture in the documented API shape', () => {
   const result = importObservationSource(fixtureImporter, 'fixture input', { sourceId: 'fixture' });
   assert.equal(result.events[0].sourceId, 'fixture');
   assert.deepEqual(result.cursor, { version: 1, sourceId: 'fixture', lines: 1, digest: 'a'.repeat(64) });
@@ -22,6 +22,6 @@ test('propagates importer errors without advancing or replacing the cursor', () 
   const options = { sourceId: 'fixture', cursor: { version: 1, sourceId: 'fixture', lines: 1, digest: 'a'.repeat(64) } };
   assert.throws(() => importObservationSource(() => { throw new Error('prefix changed'); }, '', options), /prefix changed/);
   assert.equal(options.cursor.lines, 1);
-  assert.throws(() => importObservationSource(null, '', options), /importer/);
+  assert.throws(() => importObservationSource(null, '', options), (error) => error instanceof TypeError && error.message === 'observation importer must be a function');
   assert.throws(() => importObservationSource(fixtureImporter, '', { sourceId: '' }), /sourceId/);
 });

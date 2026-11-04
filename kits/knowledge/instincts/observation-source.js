@@ -2,7 +2,7 @@
  * Temporary injection seam for Ferry's importObservations API. The host owns
  * source bytes and must commit the returned cursor atomically with downstream
  * effects. This shim does not parse files or commit cursors. Replace the
- * injected importer with the published Ferry API after kontourai/thread#80.
+ * injected importer after the Ferry release containing kontourai/thread#80.
  */
 export function importObservationSource(importer, data, options) {
   if (typeof importer !== 'function') throw new TypeError('observation importer must be a function');
