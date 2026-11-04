@@ -106,3 +106,11 @@ test("asked through recall: a stated claim is answered with its excerpt, a super
   assert.ok(!other.results.some(entry => entry.claim_id.startsWith("mem-") && entry.outcome === "answered"));
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("a presented claim longer than a recall result may be is excluded by name, not truncated", async () => {
+  const { claims, options } = await fixture();
+  const long = memoryClaim({ ...claims.find(claim => claim.posture === "stated"), value: "x".repeat(1500), supersedes: undefined });
+  const derived = deriveMemoryManifest({ ...options, claims: [long], authorityFor: () => ({ path: "knowledge/records/placeholder.md", citation: "placeholder" }) });
+  assert.deepEqual(derived.excluded, [{ claim_id: long.id, reason: "claim_too_long" }]);
+  assert.deepEqual(derived.manifest.claims, []);
+});

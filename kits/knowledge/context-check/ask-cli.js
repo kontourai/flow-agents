@@ -15,11 +15,16 @@ import { askLivingContext } from "./living-context-ask.js";
 import { createLineSupportVerifier } from "./living-context-answer.js";
 import { deriveStoreManifest } from "./living-context-store.js";
 
-const USAGE = "usage: ask-cli.js --repo <root> --revision <sha> --reader <id> --now <instant> [--store knowledge] [--readers a,b] [--budget n] [--limit n] [--min-coverage x] [--min-passage-coverage x] [--json] [--manifest] \"<question>\"";
+const USAGE = "usage: ask-cli.js --repo <root> --revision <sha> --reader <id> --now <instant> [--store knowledge] [--readers a,b] [--budget n] [--limit n] [--min-coverage x] [--min-passage-coverage x] [--nomination-budget n] [--json] [--manifest] \"<question>\"";
 
 function render(result) {
   const lines = [`Q: ${result.question}`, `   revision ${result.revision.slice(0, 12)}, store ${result.store}, as of ${result.as_of}, reader ${result.reader}`,
     `   terms: ${result.terms.join(", ") || "(none)"}; ${result.store_stats.claims} records read, ${result.store_stats.excluded} excluded`];
+  const reasons = new Map();
+  for (const entry of result.excluded) reasons.set(entry.reason, (reasons.get(entry.reason) ?? 0) + 1);
+  if (reasons.size) lines.push(`   excluded: ${[...reasons].map(([reason, count]) => `${reason} x${count}`).join(", ")}`);
+  if (result.nominations_truncated) lines.push(`   WARNING: ${result.nominations_truncated} further nominated records were not recalled (cap reached)`);
+  if (result.successors_unresolved) lines.push(`   WARNING: replacements could not be looked up for ${result.successors_unresolved.length} records (${result.successors_unresolved.slice(0, 3).join(", ")}${result.successors_unresolved.length > 3 ? ", ..." : ""}); a superseded record may be shown without its successor`);
   if (result.abstained) {
     lines.push(`A: ABSTAINED (${result.abstained})`);
     for (const near of result.below_threshold) lines.push(`   nearest below the coverage bar: ${near.id} (${near.matched.join(", ")}; coverage ${near.coverage})`);
@@ -41,7 +46,7 @@ async function main(argv) {
     allowPositionals: true,
     options: {
       repo: { type: "string" }, revision: { type: "string" }, store: { type: "string", default: "knowledge" }, reader: { type: "string" }, readers: { type: "string" },
-      now: { type: "string" }, budget: { type: "string" }, limit: { type: "string" }, "min-coverage": { type: "string" }, "min-passage-coverage": { type: "string" }, json: { type: "boolean", default: false }, manifest: { type: "boolean", default: false },
+      now: { type: "string" }, budget: { type: "string" }, limit: { type: "string" }, "min-coverage": { type: "string" }, "min-passage-coverage": { type: "string" }, "nomination-budget": { type: "string" }, json: { type: "boolean", default: false }, manifest: { type: "boolean", default: false },
     },
   });
   const question = positionals.join(" ").trim();
@@ -55,7 +60,7 @@ async function main(argv) {
   if (!question) { console.error(`missing question\n${USAGE}`); return 2; }
   const result = await askLivingContext({
     repoRoot: values.repo, revision: values.revision, storePath: values.store, reader: values.reader, readers, now: values.now, question, verifier: createLineSupportVerifier(),
-    ...(values.budget ? { budgetTokens: Number(values.budget) } : {}), ...(values.limit ? { limit: Number(values.limit) } : {}), ...(values["min-coverage"] ? { minCoverage: Number(values["min-coverage"]) } : {}), ...(values["min-passage-coverage"] ? { minPassageCoverage: Number(values["min-passage-coverage"]) } : {}),
+    ...(values.budget ? { budgetTokens: Number(values.budget) } : {}), ...(values.limit ? { limit: Number(values.limit) } : {}), ...(values["min-coverage"] ? { minCoverage: Number(values["min-coverage"]) } : {}), ...(values["min-passage-coverage"] ? { minPassageCoverage: Number(values["min-passage-coverage"]) } : {}), ...(values["nomination-budget"] ? { nominationBudgetTokens: Number(values["nomination-budget"]) } : {}),
   });
   console.log(values.json ? JSON.stringify(result, null, 2) : render(result));
   return 0;

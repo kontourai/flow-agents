@@ -3,10 +3,10 @@
  * whether a statement is in an authority document) and by question answering (which quotes a passage of a record). Sharing
  * it is what keeps the two honest with each other: a passage that is quoted is always a statement the verifier can find.
  *
- * Dependency-free on purpose, like `index.js`. Code spans are found by one scan, every pattern is bounded (a marker looks at most a
- * few hundred or thousand characters ahead) and sentence matching is a prefix test per sentence start (native string comparison;
- * 26 ms on a 52 KB unit of repeated prefixes), because the verifier runs synchronously and a timeout cannot interrupt it. The same normalisation is applied to a unit of any length, so a statement is judged the same in a short paragraph
- * and in a long one.
+ * Dependency-free on purpose, like `index.js`. Inline Markdown is removed by one bounded scan that never rescans its own output
+ * (a marker exposed by removing another stays text), and sentence matching is a prefix test per sentence start (native string
+ * comparison; 26 ms on a 52 KB unit of repeated prefixes), because the verifier runs synchronously and a timeout cannot interrupt
+ * it. The same normalisation applies to a unit of any length, so a statement is judged the same in a short paragraph and a long one.
  *
  * Stated limits: the sentence cut is a heuristic (a full stop, space, then a capital, digit or opening quote). An abbreviation
  * it does not know can cut a sentence early, and then a sentence tail is supported as if it were a sentence. Negation is not read.
@@ -19,28 +19,6 @@ const BLOCK_MARKER = /^\s*(?:(?:>\s*)+|(?:[-*+]|\d{1,3}[.)]|#{1,6})\s+)/;
 const HEADING = /^\s*#{1,6}\s/;
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`).
 const ABBREVIATION = /(?:^|\s)(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
-
-// Single emphasis may contain one strong pair (`*a **b** c*`); strong may contain one single pair (`**a *b* c**`) because single goes first.
-const EMPHASIS = [
-  [/!?\[([^\]\n]{0,300})\]\([^)\n]{0,500}\)/g, "$1"],
-  [/(^|[^\w*])\*(?=[^\s*])((?:[^*\n]|\*\*[^*\n]{1,500}?\*\*){1,2000}?)(?<=[^\s*])\*(?![\w*])/g, "$1$2"],
-  [/(^|[^\w])_(?=[^\s_])((?:[^_\n]|__[^_\n]{1,500}?__){1,2000}?)(?<=[^\s_])_(?!\w)/g, "$1$2"],
-  [/\*\*(?=\S)([^*\n]{1,2000}?)(?<=\S)\*\*/g, "$1"],
-  [/(^|[^\w])__(?=\S)([^_\n]{1,2000}?)(?<=\S)__(?!\w)/g, "$1$2"],
-  [/~~(?=\S)([^~\n]{1,2000}?)(?<=\S)~~/g, "$1"],
-];
-
-/**
- * Emphasis and links that are formatting. Markers without a partner are characters and stay. It is ONE pass on purpose: a second pass
- * would read markers exposed by the first (`_*a_*`, `[[a](x)](y)`) as formatting and erase literal wording. Nesting one level in
- * either direction is stripped; deeper or adjacent-delimiter nesting (`***a***`, `**a *b***`) is left as written, which can only
- * make the verifier abstain, never support a different statement.
- */
-function stripFormatting(text) {
-  let current = text;
-  for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
-  return current;
-}
 
 /**
  * Code spans in one linear scan: a run of N backticks opens a span that the next run of exactly N backticks closes (CommonMark); an
@@ -71,18 +49,69 @@ function codeSpans(text) {
   return spans;
 }
 
+const MAX_SPAN = 2000;
+const MAX_DEPTH = 3;
+const isWord = (c) => c !== undefined && /\w/.test(c);
+const isSpace = (c) => c === undefined || /\s/.test(c);
+
 /**
- * Inline Markdown that is formatting, not wording: links keep their text, paired emphasis goes, and the backticks around code go
- * while the code between them is kept exactly as written (a marker inside a code span is a character, never emphasis).
+ * One left-to-right scan that consumes formatting and never rescans its own output, so a marker exposed by removing another stays text:
+ * a code span is kept exactly as written; `[label](target)` keeps its label; `**x**`, `__x__`, `~~x~~`, `*x*` and `_x_` keep their
+ * inner text, which is scanned once more at the next depth (so `**a *b* c**` and `*a **b** c*` both strip). A marker with no
+ * partner within MAX_SPAN characters, a run of three or more, an intraword `_` or `*`, and anything deeper than MAX_DEPTH is text.
+ * Every search is bounded by MAX_SPAN, so the cost is at most the text length times that bound. A backslash before punctuation keeps
+ * the punctuation as a character.
  */
-export function stripInlineMarkdown(text) {
+function inline(text, depth) {
+  if (depth > MAX_DEPTH) return text;
+  const spans = new Map();
+  const inCode = new Uint8Array(text.length);
+  for (const span of codeSpans(text)) { spans.set(span.index, span); inCode.fill(1, span.index, span.index + span.length); }
   let out = "";
-  let last = 0;
-  for (const span of codeSpans(text)) {
-    out += stripFormatting(text.slice(last, span.index)) + span.content;
-    last = span.index + span.length;
+  for (let i = 0; i < text.length;) {
+    const c = text[i];
+    const span = spans.get(i);
+    if (span) { out += span.content; i += span.length; continue; }
+    if (c === "\\" && i + 1 < text.length && /[!-/:-@[-`{-~]/.test(text[i + 1])) { out += text[i + 1]; i += 2; continue; }
+    if (c === "[" || (c === "!" && text[i + 1] === "[")) {
+      const open = c === "!" ? i + 1 : i;
+      const labelEnd = text.slice(open + 1, open + 302).indexOf("]");
+      if (labelEnd !== -1 && text[open + 1 + labelEnd + 1] === "(") {
+        const close = open + 1 + labelEnd;
+        const targetEnd = text.slice(close + 2, close + 503).indexOf(")");
+        if (targetEnd !== -1) { out += inline(text.slice(open + 1, close), depth + 1); i = close + 2 + targetEnd + 1; continue; }
+      }
+    }
+    if (c === "*" || c === "_" || c === "~") {
+      let run = 1;
+      while (text[i + run] === c) run++;
+      const width = c === "~" ? (run === 2 ? 2 : 0) : (run === 1 || run === 2 ? run : 0);
+      if (width > 0 && !isSpace(text[i + width]) && !isWord(text[i - 1])) {
+        const limit = Math.min(text.length, i + width + MAX_SPAN);
+        let closer = -1;
+        for (let k = i + width; k < limit;) {
+          if (inCode[k]) { k++; continue; }
+          if (text[k] !== c) { k++; continue; }
+          let length = 1;
+          while (text[k + length] === c) length++;
+          if (length === width && !isSpace(text[k - 1]) && !isWord(text[k + length]) && text[k + length] !== c) { closer = k; break; }
+          k += length;
+        }
+        if (closer !== -1) { out += inline(text.slice(i + width, closer), depth + 1); i = closer + width; continue; }
+      }
+      out += text.slice(i, i + run);
+      i += run;
+      continue;
+    }
+    out += c;
+    i++;
   }
-  return out + stripFormatting(text.slice(last));
+  return out;
+}
+
+/** Inline Markdown that is formatting, not wording, removed from `text` (see `inline`). Applied to claim and document alike. */
+export function stripInlineMarkdown(text) {
+  return inline(text, 0);
 }
 
 const squash = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();

@@ -23,7 +23,6 @@ import { deriveStoreManifest, storeKnowledgeRoot, DEFAULT_STORE_ROOT_ID } from "
 import { DEFAULT_LIMIT, DEFAULT_MIN_COVERAGE, DEFAULT_MIN_PASSAGE_COVERAGE, bestPassage, passageCoverage, selectClaimsForQuestion } from "./living-context-select.js";
 
 export const DEFAULT_BUDGET_TOKENS = 4000;
-const NOMINATION_BATCH = 50;
 const MAX_NOMINATED = 200;
 
 /**
@@ -37,12 +36,13 @@ const MAX_NOMINATED = 200;
  * @param {object} options.verifier     a Survey SupportVerifier (required; see living-context-answer.js)
  * @param {string} [options.storePath]  store directory relative to the repository (default `knowledge`)
  * @param {(args: object) => object} [options.select] replaces the lexical selector; same input and output shape
- * @param {{manifest: object, records: object[]}[]} [options.additional] further derived sources (for example `deriveMemoryManifest` output) answered from alongside the store
+ * @param {number} [options.nominationBudgetTokens] token ceiling of the pass that reads successors from recall (the contract's maximum by default)
+ * @param {{manifest: object, records: object[], excluded?: object[]}[]} [options.additional] further derived sources (for example `deriveMemoryManifest` output) answered from alongside the store
  */
 export async function askLivingContext({
   repoRoot, revision, question, reader, readers, now, verifier,
   storePath = "knowledge", workspace = "knowledge-store", repository = "knowledge-store", audience = "maintainer",
-  budgetTokens = DEFAULT_BUDGET_TOKENS, limit = DEFAULT_LIMIT, minCoverage = DEFAULT_MIN_COVERAGE, minPassageCoverage = DEFAULT_MIN_PASSAGE_COVERAGE, select = selectClaimsForQuestion, owner, additional = [],
+  budgetTokens = DEFAULT_BUDGET_TOKENS, limit = DEFAULT_LIMIT, minCoverage = DEFAULT_MIN_COVERAGE, minPassageCoverage = DEFAULT_MIN_PASSAGE_COVERAGE, select = selectClaimsForQuestion, owner, additional = [], nominationBudgetTokens = 1000000,
 } = {}) {
   if (typeof question !== "string" || question.trim() === "") throw error("QUESTION_REQUIRED", "askLivingContext needs a question");
   if (!isIdentity(reader)) throw error("READER_IDENTITY_REQUIRED", "askLivingContext needs the reader identity (the host authenticates it)");
@@ -71,30 +71,32 @@ export async function askLivingContext({
   const visibleRecords = store.records.filter((record) => answerable.has(record.claim_id));
   const documents = visibleRecords.map((record) => ({ id: record.claim_id, title: record.title, tags: record.tags, category: record.category, body: record.body, updated_at: record.updated_at }));
   const selection = select({ question, documents, limit, minCoverage, minPassageCoverage });
-  const base = { question, revision: store.revision, store: store.store, reader, as_of: now, store_stats: store.stats, excluded: store.excluded, terms: selection.terms, below_threshold: selection.below_threshold };
+  // Exclusions of further sources are reported by reason only: their claim ids may name claims this reader may not see.
+  const excluded = [...store.excluded, ...additional.flatMap((source) => (source.excluded ?? []).map((entry) => ({ source: "additional", reason: entry.reason })))];
+  const base = { question, revision: store.revision, store: store.store, reader, as_of: now, store_stats: { ...store.stats, excluded: excluded.length }, excluded, terms: selection.terms, below_threshold: selection.below_threshold };
 
   if (selection.terms.length === 0) return { ...base, outcome: "abstained", abstained: "no_question_terms", results: [] };
   if (selection.selected.length === 0) return { ...base, outcome: "abstained", abstained: "no_record_covers_question", results: [] };
 
   const recordBy = new Map(store.records.map((record) => [record.claim_id, record]));
-  const nominated = selection.selected.filter((entry) => answerable.has(entry.id)).slice(0, MAX_NOMINATED).map((entry) => ({ ...entry }));
+  const eligible = selection.selected.filter((entry) => answerable.has(entry.id));
+  const nominated = eligible.slice(0, MAX_NOMINATED).map((entry) => ({ ...entry }));
+  const truncated = eligible.length - nominated.length;
   if (nominated.length === 0) return { ...base, outcome: "abstained", abstained: "nothing_answerable_nominated", results: [] };
   // A superseded record is shown with the record that replaced it. The successor is the one recall reports for this reader at this
   // instant (an edge the reader may not see, or one recorded later, is not followed), and only one that may be answered from.
-  // Nomination reads recall's own chain in batches, each under the largest budget the contract allows. A claim is capped at MAX_CLAIM_CHARS
-  // and a batch is small, so a drop here is not expected; if one happens it is reported (`successors_unresolved`), never silent.
+  // Reading it is one recall under the largest budget the contract allows; a claim is capped at MAX_CLAIM_CHARS, so a drop is not expected,
+  // and if one happens, or the nomination cap is reached, the shortfall is reported (`successors_unresolved`), never silent.
   const unresolved = [];
-  for (let from = 0; from < nominated.length; from += NOMINATION_BATCH) {
-    const batch = nominated.slice(from, from + NOMINATION_BATCH).map((entry) => entry.id);
-    const first = runLivingContext({ repoRoot, input: { ...input, budget: { max_tokens: 1000000 }, claim_ids: batch }, derivedManifests, write: false });
-    unresolved.push(...first.budget.dropped.map((dropped) => dropped.claim_id));
-    for (const recalled of first.recalls) {
-      for (const link of recalled.supersession_chain ?? []) {
-        if (link.relation !== "superseded_by" || link.active !== true || !answerable.has(link.claim_id) || nominated.some((other) => other.id === link.claim_id)) continue;
-        const record = recordBy.get(link.claim_id);
-        const candidate = bestPassage(record.body, selection.terms);
-        nominated.push({ id: link.claim_id, via: `successor_of:${recalled.claim_id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
-      }
+  const first = runLivingContext({ repoRoot, input: { ...input, budget: { max_tokens: nominationBudgetTokens }, claim_ids: nominated.map((entry) => entry.id) }, derivedManifests, write: false });
+  unresolved.push(...first.budget.dropped.map((dropped) => dropped.claim_id));
+  for (const recalled of first.recalls) {
+    for (const link of recalled.supersession_chain ?? []) {
+      if (link.relation !== "superseded_by" || link.active !== true || !answerable.has(link.claim_id) || nominated.some((other) => other.id === link.claim_id)) continue;
+      if (nominated.length >= MAX_NOMINATED) { unresolved.push(recalled.claim_id); continue; }
+      const record = recordBy.get(link.claim_id);
+      const candidate = bestPassage(record.body, selection.terms);
+      nominated.push({ id: link.claim_id, via: `successor_of:${recalled.claim_id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
     }
   }
 
@@ -134,5 +136,5 @@ export async function askLivingContext({
   // Answered results first (stable within each group, so a predecessor still precedes its successor); the rest say why they did not answer.
   results.sort((a, b) => Number(b.outcome === "answered") - Number(a.outcome === "answered"));
   // Answered means at least one current record states the quoted passage.
-  return { ...base, ...(unresolved.length ? { successors_unresolved: unresolved } : {}), outcome: results.some((result) => result.outcome === "answered") ? "answered" : "abstained", results, recall_verdict: recall.verdict, budget: recall.budget };
+  return { ...base, ...(truncated > 0 ? { nominations_truncated: truncated } : {}), ...(unresolved.length ? { successors_unresolved: [...new Set(unresolved)] } : {}), outcome: results.some((result) => result.outcome === "answered") ? "answered" : "abstained", results, recall_verdict: recall.verdict, budget: recall.budget };
 }

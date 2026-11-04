@@ -773,3 +773,73 @@ describe("review round 4", () => {
     assert.equal((await ask({ repoRoot: m.repo, revision: m.revision, question: "short title" })).successors_unresolved, undefined);
   });
 });
+
+describe("review round 5", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("markers whose partners cross are text: removing one never turns another into formatting", async () => {
+    for (const excerpt of ["Use _**allow_** here.", "Use **_allow**_ here.", "Use _~~allow_~~ here.", "Use _*allow_* here.", "Use ~~**allow~~** here."]) {
+      assert.equal(await verdict("Use allow here.", `${excerpt}\n`), "not-addressed", excerpt);
+    }
+    assert.equal(await verdict("Use allow here.", "Use _allow_ here.\n"), "supported");
+    assert.equal(await verdict("Use allow here.", "Use ~~allow~~ here.\n"), "supported");
+    assert.equal(await verdict("Use snake_case_name here.", "Use snake_case_name here.\n"), "supported", "an intraword underscore is text");
+    assert.equal(await verdict("Total is 2*3*4.", "Total is 2*3*4.\n"), "supported", "intraword asterisks are text on both sides");
+    assert.equal(await verdict("Use *not* here.", "Use \\*not\\* here.\n"), "not-addressed", "an escaped marker is a character; the claim's own markers are formatting");
+  });
+
+  test("the stripper's cost is bounded by the text times a constant on adversarial input", async () => {
+    const worst = [];
+    for (const unit of ["*a **", "**a *", "_a __", "[a ", "![a](", "~~a ", "`a``", "*a_ ", "*", "_", "a**b**"]) {
+      const excerpt = unit.repeat(Math.floor(60000 / unit.length));
+      const started = Date.now();
+      assert.equal(await verdict("Nothing matches this.", excerpt), "not-addressed");
+      worst.push([unit, Date.now() - started]);
+    }
+    for (const [unit, ms] of worst) assert.ok(ms < 1500, `${JSON.stringify(unit)} took ${ms} ms`);
+  });
+
+  test("more nominations than the cap are cut visibly, and the shortfall of successor lookup is reported", async () => {
+    const m = await track(async ({ store, make }) => {
+      const ids = [];
+      for (let i = 0; i < 205; i++) ids.push(await make("2026-10-01T00:00:00.000Z", { title: `Numbered note ${i}`, body: `Numbered note ${i}.\n`, tags: ["numbered"] }));
+      const next = await make("2026-10-02T00:00:00.000Z", { title: "Numbered note replacement", body: "Numbered note replacement.\n", tags: ["numbered"] });
+      store.at = "2026-10-03T00:00:00.000Z";
+      await store.supersede(next, [ids[0]], { agent: "fixture", rationale: "replace" });
+      return { ids, next };
+    });
+    const everyone = (ids) => () => ({ terms: ["numbered"], weights: new Map([["numbered", 1]]), selected: ids.map((id) => ({ id, score: 1, coverage: 1, matched: ["numbered"], passage: "" })), below_threshold: [] });
+    const many = await ask({ repoRoot: m.repo, revision: m.revision, question: "numbered", select: everyone(m.ids.ids), budgetTokens: 1000000 });
+    assert.equal(many.results.length, 200);
+    assert.equal(many.nominations_truncated, 5);
+    // The cap also bounds successors: the 200th slot is taken, so the successor of the first record cannot be added, and that is said.
+    assert.ok(!many.results.some((entry) => entry.claim_id === m.ids.next && entry.via));
+    assert.deepEqual(many.successors_unresolved, [m.ids.ids[0]]);
+    // A nomination pass that cannot fit the claims says so rather than quietly showing no successor.
+    const starved = await ask({ repoRoot: m.repo, revision: m.revision, question: "numbered", select: everyone([m.ids.ids[0]]), nominationBudgetTokens: 1 });
+    assert.deepEqual(starved.successors_unresolved, [m.ids.ids[0]]);
+    assert.ok(!starved.results.some((entry) => entry.via));
+  });
+
+  test("the CLI says what was excluded and warns when successor lookup fell short", async () => {
+    const s = await sharedSeed();
+    const cli = path.join(__dirname, "ask-cli.js");
+    const base = ["--repo", s.repo, "--revision", s.revision, "--reader", "maintainer", "--now", NOW];
+    const plain = spawnSync(process.execPath, [cli, ...base, "What is the CI compute policy?"], { encoding: "utf8" });
+    assert.equal(plain.status, 0, plain.stderr);
+    assert.match(plain.stdout, /excluded: .*duplicate_id x2/);
+    assert.doesNotMatch(plain.stdout, /WARNING/);
+    const starved = spawnSync(process.execPath, [cli, ...base, "--nomination-budget", "1", "What is the CI compute policy?"], { encoding: "utf8" });
+    assert.equal(starved.status, 0, starved.stderr);
+    assert.match(starved.stdout, /WARNING: replacements could not be looked up/);
+  });
+
+  test("exclusions of further sources are reported by reason, without naming the claims", async () => {
+    const m = await track(async ({ put }) => { put("docs/p.md", "Public pricing is flat.\n"); return {}; });
+    const source = { ...sourceOf([manifestClaim("pub", "docs/p.md")], [recordOf("pub", "docs/p.md", "Public pricing", "Public pricing is flat.\n")]), excluded: [{ claim_id: "hidden-id", reason: "claim_too_long" }] };
+    const result = await askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "Public pricing flat", reader: "bob", readers: ["alice", "bob"], now: NOW, verifier, additional: [source] });
+    assert.deepEqual(result.excluded, [{ source: "additional", reason: "claim_too_long" }]);
+    assert.equal(result.store_stats.excluded, 1);
+    assert.equal(JSON.stringify(result).includes("hidden-id"), false);
+  });
+});
