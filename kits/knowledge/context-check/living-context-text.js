@@ -165,7 +165,8 @@ export function documentUnits(text) {
       continue;
     }
     if (current === undefined && /^(?: {4}|\t)/.test(core)) continue; // an indented code block
-    const body = line.replace(BLOCK_MARKER, "").replace(/\s+/g, " ").trim();
+    let body = line.replace(BLOCK_MARKER, "").replace(/\s+/g, " ").trim();
+    if (HEADING.test(line)) body = body.replace(/\s+#+$/, ""); // an ATX heading's optional closing sequence is not displayed
     const starts = BLOCK_MARKER.test(line);
     if (starts || current === undefined) {
       const kind = HEADING.test(line) ? "heading" : starts ? "item" : "paragraph";

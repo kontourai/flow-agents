@@ -929,6 +929,8 @@ describe("review round 7: only prose is prose, and entity references are not tex
     assert.equal(await verdict("The *allow* operator is reserved.", "| a |\n|---|\n| b |\n\nThe `*allow*` operator is reserved.\n"), "supported", "a table ends at a blank line");
     assert.equal(await verdict("The *allow* operator is reserved.", "The `*allow*` operator is\nreserved.\n"), "supported");
     assert.equal(await verdict("The *allow* operator", "The `*allow*` operator\n---\n"), "supported", "a setext heading displays its text");
+    assert.equal(await verdict("Release notes", "## Release notes ##\n"), "supported", "an ATX heading displays its text");
+    assert.equal(await verdict("Release notes ##", "## Release notes ##\n\nBody.\n"), "not-addressed", "...without its closing sequence");
     assert.equal(await verdict("indented continuation The operator is reserved.", "Intro line\n    indented continuation\nThe operator is reserved.\n"), "not-addressed", "a lazy continuation joins the paragraph: a fragment of the joined sentence is not a sentence");
     assert.equal(await verdict("Intro line indented continuation The operator is reserved.", "Intro line\n    indented continuation\nThe operator is reserved.\n"), "supported");
   });
