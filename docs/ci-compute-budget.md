@@ -25,9 +25,9 @@ run blocks the whole repository.
 
 The repository owner decided (2026-11-03) to split each slot into two lanes,
 allowing two concurrent admission units per slot and raising the repository-wide
-peak from 2 to 4 runners. That halves the exposure to any single stalled run
-(one stuck group stalls a quarter of participating work, not half) and doubles
-admission capacity (actual throughput still depends on the workload and on how
+peak from 2 to 4 runners. That halves the nominal admission capacity a single stalled
+run can remove (one of four groups, not one of two; the share of work actually
+delayed depends on how run IDs fall across lanes) and doubles admission capacity (actual throughput still depends on the workload and on how
 run IDs fall across lanes). The groups were renamed to `flow-agents-compute-v2-…` so that runs
 created under the old workflow revisions, which may still be pending in the
 retired groups, cannot share a queue with the new ones; the policy refuses the
@@ -175,7 +175,7 @@ lane), a changed or inverted parity expression, lane inputs drawn from PR, ref,
 head SHA or run attempt, missing jobs/admission/queue, cross-PR cancellation,
 mutable pins, unclassified PR compute and callee growth. It also pins the
 parity expression and checks that it maps run IDs to exactly two lanes. Its
-finite model exhausts every completion interleaving in 96 scenarios containing
+finite model exhausts every completion interleaving in 132 scenarios containing
 two PR graphs and runtime compatibility, with both job orders, all six
 caller-batch arrival orders and eleven lane assignments (eight with one lane per
 owner, three giving each workflow run of an owner its own lane), and asserts a
