@@ -262,7 +262,7 @@ test("quarantine: only applied claims are eligible by default; pending needs opt
 function surveyDecision(entry, { decision, editedValue }) {
   const routed = routeMemoryChange({ type: "claim", claim: entry.claim, agreement: { passes: 2, agreeing: 1 } });
   const reviewItem = buildMemoryReviewItem(routed);
-  const session = { ...initialReviewQueueSessionState([reviewItem]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [reviewItem.metadata.name]: decision }, ...(editedValue !== undefined ? { editedValuesByItemName: { [reviewItem.metadata.name]: editedValue } } : {}) };
+  const session = { ...initialReviewQueueSessionState([reviewItem]), actorId: "person:reviewer", reviewerKind: "human", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [reviewItem.metadata.name]: decision }, ...(editedValue !== undefined ? { editedValuesByItemName: { [reviewItem.metadata.name]: editedValue } } : {}) };
   return buildReviewDecisionsFromSession(session);
 }
 

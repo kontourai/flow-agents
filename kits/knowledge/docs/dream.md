@@ -223,7 +223,10 @@ id is the sitting's working-directory name. Nothing else decides scope.
 - **Labels.** Every entry is `presentMemoryClaims` text, so it begins with posture and
   review label. That function labels from Survey review decisions. Pass them with
   `host.reviewDecisions()`; without them an applied claim reads as unreviewed, which
-  understates and never overstates.
+  understates and never overstates. A decision changes a claim (confirms, corrects or
+  withholds it) only when the host attests `reviewerKind: "human"` on the Survey session;
+  the run gives `presentMemoryClaims` no routing record, so every claim is treated as
+  routed and an agent's or unattested decision only annotates it.
 - **The reader's rules.** Control characters, bidi overrides and the injected-memory
   markers are removed from every entry, because #672's reader drops the whole file if any
   entry has one.

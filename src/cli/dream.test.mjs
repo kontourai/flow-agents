@@ -984,7 +984,7 @@ test("a contest that a Survey edit created reaches the review queue: the verdict
   await store.applyCreate(ids[0], "a-human-reviewer"); // a is applied; b stays pending
   // Survey's reviewer corrects b to a different value: they now disagree, though no stored value says so.
   const item = buildMemoryReviewItem(routeMemoryChange({ type: "claim", claim: b, agreement: { passes: 2, agreeing: 1 }, sourceVisibility: vis }));
-  const reviewDecisions = buildReviewDecisionsFromSession({ ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "accept-proposed" }, editedValuesByItemName: { [item.metadata.name]: "half up" } });
+  const reviewDecisions = buildReviewDecisionsFromSession({ ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewerKind: "human", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "accept-proposed" }, editedValuesByItemName: { [item.metadata.name]: "half up" } });
   const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: () => [] }), { reviewDecisions: () => reviewDecisions });
   for (let i = 0; i < 3; i += 1) {
     host.published.length = 0;
@@ -1099,7 +1099,7 @@ test("review's rejection and correction are seen when routing: a rival the revie
     const entry = { claim: peer, agreement: { passes: 2, agreeing: 2 }, project: null };
     await store.proposeCreate({ title: "peer", category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision: routeMemoryChange({ type: "claim", claim: peer, current: [], agreement: entry.agreement, sourceVisibility: vis }), sitting: { id: "peer:1", contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
     const item = buildMemoryReviewItem(routeMemoryChange({ type: "claim", claim: peer, agreement: { passes: 2, agreeing: 1 }, sourceVisibility: vis }));
-    const reviewDecisions = buildReviewDecisionsFromSession({ ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: decision }, ...(editedValue ? { editedValuesByItemName: { [item.metadata.name]: editedValue } } : {}) });
+    const reviewDecisions = buildReviewDecisionsFromSession({ ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewerKind: "human", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: decision }, ...(editedValue ? { editedValuesByItemName: { [item.metadata.name]: editedValue } } : {}) });
     const mine = (content) => (content.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "ledger service", subjectType: "service", property: "rounding mode", value: "banker's rounding", posture: "stated" }] : []);
     const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: mine }), { reviewDecisions: () => reviewDecisions });
     const report = await runDream(host, runOptions(ws, { visibility: vis }));
