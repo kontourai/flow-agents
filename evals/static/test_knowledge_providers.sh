@@ -36,6 +36,9 @@ if npm run knowledge:yaml:check && node --test \
   kits/knowledge/providers/conformance/suite.test.js \
   kits/knowledge/providers/conformance/installed-entry.test.js \
   kits/knowledge/providers/health/health-pass.test.js \
+  kits/knowledge/instincts/confidence.test.js \
+  kits/knowledge/instincts/dream-confidence.test.mjs \
+  kits/knowledge/instincts/observation-source.test.mjs \
   kits/knowledge/promote/promote.test.js \
   kits/knowledge/promote/runtime-session.test.js \
   kits/knowledge/promote/store-target.test.js \

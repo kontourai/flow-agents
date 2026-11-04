@@ -36,7 +36,8 @@ import { canonicalJson } from "@kontourai/relay";
 import { assertMemoryClaim, recomputeMemoryRouting } from "../adapters/memory-claims/index.mjs";
 import { dreamError, truncateUtf8 } from "./util.js";
 
-export const ENVELOPE_VERSION = "1.2";
+export const ENVELOPE_VERSION = "1.3";
+const LEGACY_ENVELOPE_VERSION = "1.2";
 export const MEMORY_CATEGORY = "memory.claim";
 /** The most claims one sitting may propose. Beyond it the run keeps the first by claim id and reports the rest. */
 export const MAX_CLAIMS_PER_SITTING = 32;
@@ -69,7 +70,7 @@ export const visibilityKey = (visibility) => {
 export function encodeEnvelope({ plan, index, decision, sitting }) {
   const entry = plan[index];
   const body = canonicalJson({
-    dream: ENVELOPE_VERSION,
+    dream: entry.instinctConfidence === undefined ? LEGACY_ENVELOPE_VERSION : ENVELOPE_VERSION,
     claim: entry.claim,
     agreement: entry.agreement,
     ...(entry.instinctConfidence === undefined ? {} : { instinctConfidence: entry.instinctConfidence }),
@@ -162,7 +163,8 @@ export function decodeEnvelope(body) {
   try {
     if (typeof body !== "string" || Buffer.byteLength(body) > MAX_ENVELOPE_BYTES) return null;
     const value = JSON.parse(body);
-    if (!value || value.dream !== ENVELOPE_VERSION) return null;
+    if (!value || ![LEGACY_ENVELOPE_VERSION, ENVELOPE_VERSION].includes(value.dream)) return null;
+    if ((value.dream === LEGACY_ENVELOPE_VERSION) !== (value.instinctConfidence === undefined)) return null;
     const { plan, sitting } = value;
     if (!Array.isArray(plan) || plan.length === 0 || plan.length > MAX_CLAIMS_PER_SITTING) return null;
     if (!sitting || typeof sitting.id !== "string" || typeof sitting.contentHash !== "string" || typeof sitting.visibilityKey !== "string" || typeof sitting.planDigest !== "string" || !isCount(sitting.index)) return null;

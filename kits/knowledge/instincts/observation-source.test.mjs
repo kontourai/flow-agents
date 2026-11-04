@@ -15,3 +15,16 @@ test('invalid and duplicate residues fail closed', async () => {
   await assert.rejects(readObservationResidues({ read: () => ({ residues: [fixture, fixture], cursor: {} }) }), /duplicate/);
   await assert.rejects(readObservationResidues({ read: () => ({ residues: [{ ...fixture, turns: [] }], cursor: {} }) }), /invalid/);
 });
+
+test('the adapter cannot change the caller cursor', async () => {
+  const cursor = { nested: { offset: 7 } };
+  await readObservationResidues({ read(input) { input.nested.offset = 99; return { residues: [], cursor: input }; } }, cursor);
+  assert.equal(cursor.nested.offset, 7);
+});
+test('the adapter rejects an oversized batch before consuming it', async () => {
+  await assert.rejects(readObservationResidues({ read: () => ({ residues: Array(1001).fill(fixture), cursor: {} }) }), /adapter result/);
+});
+test('a valid non-runtime residue is not an observation', async () => {
+  const sidecar = { sessionDir: 'fixture', sessionMarkdown: null, slug: 'fixture', repo: null, status: null, phase: null, planSummary: '', definitionOfDone: '', decisions: [], learnings: [], evidence: null, critiqueSummary: '', transcriptRefs: [], touchedFiles: [] };
+  await assert.rejects(readObservationResidues({ read: () => ({ residues: [sidecar], cursor: {} }) }), /invalid/);
+});

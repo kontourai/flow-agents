@@ -10,7 +10,7 @@ function sample(confidence) {
   const decision = routeMemoryChange({ type: 'claim', claim, current: [], agreement: null, sourceVisibility: { kind: 'public' } });
   return encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: 'fixture', contentHash: 'sha256:fixture', visibilityKey: 'public' } });
 }
-test('confidence is bound to the verified proposal plan and affects ranking without widening eligibility', () => {
+test('confidence is bound to the verified proposal plan and affects confidence scoring', () => {
   const envelope = decodeEnvelope(sample(0.8));
   assert.equal(envelope.instinctConfidence, 0.8);
   assert.ok(confidenceOf({ state: 'applied', instinctConfidence: 0.8 }) > confidenceOf({ state: 'applied', instinctConfidence: 0.3 }));
@@ -20,4 +20,11 @@ test('confidence is bound to the verified proposal plan and affects ranking with
 });
 test('out of bounds confidence cannot be read as a verified envelope', () => {
   for (const value of [-1, 1.1, '0.8', null]) assert.equal(decodeEnvelope(sample(value)), null);
+});
+
+ test('legacy and confidence envelopes use distinct readable versions', () => {
+  const value = JSON.parse(sample(0.8));
+  assert.equal(value.dream, '1.3');
+  value.dream = '1.2';
+  assert.equal(decodeEnvelope(JSON.stringify(value)), null);
 });

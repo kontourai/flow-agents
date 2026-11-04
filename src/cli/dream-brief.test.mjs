@@ -537,3 +537,24 @@ test("the injection hook's real reader accepts what the dream writes and injects
     for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   }
 });
+
+test('stored instinct confidence reaches the ranked brief after independent review', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup);
+  fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const host = hostFor(ws, store, async () => { throw new Error('no extraction expected'); });
+  const { encodeEnvelope } = await import('../../kits/knowledge/dream/envelope.js');
+  const claims = [claim({ property: 'first pattern', value: 'first-value' }), claim({ property: 'second pattern', value: 'second-value' })].sort((a, b) => a.id.localeCompare(b.id));
+  for (const [i, candidate] of claims.entries()) {
+    const entry = { claim: candidate, agreement: null, project: null, instinctConfidence: i ? 0.9 : 0.1 };
+    const decision = routeMemoryChange({ type: 'claim', claim: candidate, current: [], agreement: null, sourceVisibility: { kind: 'public' } });
+    const body = encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `fixture:${i}`, contentHash: 'h', visibilityKey: 'k' } });
+    const id = await store.proposeCreate({ title: `fixture ${i}`, category: 'memory.claim', body }, 'knowledge.dream', { agent: 'fixture', proposal: 'fixture' });
+    await store.applyCreate(id, 'independent-reviewer');
+  }
+  await runDream(host, runOptions(ws));
+  const entries = JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries;
+  assert.equal(entries.length, 2);
+  assert.ok(entries[0].includes(claims[1].value), 'higher confidence must rank first');
+  assert.ok(entries[1].includes(claims[0].value));
+});

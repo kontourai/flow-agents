@@ -20,11 +20,13 @@ it.
 | Model calls | `@kontourai/datum`, `@kontourai/dispatch`, `@kontourai/relay` | A Datum role resolves to a provider and model, Dispatch routes and budgets the call, a Relay `ModelRuntime` makes it. |
 | Extraction | `@kontourai/traverse` | Grounds each claim in a verbatim excerpt. |
 
-## Temporary instinct confidence carrier
+## Instinct confidence (temporary)
 
-Until [Corpus #68](https://github.com/kontourai/corpus/issues/68) provides confidence frontmatter, a dream proposal plan may carry an optional `instinctConfidence` number between 0 and 1. The plan digest binds it to the proposal; invalid or altered values fail envelope verification. Brief ranking uses the value within the existing applied and pending score bands, without changing visibility, contest, or review eligibility. This carrier alone does not import instincts, invoke consolidation, or create compiled records. Remove it when the upstream store contract and migration are in place.
+An instinct is a learned pattern. The dream run does not yet write an instinct confidence score. Until [Corpus #68](https://github.com/kontourai/corpus/issues/68) provides confidence frontmatter, a proposal plan can hold a score from 0 to 1. The reader refuses invalid scores and scores that disagree with the plan. The digest checks consistency, not who supplied the score. A reviewed claim still ranks above an unreviewed one. Visibility, conflict and review rules do not change.
 
-The temporary observation adapter boundary (`instincts/observation-source.js`) accepts only validated existing runtime-session residues and leaves cursor ownership with the caller. Its sole current adapter is a test fixture; it is not connected to the dream runner and cannot read observation files. Replace it with the Ferry/Thread importer tracked by [Thread #80](https://github.com/kontourai/thread/issues/80), then integrate its cursor with the dream transaction.
+Proposals with a score use envelope version 1.3; existing proposals without one remain version 1.2. Before rolling back to a version that only reads 1.2, review and resolve each 1.3 proposal. The older reader will reject it and report its version. This temporary field does not migrate instincts or create compiled records. Remove it after the upstream store contract and migration are in place.
+
+The temporary observation adapter (`instincts/observation-source.js`) accepts session records that already match the residue schema; the caller tracks how far it has read. Its only adapter is a test fixture. It is not connected to the dream runner and cannot read observation files. Replace it with the importer tracked by [Thread #80](https://github.com/kontourai/thread/issues/80), then integrate its cursor with the dream transaction.
 
 ## The run
 

@@ -2,6 +2,9 @@
  * Compute an instinct's confidence from a preserved migration baseline and
  * distinct evidence boundaries. This only plans a value; callers must route any
  * resulting change through the memory review and Corpus proposal contracts.
+ * The baseline is the confidence at lastObservedAt before subsequent decay;
+ * baselineSources counts distinct evidence boundaries already in that baseline.
+ * sourceIds must include those boundaries so additions are not undercounted.
  */
 export function instinctConfidence({ baseline, baselineSources, sourceIds, lastObservedAt, now }) {
   if (typeof baseline !== 'number' || !Number.isFinite(baseline) || baseline < 0 || baseline > 1) throw new TypeError('baseline must be between 0 and 1');
