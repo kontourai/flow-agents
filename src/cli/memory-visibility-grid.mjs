@@ -1,0 +1,53 @@
+// A grid of visibility values, well formed and not, for checking the Kit's visibility order against Surface's
+// `meetVisibility` (kontourai/surface src/visibility.ts, surface#356). Each entry is a name and a function that builds
+// the value fresh: sparse arrays, prototype tricks and iterator overrides cannot be written as JSON.
+//
+// `visibility-grid.vectors.json` holds, for every ordered pair, whether `meetVisibility(a, b)` deep-equals
+// `meetVisibility(a)` according to the real Surface (first generated at commit 18e3570 by compiling that file; surface@6.3.0 reproduces it).
+// Regenerate it from the pinned release if the grid changes. The test replays the matrix against the Kit.
+const only = (...audiences) => ({ kind: "restricted", audiences });
+const many = n => ({ kind: "restricted", audiences: Array.from({ length: n }, (_, i) => `a${i}`) });
+const sparse = () => { const list = new Array(2); list[0] = "a"; return { kind: "restricted", audiences: list }; };
+const withIterator = () => { const list = ["a"]; list[Symbol.iterator] = function* () { yield "b"; }; return { kind: "restricted", audiences: list }; };
+const inheritedKind = () => Object.create({ kind: "restricted", audiences: ["a"] });
+const subclass = () => { class L extends Array {} const list = new L(); list.push("a"); return { kind: "restricted", audiences: list }; };
+
+export const GRID = [
+  ["public", () => ({ kind: "public" })],
+  ["sealed", () => only()],
+  ["a", () => only("a")],
+  ["b", () => only("b")],
+  ["ab", () => only("a", "b")],
+  ["ba", () => only("b", "a")],
+  ["aab (duplicates)", () => only("a", "a", "b")],
+  ["abc", () => only("a", "b", "c")],
+  ["empty string audience", () => only("")],
+  ["a plus empty string", () => only("a", "")],
+  ["a plus a number", () => only("a", 1)],
+  ["a plus null", () => only("a", null)],
+  ["a plus an object", () => only("a", {})],
+  ["audiences is a string", () => ({ kind: "restricted", audiences: "a" })],
+  ["audiences missing", () => ({ kind: "restricted" })],
+  ["audiences null", () => ({ kind: "restricted", audiences: null })],
+  ["audiences is an object", () => ({ kind: "restricted", audiences: { 0: "a", length: 1 } })],
+  ["public with audiences", () => ({ kind: "public", audiences: ["a"] })],
+  ["public with an extra key", () => ({ kind: "public", note: 1 })],
+  ["restricted with an extra key", () => ({ kind: "restricted", audiences: ["a"], note: 1 })],
+  ["unknown kind", () => ({ kind: "everyone" })],
+  ["no kind", () => ({ audiences: ["a"] })],
+  ["null", () => null],
+  ["undefined", () => undefined],
+  ["the string public", () => "public"],
+  ["a number", () => 7],
+  ["an array", () => ["a"]],
+  ["a list with a hole", sparse],
+  ["a list with an overridden iterator", withIterator],
+  ["an array subclass", subclass],
+  ["kind inherited from a prototype", inheritedKind],
+  ["a function carrying kind public", () => Object.assign(() => 0, { kind: "public" })],
+  ["a function carrying a restricted list", () => Object.assign(() => 0, { kind: "restricted", audiences: ["a"] })],
+  ["a boxed string", () => new String("public")],
+  ["audiences holding a duplicate and an empty string", () => only("a", "a", "")],
+  ["1024 audiences", () => many(1024)],
+  ["1025 audiences", () => many(1025)],
+];

@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/memory-run-metrics.schema.json",
+  "title": "Knowledge Memory Run Metrics",
+  "description": "Per-run routed-review metrics, derived from the run's routing decisions and Survey review decisions so review cost per caught defect can be measured. `reviewSeconds` is selection-to-submission dwell from Survey session events, an upper bound on attention; it is null when no events were supplied, never estimated. Shares are null when their denominator is zero.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "runId",
+    "decisions",
+    "claimsProposed",
+    "uncontested",
+    "routed",
+    "routedShare",
+    "routedByRule",
+    "reviewer",
+    "reviewSeconds",
+    "reviewTimedDecisions",
+    "reviewSecondsPerCaughtDefect"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decisions": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Routing decisions made this run (claims and entity changes)."
+    },
+    "claimsProposed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Claim changes recorded as proposed this run, routed or not."
+    },
+    "uncontested": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "routed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "routedShare": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "routedByRule": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Routing reasons per rule. A change with several reasons counts once under each."
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisions",
+        "confirmed",
+        "corrected",
+        "rejected",
+        "held",
+        "pending",
+        "unmatched",
+        "defectsCaught",
+        "annotated"
+      ],
+      "properties": {
+        "decisions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "corrected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "held": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Routed changes with no reviewer decision yet."
+        },
+        "unmatched": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Reviewer decisions that name no routed change of this run; not counted in decisions."
+        },
+        "defectsCaught": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "corrected + rejected."
+        },
+        "annotated": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Review decisions that only annotated a routed item: an agent's, a rule's or an unattested reviewer's. They promote nothing and leave the item pending; only a human reviewer's decision promotes a routed claim."
+        }
+      }
+    },
+    "reviewSeconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "reviewSecondsPerCaughtDefect": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "reviewTimedDecisions": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Reviewer decisions whose dwell is in reviewSeconds. A total over fewer decisions than were made understates review time; compare with reviewer.decisions."
+    }
+  }
+}

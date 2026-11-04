@@ -194,6 +194,30 @@
     "./knowledge-learning-file": {
       "types": "./build/src/knowledge-learning-file.d.ts",
       "import": "./build/src/knowledge-learning-file.js"
+    },
+    "./memory-claims": {
+      "types": "./build/src/memory-claims.d.ts",
+      "import": "./build/src/memory-claims.js"
+    },
+    "./memory-entity": {
+      "types": "./build/src/memory-entity.d.ts",
+      "import": "./build/src/memory-entity.js"
+    },
+    "./memory-json": {
+      "types": "./build/src/memory-json.d.ts",
+      "import": "./build/src/memory-json.js"
+    },
+    "./memory-accumulation": {
+      "types": "./build/src/memory-accumulation.d.ts",
+      "import": "./build/src/memory-accumulation.js"
+    },
+    "./memory-routing": {
+      "types": "./build/src/memory-routing.d.ts",
+      "import": "./build/src/memory-routing.js"
+    },
+    "./memory-routing-flow": {
+      "types": "./build/src/memory-routing-flow.d.ts",
+      "import": "./build/src/memory-routing-flow.js"
     }
   },
   "repository": {
@@ -358,7 +382,7 @@
     "@kontourai/flow": "5.4.0",
     "@kontourai/relay": "0.7.1",
     "@kontourai/surface": "6.3.0",
-    "@kontourai/survey": "8.3.0",
+    "@kontourai/survey": "8.4.0",
     "@kontourai/thread": "0.5.0",
     "esbuild": "0.28.2"
   },

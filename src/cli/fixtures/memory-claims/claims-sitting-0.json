@@ -1,0 +1,102 @@
+{
+  "agreement": {
+    "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02": {
+      "agreeing": 1,
+      "passes": 2
+    },
+    "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c": {
+      "agreeing": 2,
+      "passes": 2
+    }
+  },
+  "claims": [
+    {
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
+      "posture": "stated",
+      "property": "primary database",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+        "extractor": "scripted-replay",
+        "locator": "chars:32-94",
+        "observedAt": "2026-10-28T09:00:00.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "PostgreSQL 15",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
+    },
+    {
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+      "posture": "stated",
+      "property": "on-call owner",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+        "extractor": "scripted-replay",
+        "locator": "chars:220-279",
+        "observedAt": "2026-10-28T09:01:10.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "Maya Chen",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
+    },
+    {
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+      "posture": "stated",
+      "property": "retry budget",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Our retry budget is 5 attempts per request.",
+        "extractor": "scripted-replay",
+        "locator": "chars:280-323",
+        "observedAt": "2026-10-28T09:01:10.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "5 attempts per request",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
+    }
+  ]
+}
