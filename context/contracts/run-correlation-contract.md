@@ -40,6 +40,14 @@ what makes the join honest. Consumers read the `source` label before trusting
 the tuple, and never repair an `unknown` identity from adjacent records,
 timestamps, or paths.
 
+Credential screening keeps the exported pattern sources shared with the JSON
+Schemas unchanged. For primitive strings without `://`, it skips only the
+URL-credential expression, which requires that delimiter. All other credential
+families still run; strings containing the delimiter use the original URL
+expression. This avoids repeated failed scheme scans on long opaque references,
+not every possible worst case. Direct JavaScript calls outside the declared
+string type retain their existing regular-expression coercion and error behavior.
+
 Runtime adapters declare support for every identity slot through
 `runtimeCorrelationIdentityDeclaration`. `supported` means the adapter can
 observe that identity when the host supplies it; `partial` names the host mode
