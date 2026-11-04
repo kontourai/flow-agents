@@ -4,12 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { KitDefaultStoreAdapter, standaloneFileMutationLock } from '@kontourai/corpus-store';
 import { runPromote } from './index.js';
 import { snapshotDir } from './lib.js';
 
-// Set CORPUS_STORE_ENTRY to the installed packed-branch entry until npm publish.
-test('Corpus stages an unreviewed proposal without a working-set record', { skip: !process.env.CORPUS_STORE_ENTRY }, async (t) => {
-  const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import(pathToFileURL(process.env.CORPUS_STORE_ENTRY).href);
+test('Corpus stages an unreviewed proposal without a working-set record', async (t) => {
   const residue = JSON.parse(fs.readFileSync(new URL('./fixtures/runtime-residue-669.json', import.meta.url), 'utf8'));
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wi2-corpus-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
@@ -22,7 +21,7 @@ test('Corpus stages an unreviewed proposal without a working-set record', { skip
   assert.equal(roots.get('memory'), root);
   assert.equal((await store.listProposals({ state: 'pending' })).length, 1);
   assert.equal((await store.listByType('raw')).length, 0);
-  assert.deepEqual(JSON.parse(proposal.candidate.provenance.note), { session_id: residue.provenance.sessionId, transcript_ref: residue.provenance.transcriptRef, sitting_id: residue.sittingId });
+  assert.deepEqual(JSON.parse(proposal.candidate.provenance.note), { session_id: residue.provenance.sessionId, transcript_ref: residue.provenance.transcriptRef, sitting_id: residue.sittingId, content_hash: residue.contentHash });
   await assert.rejects(store.applyCreate(proposal.id, 'distiller'), (error) => error.code === 'SELF_APPROVAL');
   assert.equal((await store.getProposal(proposal.id)).state, 'pending');
   const recordId = await store.applyCreate(proposal.id, 'independent-reviewer');
@@ -35,12 +34,46 @@ test('Corpus stages an unreviewed proposal without a working-set record', { skip
   assert.equal((await store.listByType('raw')).length, 1);
 });
 
-test('the host registry exposes the authorized root through the real MCP server', { skip: !process.env.CORPUS_STORE_ENTRY || !process.env.KNOWLEDGE_HOST_ROOT }, async (t) => {
+test('identical batch retries reuse receipts and changed content conflicts', async (t) => {
+  const residue = JSON.parse(fs.readFileSync(new URL('./fixtures/runtime-residue-669.json', import.meta.url), 'utf8'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wi2-retry-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, 'memory');
+  const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(base, 'coordination'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock, allowPurge: true });
+  const candidates = [{ title: 'First', body: 'One', category: 'memory.learning' }, { title: 'Second', body: 'Two', category: 'memory.learning' }];
+  let calls = 0;
+  const attemptedKeys = [];
+  const unreliable = { proposeCreate: async (...args) => { attemptedKeys.push(args[3].requestKey); const id = await store.proposeCreate(...args); if (++calls === 2) throw new Error('response lost after commit'); return id; } };
+  const options = { target: 'store', residue, candidates, proposerId: 'distiller', root, rootName: 'memory', store: unreliable, registerRoot: async () => {} };
+  let firstId;
+  await assert.rejects(runPromote(options), (error) => { firstId = error.completedProposals[0]; assert.equal(error.failedCandidateIndex, 1); return /unconfirmed/.test(error.message); });
+  assert.equal((await store.listProposals({ state: 'pending' })).length, 2);
+  const retried = await runPromote({ ...options, store });
+  assert.equal(retried.proposals[0], firstId);
+  assert.equal(new Set(retried.proposals).size, 2);
+  assert.equal((await store.listProposals({ state: 'pending' })).length, 2);
+  assert.deepEqual((await runPromote({ ...options, store })).proposals, retried.proposals);
+  await store.rejectCreate(retried.proposals[0], 'independent-reviewer', 'Not needed');
+  const settledReplay = await runPromote({ ...options, store });
+  assert.equal(settledReplay.review_state, 'not_observed');
+  assert.equal((await store.getProposal(settledReplay.proposals[0])).state, 'rejected');
+  await assert.rejects(runPromote({ ...options, store, candidates: [{ ...candidates[0], body: 'Changed' }, candidates[1]] }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
+  await assert.rejects(runPromote({ ...options, store, proposerId: 'another-proposer' }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
+  await assert.rejects(runPromote({ ...options, store, candidates: [candidates[0], { ...candidates[1], category: 'Invalid Category!' }] }), (error) => error.code === 'MISSING_EVIDENCE' && error.failedCandidateIndex === 1 && error.completedProposals[0] === retried.proposals[0]);
+  await assert.rejects(runPromote({ ...options, store, residue: { ...residue, provenance: { ...residue.provenance, transcriptRef: 'another-transcript.jsonl' } } }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
+  assert.equal((await store.listProposals({ state: 'pending' })).length, 1);
+  assert.equal((await store.listByType('raw')).length, 0);
+  const created = await store.applyCreate(retried.proposals[1], 'independent-reviewer');
+  await store.purge([created], { agent: 'independent-reviewer', rationale: 'erase' });
+  await assert.rejects(runPromote({ ...options, store }), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 1 && /retired/.test(error.cause.message) && error.requestKey === attemptedKeys[1] && error.requestKey !== attemptedKeys[0]);
+  assert.equal((await store.listByType('raw')).length, 0);
+});
+
+test('the host registry exposes the authorized root through the real MCP server', { skip: !process.env.KNOWLEDGE_HOST_ROOT }, async (t) => {
   const { spawn } = await import('node:child_process');
   const { once } = await import('node:events');
   const host = process.env.KNOWLEDGE_HOST_ROOT;
   const { scaffoldStore, registerRoot } = await import(pathToFileURL(path.join(host, 'scripts/lib/store-resolve.mjs')).href);
-  const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import(pathToFileURL(process.env.CORPUS_STORE_ENTRY).href);
   const residue = JSON.parse(fs.readFileSync(new URL('./fixtures/runtime-residue-669.json', import.meta.url), 'utf8'));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wi2-mcp-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

@@ -82,8 +82,9 @@ const workItemIdentityPattern = /^(?:[A-Za-z0-9][A-Za-z0-9._:@#-]{0,254}|(?:[A-Z
  * published JSON Schemas. Keep these schema-safe: JSON Schema has no regex
  * flags, so each case-insensitive credential family is encoded directly.
  */
+const URL_CREDENTIAL_PATTERN_SOURCE = String.raw`[A-Za-z][A-Za-z0-9+.-]*://[^\s/?#@]*@`;
 export const CREDENTIAL_PATTERN_SOURCES = [
-  String.raw`[A-Za-z][A-Za-z0-9+.-]*://[^\s/?#@]*@`,
+  URL_CREDENTIAL_PATTERN_SOURCE,
   String.raw`[Bb][Ee][Aa][Rr][Ee][Rr]\s+`,
   String.raw`(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][_-]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd])\s*[:=]`,
   String.raw`(?:[Ss][Kk]|[Gg][Hh][OoPpRrSsUu]|[Nn][Pp][Mm]|[Pp][Yy][Pp][Ii]|[Hh][Ff])_[A-Za-z0-9_-]{8,}`,
@@ -99,7 +100,10 @@ export const CREDENTIAL_PATTERN_SOURCES = [
   String.raw`[Ss][Qq]0(?:[Aa][Tt][Pp]|[Cc][Ss][Pp])-[A-Za-z0-9_-]{8,}`,
   String.raw`eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.`,
 ] as const;
-const credentialPatterns = CREDENTIAL_PATTERN_SOURCES.map((source) => new RegExp(source));
+const credentialPatterns = CREDENTIAL_PATTERN_SOURCES.map((source) => ({
+  expression: new RegExp(source),
+  requiresUrlDelimiter: source === URL_CREDENTIAL_PATTERN_SOURCE,
+}));
 const allowedEnvelopeKeys = new Set(["schema_version", "correlation_id", "identities"]);
 const allowedPresentKeys = new Set(["status", "value"]);
 const allowedAbsentKeys = new Set(["status", "reason"]);
@@ -114,7 +118,9 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string
 }
 
 export function containsSensitiveCredential(value: string): boolean {
-  return credentialPatterns.some((pattern) => pattern.test(value));
+  return credentialPatterns.some(({ expression, requiresUrlDelimiter }) =>
+    (!requiresUrlDelimiter || typeof value !== "string" || value.includes("://"))
+      && expression.test(value));
 }
 
 function isSafeIdentity(value: unknown, key?: RunCorrelationIdentityKey): value is string {

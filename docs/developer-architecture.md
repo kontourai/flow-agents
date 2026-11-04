@@ -6,7 +6,7 @@ title: Developer Architecture
 
 This guide is the local starting point for Flow Agents maintainers who need to understand how this repository coordinates with Flow, Surface, Veritas, and Builder Kit. It describes the architecture from the Flow Agents side only; product-specific runtime details remain in their owning products.
 
-**Package identity:** This source guide accompanies `@kontourai/flow-agents` version `9.11.0`, as declared in [`package.json`](../package.json). <!-- x-release-please-version -->
+**Package identity:** This source guide accompanies `@kontourai/flow-agents` version `9.12.0`, as declared in [`package.json`](../package.json). <!-- x-release-please-version -->
 
 Release Please updates this binding alongside package metadata through the
 `extra-files` entry in [`release-please-config.json`](../release-please-config.json).
@@ -179,6 +179,17 @@ file and the authorized transcript roots, ingest writes nothing, and it returns 
 candidate cursor that the transaction owner commits only after its own work
 succeeds. See the [Knowledge kit documentation](../kits/knowledge/docs/README.md#residue-sources-runtime-session-ingest)
 for the cursor rule, drift handling and scrub guarantees.
+
+## Memory-root proposals
+
+The Knowledge kit can stage distilled session candidates through a host-supplied
+Corpus store adapter for an authorized memory root. The proposal includes session,
+transcript and sitting provenance; Corpus owns the pending proposal and its review
+transaction. Staging does not apply a record or establish its review state. The
+repository pins `@kontourai/corpus-store` as a development dependency to exercise
+the integration; the host supplies the adapter at runtime. See the
+[proposal target documentation](../kits/knowledge/docs/README.md) for registration,
+retry and recovery boundaries.
 
 ## Memory claims and routed review
 
