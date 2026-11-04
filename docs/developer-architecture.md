@@ -164,6 +164,17 @@ candidate cursor that the transaction owner commits only after its own work
 succeeds. See the [Knowledge kit documentation](../kits/knowledge/docs/README.md#residue-sources-runtime-session-ingest)
 for the cursor rule, drift handling and scrub guarantees.
 
+## Memory-root proposals
+
+The Knowledge kit can stage distilled session candidates through a host-supplied
+Corpus store adapter for an authorized memory root. The proposal includes session,
+transcript and sitting provenance; Corpus owns the pending proposal and its review
+transaction. Staging does not apply a record or establish its review state. The
+repository pins `@kontourai/corpus-store` as a development dependency to exercise
+the integration; the host supplies the adapter at runtime. See the
+[proposal target documentation](../kits/knowledge/docs/README.md) for registration,
+retry and recovery boundaries.
+
 ## Memory claims and routed review
 
 Native hosts consume the `memory-claims`, `memory-routing` and `memory-routing-flow`
