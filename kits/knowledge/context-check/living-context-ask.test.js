@@ -871,7 +871,7 @@ describe("review round 6: a claim is plain text, a document is rendered only whe
   });
 
   test("rendering is the identity unless every marker is a simple well-formed pair, and is idempotent on its own output", () => {
-    const identity = ["a **b *c* d** e", "**a** and **b *c***", "x ***y*** z", "a * b *c", "a\\b", "a <b> c", "a ![i](u) b", "a [b] c", "a [b](u c) d", "a `` b `` c", "a ` b ` c", "a _b c", "a **b c", "a~b", "a ~~b~ c", "foo*bar* baz", "well-**known** thing"];
+    const identity = ["a **b *c* d** e", "**a** and **b *c***", "x ***y*** z", "a * b *c", "a\\b", "a <b> c", "a ![i](u) b", "a [b] c", "a [b](u c) d", "a `` b `` c", "a ` b ` c", "a _b c", "a **b c", "a~b", "a ~~b~ c", "foo*bar* baz", "well-**known** thing", "**x** a\\b", "**x** 5\\% off", "**x** <b>y</b>", "**x** y] z", "**x** a > b"];
     for (const text of identity) assert.equal(renderInline(text), text, text);
     assert.equal(renderInline("a * b"), "a * b", "a lone marker between spaces is text");
     assert.equal(renderInline("snake_case and __init__ and **Note:** *x* _y_ ~~z~~ `c` [l](http://u/p)"), "snake_case and init and Note: x y z c l");
