@@ -33,6 +33,7 @@
 import { assertMemoryClaim, memoryInstant, memorySlotKey, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
 import { presentMemoryClaims } from "@kontourai/flow-agents/memory-routing";
 import { error, isIdentity, safeRelativePath } from "./index.js";
+import { MAX_CLAIM_CHARS } from "./living-context-store.js";
 
 const manifestIdOf = (claimId) => `mem-${claimId.replace(/^sha256:/, "").replace(/[^A-Za-z0-9._-]/g, "-")}`;
 const iso = (text) => { const ms = memoryInstant(text); return ms === undefined ? undefined : new Date(ms).toISOString(); };
@@ -59,6 +60,7 @@ export function deriveMemoryManifest({ claims, authorityFor, recordedAtFor, revi
     const shown = presentedBy.get(claim?.id);
     if (!shown) continue;
     assertMemoryClaim(claim);
+    if (shown.text.length > MAX_CLAIM_CHARS) { excluded.push({ claim_id: claim.id, reason: "claim_too_long" }); continue; }
     const authority = authorityFor(claim);
     let path;
     try { path = safeRelativePath(authority?.path, "authority.path"); } catch { excluded.push({ claim_id: claim.id, reason: "no_authority" }); continue; }

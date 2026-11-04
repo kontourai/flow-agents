@@ -33,7 +33,7 @@
  *                        and every record is visible to exactly those readers. No `readers`, no manifest.
  *   review               omitted, which recall reads as `proposed`: no record carries a per-claim human review.
  *
- * Excluded, with a reason (never silently dropped): duplicate ids (all copies), over-size files, blank titles,
+ * Excluded, with a reason (never silently dropped): duplicate ids (all copies), over-size files, blank or over-long titles,
  * unsafe ids, bytes that are not UTF-8 (never rewritten into text), paths recall cannot carry. Files under `archive/` or a dot directory, symlinks, and Markdown without a record's `id` and `category`
  * frontmatter are not records and are only counted.
  *
@@ -47,6 +47,8 @@ import { error, gitRaw, isIdentity, resolveRevisionBoundRepository, safeClaimId,
 /** A record file larger than this is excluded rather than read: the answer step also refuses an authority over 64 KiB, so a bigger record could never be answered from. */
 export const MAX_RECORD_BYTES = 262144;
 export const DEFAULT_STORE_ROOT_ID = "knowledge-store";
+/** A claim (a record title, or a presented memory claim) longer than this is excluded, so one recall result stays small and a nomination pass cannot be starved by its budget. */
+export const MAX_CLAIM_CHARS = 1000;
 
 const LS_TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]{40,64}) +(\d+|-)\t([\s\S]+)$/;
 const SERVED_STATUSES = new Set(["active", "implemented"]);
@@ -144,6 +146,7 @@ export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge
     try { safeClaimId(id, "record id"); } catch { excluded.push({ path: file.path, id, reason: "invalid_id" }); continue; }
     const title = collapse(meta.title);
     if (!title) { excluded.push({ path: file.path, id, reason: "blank_title" }); continue; }
+    if (title.length > MAX_CLAIM_CHARS) { excluded.push({ path: file.path, id, reason: "title_too_long" }); continue; }
     records.push({ id, path: file.path, title, type: meta.type, category: meta.category, tags: asList(meta.tags).map(collapse).filter(Boolean), status: collapse(meta.status) || "active", meta, body });
   }
   records.sort((a, b) => a.id.localeCompare(b.id));

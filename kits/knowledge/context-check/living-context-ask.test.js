@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { DefaultKnowledgeStore } from "../adapters/default-store/index.js";
 import { runLivingContext, validateLivingContextInput } from "./living-context.js";
 import { answerLivingContext as answerWith, createLineSupportVerifier } from "./living-context-answer.js";
-import { deriveStoreManifest, storeKnowledgeRoot, MAX_RECORD_BYTES } from "./living-context-store.js";
+import { deriveStoreManifest, storeKnowledgeRoot, MAX_RECORD_BYTES, MAX_CLAIM_CHARS } from "./living-context-store.js";
 import { selectClaimsForQuestion, bestPassage, terms } from "./living-context-select.js";
 import { askLivingContext } from "./living-context-ask.js";
 
@@ -716,7 +716,7 @@ describe("review round 3", () => {
   test("emphasis nests in either direction, and a quote marker needs no space", async () => {
     assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*."), "supported");
     assert.equal(await verdict("Use alpha beta here.", "Use _alpha __beta__ here_."), "supported");
-    assert.equal(await verdict("Use alpha.", "Use ***alpha***."), "supported");
+    assert.equal(await verdict("Use alpha.", "Use ***alpha***."), "not-addressed", "adjacent delimiters are left as written: the verifier abstains rather than guess");
     assert.equal(await verdict("Admin is allowed.", ">Admin is allowed.\n"), "supported");
     assert.equal(await verdict("Admin is allowed.", ">> Admin is allowed.\n"), "supported");
     assert.equal(await verdict("Admin is allowed.", ">- Admin is allowed.\n"), "supported");
@@ -751,5 +751,26 @@ describe("review round 3: ask", () => {
     const result = await ask({ repoRoot: m.repo, revision: m.revision, question: "kyanite", select: () => ({ terms: ["kyanite"], weights: new Map([["kyanite", 1]]), selected: [{ id: "not-a-claim", score: 1, coverage: 1, matched: ["kyanite"], passage: "Kyanite note." }], below_threshold: [] }) });
     assert.equal(result.outcome, "abstained");
     assert.equal(result.abstained, "nothing_answerable_nominated");
+  });
+});
+
+describe("review round 4", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("markers exposed by stripping are not read as formatting a second time", async () => {
+    assert.equal(await verdict("Use allow here.", "Use _*allow_* here.\n"), "not-addressed");
+    assert.equal(await verdict("Use *allow* here.", "Use _*allow_* here.\n"), "not-addressed", "a claim is read as Markdown too, so its asterisks are emphasis: abstaining is the safe side");
+    assert.equal(await verdict("allow", "[[allow](x)](y)\n"), "not-addressed");
+    assert.equal(await verdict("[allow](y)", "[[allow](x)](y)\n"), "supported");
+    assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*.\n"), "supported", "one level of nesting either way");
+    assert.equal(await verdict("Use alpha beta here.", "Use **alpha *beta* here**.\n"), "supported");
+  });
+
+  test("a title longer than a claim may be is a named exclusion, so one result stays small", async () => {
+    const m = await track(async ({ make }) => ({ ok: await make("2026-10-01T00:00:00.000Z", { title: "Short title", body: "Short body.\n" }), long: await make("2026-10-01T00:00:00.000Z", { title: `Long ${"word ".repeat(300)}`, body: "Long body.\n" }) }));
+    const derived = deriveStoreManifest({ repoRoot: m.repo, revision: m.revision, readers: ["maintainer"] });
+    assert.deepEqual(derived.excluded.map((entry) => [entry.id, entry.reason]), [[m.ids.long, "title_too_long"]]);
+    assert.ok(derived.manifest.claims.every((claim) => claim.claim.length <= MAX_CLAIM_CHARS));
+    assert.equal((await ask({ repoRoot: m.repo, revision: m.revision, question: "short title" })).successors_unresolved, undefined);
   });
 });

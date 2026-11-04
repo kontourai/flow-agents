@@ -23,6 +23,8 @@ import { deriveStoreManifest, storeKnowledgeRoot, DEFAULT_STORE_ROOT_ID } from "
 import { DEFAULT_LIMIT, DEFAULT_MIN_COVERAGE, DEFAULT_MIN_PASSAGE_COVERAGE, bestPassage, passageCoverage, selectClaimsForQuestion } from "./living-context-select.js";
 
 export const DEFAULT_BUDGET_TOKENS = 4000;
+const NOMINATION_BATCH = 50;
+const MAX_NOMINATED = 200;
 
 /**
  * @param {object} options
@@ -75,18 +77,24 @@ export async function askLivingContext({
   if (selection.selected.length === 0) return { ...base, outcome: "abstained", abstained: "no_record_covers_question", results: [] };
 
   const recordBy = new Map(store.records.map((record) => [record.claim_id, record]));
-  const nominated = selection.selected.filter((entry) => answerable.has(entry.id)).map((entry) => ({ ...entry }));
+  const nominated = selection.selected.filter((entry) => answerable.has(entry.id)).slice(0, MAX_NOMINATED).map((entry) => ({ ...entry }));
   if (nominated.length === 0) return { ...base, outcome: "abstained", abstained: "nothing_answerable_nominated", results: [] };
   // A superseded record is shown with the record that replaced it. The successor is the one recall reports for this reader at this
   // instant (an edge the reader may not see, or one recorded later, is not followed), and only one that may be answered from.
-  // The nomination pass is not budgeted: it only reads which successors recall reports, and a budget drop here would hide one.
-  const first = runLivingContext({ repoRoot, input: { ...input, budget: { max_tokens: 1000000 }, claim_ids: nominated.map((entry) => entry.id) }, derivedManifests, write: false });
-  for (const recalled of first.recalls) {
-    for (const link of recalled.supersession_chain ?? []) {
-      if (link.relation !== "superseded_by" || link.active !== true || !answerable.has(link.claim_id) || nominated.some((other) => other.id === link.claim_id)) continue;
-      const record = recordBy.get(link.claim_id);
-      const candidate = bestPassage(record.body, selection.terms);
-      nominated.push({ id: link.claim_id, via: `successor_of:${recalled.claim_id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
+  // Nomination reads recall's own chain in batches, each under the largest budget the contract allows. A claim is capped at MAX_CLAIM_CHARS
+  // and a batch is small, so a drop here is not expected; if one happens it is reported (`successors_unresolved`), never silent.
+  const unresolved = [];
+  for (let from = 0; from < nominated.length; from += NOMINATION_BATCH) {
+    const batch = nominated.slice(from, from + NOMINATION_BATCH).map((entry) => entry.id);
+    const first = runLivingContext({ repoRoot, input: { ...input, budget: { max_tokens: 1000000 }, claim_ids: batch }, derivedManifests, write: false });
+    unresolved.push(...first.budget.dropped.map((dropped) => dropped.claim_id));
+    for (const recalled of first.recalls) {
+      for (const link of recalled.supersession_chain ?? []) {
+        if (link.relation !== "superseded_by" || link.active !== true || !answerable.has(link.claim_id) || nominated.some((other) => other.id === link.claim_id)) continue;
+        const record = recordBy.get(link.claim_id);
+        const candidate = bestPassage(record.body, selection.terms);
+        nominated.push({ id: link.claim_id, via: `successor_of:${recalled.claim_id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
+      }
     }
   }
 
@@ -126,5 +134,5 @@ export async function askLivingContext({
   // Answered results first (stable within each group, so a predecessor still precedes its successor); the rest say why they did not answer.
   results.sort((a, b) => Number(b.outcome === "answered") - Number(a.outcome === "answered"));
   // Answered means at least one current record states the quoted passage.
-  return { ...base, outcome: results.some((result) => result.outcome === "answered") ? "answered" : "abstained", results, recall_verdict: recall.verdict, budget: recall.budget };
+  return { ...base, ...(unresolved.length ? { successors_unresolved: unresolved } : {}), outcome: results.some((result) => result.outcome === "answered") ? "answered" : "abstained", results, recall_verdict: recall.verdict, budget: recall.budget };
 }

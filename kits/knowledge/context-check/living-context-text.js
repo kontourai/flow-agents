@@ -20,23 +20,25 @@ const HEADING = /^\s*#{1,6}\s/;
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`).
 const ABBREVIATION = /(?:^|\s)(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
 
+// Single emphasis may contain one strong pair (`*a **b** c*`); strong may contain one single pair (`**a *b* c**`) because single goes first.
 const EMPHASIS = [
   [/!?\[([^\]\n]{0,300})\]\([^)\n]{0,500}\)/g, "$1"],
-  [/(^|[^\w*])\*(?=[^\s*])([^*\n]{1,2000}?)(?<=[^\s*])\*(?![\w*])/g, "$1$2"],
-  [/(^|[^\w])_(?=[^\s_])([^_\n]{1,2000}?)(?<=[^\s_])_(?!\w)/g, "$1$2"],
+  [/(^|[^\w*])\*(?=[^\s*])((?:[^*\n]|\*\*[^*\n]{1,500}?\*\*){1,2000}?)(?<=[^\s*])\*(?![\w*])/g, "$1$2"],
+  [/(^|[^\w])_(?=[^\s_])((?:[^_\n]|__[^_\n]{1,500}?__){1,2000}?)(?<=[^\s_])_(?!\w)/g, "$1$2"],
   [/\*\*(?=\S)([^*\n]{1,2000}?)(?<=\S)\*\*/g, "$1"],
   [/(^|[^\w])__(?=\S)([^_\n]{1,2000}?)(?<=\S)__(?!\w)/g, "$1$2"],
   [/~~(?=\S)([^~\n]{1,2000}?)(?<=\S)~~/g, "$1"],
 ];
 
-/** Emphasis and links that are formatting. Markers without a partner are characters and stay. Single-marker emphasis goes before double, so a nested pair is stripped in one pass. */
+/**
+ * Emphasis and links that are formatting. Markers without a partner are characters and stay. It is ONE pass on purpose: a second pass
+ * would read markers exposed by the first (`_*a_*`, `[[a](x)](y)`) as formatting and erase literal wording. Nesting one level in
+ * either direction is stripped; deeper or adjacent-delimiter nesting (`***a***`, `**a *b***`) is left as written, which can only
+ * make the verifier abstain, never support a different statement.
+ */
 function stripFormatting(text) {
   let current = text;
-  for (let pass = 0; pass < 3; pass++) {
-    const before = current;
-    for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
-    if (current === before) break;
-  }
+  for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
   return current;
 }
 
