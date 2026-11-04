@@ -110,6 +110,63 @@ test("real Corpus: two claims in ONE sitting, the first reply lost: the retry pr
   assert.equal(new Set(proposals.map((proposal) => proposal.id)).size, 2);
 });
 
+function lossyFirstReply(store) {
+  let calls = 0;
+  return new Proxy(store, {
+    get(target, prop) {
+      if (prop === "proposeCreate") {
+        return async (...args) => {
+          const id = await target.proposeCreate(...args);
+          if (calls++ === 0) throw Object.assign(new Error("reply lost"), { code: "INJECTED" });
+          return id;
+        };
+      }
+      const value = target[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+test("real Corpus: a retry whose provenance differs (the transcript root widened) still completes a half-proposed sitting", async (t) => {
+  // Real Corpus digests the candidate's provenance into the request, and the transcript reference is relative to the root.
+  // A claim already proposed is never sent again, so a changed reference cannot conflict with it.
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = await realStore(ws);
+  const claimsOf = (content) => content.includes("banker's rounding") ? [SCRIPT[0].claims[0], { ...SCRIPT[0].claims[0], property: "rounding scope", value: "the total" }] : [];
+  const host = hostFor(ws, noApplyStore(lossyFirstReply(store)), await scriptedExtract({ claimsOf }));
+  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.code === "INJECTED");
+  const retry = await runDream(host, runOptions(ws, { maxSittingsPerRun: 1, transcriptRoots: [path.dirname(ws.transcriptRoot)] }));
+  assert.equal(retry.status, "success");
+  assert.equal((await store.listProposals()).length, 2);
+});
+
+test("real Corpus: a changed plan for a half-proposed sitting proposes only what is new and never sends the known claim again", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = await realStore(ws);
+  const [a] = SCRIPT[0].claims;
+  const mk = (property, value) => ({ ...a, property, value });
+  let plan = [a, mk("rounding scope", "the total")];
+  const claimsOf = (content) => content.includes("banker's rounding") ? plan : [];
+  const host = hostFor(ws, noApplyStore(lossyFirstReply(store)), await scriptedExtract({ claimsOf }));
+  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.code === "INJECTED");
+  const [first] = await store.listProposals();
+  await store.rejectCreate(first.id, "a-human-reviewer", "not wanted");
+
+  // The sitting grows by a turn, so its stored plan is not resumed and the model is asked again, and now says three things.
+  const rollout = path.join(ws.transcriptRoot, "codex-rollout.jsonl");
+  fs.appendFileSync(rollout, `${JSON.stringify({ timestamp: "2026-10-31T14:00:40.000Z", type: "response_item", payload: { type: "message", id: "m-extra", role: "user", content: [{ type: "input_text", text: "One more thing: the rounding applies to refunds." }] }, ordinal: 99 })}\n`);
+  plan = [a, mk("rounding scope", "the total"), mk("rounding applies to", "refunds")];
+  await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
+
+  const proposals = await store.listProposals();
+  const states = Object.fromEntries(proposals.map((proposal) => [proposal.id, proposal.state]));
+  assert.equal(states[first.id], "rejected", "the known claim stays rejected: it was not sent again");
+  const claimIds = proposals.map((proposal) => JSON.parse(proposal.candidate.body).claim.id);
+  assert.equal(new Set(claimIds).size, claimIds.length, "no claim has two proposals");
+});
+
 test("the in-test store has the proposal shape the real store writes", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);

@@ -8,11 +8,10 @@
  * A retry reconciles against the store: every claim already proposed, in any
  * state, is reused by its claim id. A rejected proposal stays rejected; the same
  * claim is never proposed a second time. Corpus also keys each request by the
- * sitting and the candidate's position (#1573), so the batch handed to
- * `proposeMemory` is always the sitting's whole plan in order, with each claim
- * already proposed sent back as Corpus stored it. The request scope is the plan's
- * digest, so a different plan for the same sitting (another visibility, another
- * proposer) takes its own keys and cannot collide with the first. Each envelope carries the plan
+ * sitting and the candidate's position (#1573), so each claim sent says where it
+ * sits in the sitting's whole plan, and the request scope is the plan's digest:
+ * a different plan for the same sitting (another visibility, a changed plan)
+ * takes its own keys and cannot collide with the first. Each envelope carries the plan
  * (see envelope.js), so a retry resumes it and does not extract again.
  *
  * @module dream/propose
@@ -63,40 +62,23 @@ export async function proposeSitting({ residue, plan, decisions, visibilityKey, 
   if (!write) return { created, reused, preview: candidates.map((candidate, i) => ({ ...candidate, claimId: fresh[i].entry.claim.id })) };
   if (candidates.length === 0) return { created, reused, preview: [] };
 
-  // Corpus keys a request by the sitting and the candidate's POSITION in the batch it is given (#1573), and refuses a
-  // different candidate at a taken position. So the batch must be the sitting's whole plan in order: a batch shortened
-  // to the claims not yet proposed would give the second claim the first one's key. A claim already proposed goes in as
-  // the candidate Corpus stored, byte for byte, which Corpus answers with the proposal it already holds, in any state.
-  const batch = plan.map((entry, position) => {
-    const known = index.byClaim.get(entry.claim.id);
-    if (!known) return candidateFor(position);
-    // The proposal holds this position's key only if it is this sitting's, at this position. Claim ids carry the sitting
-    // (the source reference), so anything else is a receipt that does not belong to this plan.
-    if (known.envelope.sitting.id !== residue.sittingId || known.envelope.sitting.index !== position) {
-      throw dreamError("DREAM_RECEIPT_MISMATCH", "a proposal for this claim was made for a different sitting or position", { claimId: entry.claim.id });
-    }
-    const { title, body, category } = known.proposal.candidate;
-    return { title, body, category };
-  });
-
+  // Corpus keys a request by the sitting and the candidate's place in the batch (#1573), and refuses a different candidate
+  // at a taken key. Only the claims not yet proposed are sent, so each says where it sits in the sitting's WHOLE plan
+  // (`positions`); a claim already proposed is never sent again, so nothing about it (its provenance, its routing) can
+  // conflict. The scope is the plan's digest, so a different plan for the same sitting (another visibility, a changed
+  // plan) takes its own keys and cannot collide with, or be mistaken for, the first.
   let result;
   try {
-    result = await proposeMemory({ residue, candidates: batch, proposerId, ...host, write: true, requestScope: planDigest(plan) });
+    result = await proposeMemory({ residue, candidates, proposerId, ...host, write: true, requestScope: planDigest(plan), positions: fresh.map(({ position }) => position) });
   } catch (error) {
     // proposeMemory reports the ids it saw, but the failing call is indeterminate: ask the store what landed.
     const landed = await reconcile(host.store, proposerId, fresh);
     throw Object.assign(error, { dreamLanded: landed });
   }
-  if (result.proposals.length !== plan.length) {
+  if (result.proposals.length !== candidates.length) {
     throw dreamError("DREAM_PROPOSAL_COUNT", "the store returned a different number of proposals than were requested");
   }
-  plan.forEach((entry, position) => {
-    const known = index.byClaim.get(entry.claim.id);
-    if (known && result.proposals[position] !== known.proposal.id) {
-      throw dreamError("DREAM_PROPOSAL_MISMATCH", "the store answered a claim that was already proposed with a different proposal", { claimId: entry.claim.id });
-    }
-  });
-  fresh.forEach(({ entry, position }) => created.push({ claimId: entry.claim.id, proposalId: result.proposals[position] }));
+  result.proposals.forEach((proposalId, i) => created.push({ claimId: fresh[i].entry.claim.id, proposalId }));
   return { created, reused, preview: [] };
 }
 

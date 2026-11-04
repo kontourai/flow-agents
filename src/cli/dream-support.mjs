@@ -111,7 +111,9 @@ export class FakeCorpusStore {
       const same = (await this.listProposals()).find((proposal) => proposal.request_key === requestKey);
       this.calls.listProposals -= 1;
       if (same) {
-        if (JSON.stringify([same.candidate.title, same.candidate.body, same.candidate.category]) !== JSON.stringify([candidate.title, candidate.body, candidate.category])) {
+        // Real Corpus digests the whole request: the candidate with its provenance, the proposer and the evidence.
+        const sent = JSON.stringify([candidate, proposerId, { agent: evidence.agent, proposal: evidence.proposal }]);
+        if (JSON.stringify([same.candidate, same.proposer_id, same.evidence]) !== sent) {
           throw Object.assign(new Error("request key already names a different candidate"), { code: "REQUEST_KEY_CONFLICT" });
         }
         return same.id;
