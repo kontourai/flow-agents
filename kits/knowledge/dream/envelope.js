@@ -210,7 +210,7 @@ export function indexProposals(proposals, proposerId) {
         try {
           // The size bound applies here too: an over-size body is never parsed, not even to name its format.
           const written = Buffer.byteLength(proposal.candidate.body) <= MAX_ENVELOPE_BYTES ? JSON.parse(proposal.candidate.body)?.dream : undefined;
-          if (written && ![LEGACY_ENVELOPE_VERSION, ENVELOPE_VERSION].includes(written)) format = ` (written in envelope format ${String(written).slice(0, 16)}; this run reads ${ENVELOPE_VERSION})`;
+          if (written && ![LEGACY_ENVELOPE_VERSION, ENVELOPE_VERSION].includes(written)) format = ` (written in envelope format ${String(written).slice(0, 16)}; this run reads ${LEGACY_ENVELOPE_VERSION} and ${ENVELOPE_VERSION})`;
         } catch {
           // not JSON at all
         }

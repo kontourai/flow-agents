@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { memoryClaim, routeMemoryChange } from '../adapters/memory-claims/index.mjs';
-import { encodeEnvelope, decodeEnvelope } from '../dream/envelope.js';
+import { encodeEnvelope, decodeEnvelope, indexProposals } from '../dream/envelope.js';
 import { confidenceOf } from '../dream/brief.js';
 
 function sample(confidence) {
@@ -32,4 +32,12 @@ test('legacy and confidence envelopes use distinct readable versions', () => {
   assert.equal(decodeEnvelope(JSON.stringify(legacy)), null);
   value.dream = '1.2';
   assert.equal(decodeEnvelope(JSON.stringify(value)), null);
+});
+
+test('corrupt known versions and unsupported versions have accurate diagnostics', () => {
+  const proposal = (version) => ({ id: 'fixture', proposer_id: 'knowledge.dream', state: 'pending', candidate: { category: 'memory.claim', body: JSON.stringify({ dream: version }) } });
+  for (const version of ['1.2', '1.3']) {
+    assert.throws(() => indexProposals([proposal(version)], 'knowledge.dream'), (error) => error.code === 'DREAM_RECEIPT_CORRUPT' && !error.message.includes('written in envelope format'));
+  }
+  assert.throws(() => indexProposals([proposal('9.9')], 'knowledge.dream'), (error) => error.code === 'DREAM_RECEIPT_CORRUPT' && error.message.includes('reads 1.2 and 1.3'));
 });
