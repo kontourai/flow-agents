@@ -960,6 +960,14 @@ describe("the block layer: a flat document is read as prose, anything contextual
       ["a quote straight after a bullet", "- > The **key** is\n  > reserved.\n", "The key is reserved."],
       ["a heading straight after a bullet", "- # The **key** is reserved.\n", "The key is reserved."],
       ["a bullet inside a bullet", "- - The **key** is\n    reserved.\n", "The key is reserved."],
+      ["an indented fence-like line inside a fence", "```\n ```\n```\nThe **key** is\nreserved.\n", "The key is reserved."],
+      ["a tab-indented nested item", "- Parent\n\t- The **key** is\n\t  reserved.\n", "Parent - The key is reserved."],
+      ["a tab after a bullet", "- \t\tThe **key** is\n          reserved.\n", "The key is reserved."],
+      ["a backtick in a fence's info string", "```a`b\n```\nThe **key** is\nreserved.\n", "The key is reserved."],
+      ["an empty bullet", "- The **key** is\n*\nreserved.\n", "The key is * reserved."],
+      ["an empty plus item", "- The **key** is\n+\nreserved.\n", "The key is + reserved."],
+      ["an empty ordered item", "1) The **key** is\n1.\nreserved.\n", "The key is 1. reserved."],
+      ["a definition right after a bullet", "- [x]: /url\n  \"The key is\n  reserved.\"\n", "[x]: /url \"The key is reserved.\""],
       ["a setext heading", "The **key** is\nreserved\n===\n", "The key is reserved ==="],
       ["a setext heading under a list item", "- The **key** is\n  reserved.\n  ===\n", "The key is reserved. ==="],
       ["an over-indented bullet after a paragraph", "Do not\n    - **enable** signing.\n", "enable signing."],
@@ -970,9 +978,25 @@ describe("the block layer: a flat document is read as prose, anything contextual
       assert.equal(isFlatDocument(doc), false, name);
       assert.equal(await verdict(claim, doc), "not-addressed", `${name}: ${JSON.stringify(doc)}`);
     }
+    // The fallback is exactly the version 2 reading: not even a heading marker is taken off a line.
+    assert.equal(await verdict("**Enable** signing.", "> Quote\n# **Enable** signing.\n"), "not-addressed");
+    assert.equal(await verdict("# **Enable** signing.", "> Quote\n# **Enable** signing.\n"), "supported");
     // ...and a physical line is still a physical line.
     assert.equal(await verdict("Do not", "> Do not\n> **enable** signing.\n"), "supported");
     assert.equal(await verdict("Child **x**", "- Parent\n  - Child **x**\n"), "supported");
+  });
+
+  test("Unicode line and space characters are text, not blank lines; CRLF is an ordinary line ending; a table interrupts a paragraph by dropping it", async () => {
+    for (const separator of ["\u2028", "\u2029", "\u00a0"]) {
+      assert.equal(await verdict("enable signing.", `Do not\n${separator}\n**enable** signing.\n`), "not-addressed", JSON.stringify(separator));
+    }
+    assert.equal(await verdict("Two.", "One.\n   \n**Two**.\n"), "supported", "spaces alone make a blank line");
+    assert.ok(isFlatDocument("The **key** is\r\nreserved.\r\n"));
+    assert.equal(await verdict("The key is reserved.", "The **key** is\r\nreserved.\r\n"), "supported");
+    assert.equal(isFlatDocument("The **key** is\rreserved.\n"), false, "a lone CR is contextual");
+    assert.deepEqual(documentUnits("Intro words\nmore words.\n| a |\n|---|\n| c |\n\nAfter.\n").map((unit) => unit.sentences), [["After."]], "the half paragraph before a table row is dropped");
+    assert.equal(await verdict(`${"Alpha stays. ".repeat(400)}Omega stays.`, `${"Alpha stays. ".repeat(400)}Omega stays.\n`), "supported", "...a statement beyond the bound is still a whole physical line");
+    assert.equal(await verdict(`${"Alpha stays. ".repeat(400)}Omega stays.`, `${"Alpha stays. ".repeat(399)}\nAlpha stays. Omega stays.\n`), "not-addressed", "...but is not matched as a sentence run");
   });
 
   test("a fence at column 0 swallows its lines and keeps nothing else out; its closer must match", () => {

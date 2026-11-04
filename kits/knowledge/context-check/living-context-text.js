@@ -42,21 +42,27 @@
 const LIST_MARKER = /^[ ]?(?:[-*+]|(\d{1,9})[.)])(?:[ \t]+|$)/; // top level only: at most one space of indentation
 const ATX = /^[ ]{0,3}#{1,6}(?:[ \t]|$)/;
 const THEMATIC = /^[ ]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const BLANK = /^[ ]*$/; // a blank line is spaces only (a tab anywhere outside a fence makes the document contextual; Unicode spaces are text, as in CommonMark)
 const FENCE_OPEN = /^(`{3,}|~{3,})/; // a fence at column 0 only; it swallows lines up to its closing fence (or the end of the document)
+const FENCE_LIKE = /^[ \t]*(?:`{3,}|~{3,})/;
 const fenceCloses = (line, fence) => { const match = /^(`{3,}|~{3,})[ \t]*$/.exec(line); return Boolean(match) && match[1][0] === fence.char && match[1].length >= fence.length; };
 const SETEXT = /^[ ]{0,3}(?:=+|-+)[ \t]*$/;
 const POISON = [
   /^[ \t]*>/,                               // a quote: containers, laziness
   /^[ \t]+(?:`{3,}|~{3,})/,                 // an indented fence: its closer is relative to a container
+  /\t/,                                     // a tab: columns, not characters, decide indentation
+  /^[ ]?(?:[-*+]|\d{1,9}[.)])[ ]*$/,         // an empty list item: it ends the item above and does not start a paragraph
   /^[ \t]*<[!/?A-Za-z]/,                    // an HTML block (or a tag that starts one)
   /^[ ]{0,3}\[[^\]]+\]:/,                   // a link reference or footnote definition, with continuation lines
   /^[ \t]{2,}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/, // a nested list item
   // A list item whose content is itself a block: a quote, a fence, a heading, HTML, another item, or indented code (five spaces after the marker).
-  /^[ ]?(?:[-*+]|\d{1,9}[.)])(?:[ \t]+(?:>|`{3,}|~{3,}|#{1,6}(?:[ \t]|$)|<[!/?A-Za-z]|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))|[ ]{5,}\S|\t)/,
+  /^[ ]?(?:[-*+]|\d{1,9}[.)])(?:[ \t]+(?:>|`{3,}|~{3,}|#{1,6}(?:[ \t]|$)|<[!/?A-Za-z]|\[[^\]]+\]:|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))|[ ]{5,}\S|\t)/,
 ];
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`); tested on the last word only.
 const ABBREVIATION = /^(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
 
+/** A statement longer than this is not matched by the sentence reading (a claim is capped at 1,000 characters, a passage at 700); it bounds the cost of a repeated-prefix document. */
+const MAX_STATEMENT_CHARS = 4000;
 const MARKUP = /[*_~`[\]\\<>]/;
 const ENTITY = /&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/;
 const isAlnum = (c) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
@@ -150,13 +156,13 @@ function splitSentences(text) {
  * @returns {{kind: "heading"|"item"|"paragraph", sentences: string[]}[]}
  */
 export function documentUnits(text) {
-  const lines = text.split(/\r\n|\n/);
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
   let start = 0;
   if (lines[0] === "---") {
     const end = lines.indexOf("---", 1);
     if (end > 0) start = end + 1;
   }
-  if (/[\r\u0000]/.test(text) || isContextual(lines, start)) return lineUnits(lines.slice(start));
+  if (/[\r\u0000]/.test(lines.join("\n")) || isContextual(lines, start)) return lineUnits(lines.slice(start));
   const units = [];
   let current;
   let fence;
@@ -166,7 +172,7 @@ export function documentUnits(text) {
     if (fence) { if (fenceCloses(line, fence)) fence = undefined; continue; }
     const opening = FENCE_OPEN.exec(line);
     if (opening) { fence = { char: opening[1][0], length: opening[1].length }; current = undefined; skipping = false; continue; }
-    if (line.trim() === "") { current = undefined; skipping = false; continue; }
+    if (BLANK.test(line)) { current = undefined; skipping = false; continue; }
     if (skipping) continue;
     if (THEMATIC.test(line)) { current = undefined; continue; }
     if (line.includes("|")) {
@@ -176,7 +182,7 @@ export function documentUnits(text) {
       continue;
     }
     const list = LIST_MARKER.exec(line);
-    const listStart = list && line.slice(list[0].length).trim() !== "" && !(list[1] !== undefined && current?.kind === "paragraph" && Number(list[1]) !== 1);
+    const listStart = list && !BLANK.test(line.slice(list[0].length)) && !(list[1] !== undefined && current?.kind === "paragraph" && Number(list[1]) !== 1);
     const heading = ATX.test(line);
     let body = line.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : listStart ? LIST_MARKER : /^$/, "").replace(/\s+/g, " ").trim();
     if (heading) body = body.replace(/\s+#+$/, ""); // an ATX heading's optional closing sequence is not displayed
@@ -191,9 +197,9 @@ export function documentUnits(text) {
 
 /** Whether `documentUnits` reads this document as prose (the flat reading) rather than one line per unit. */
 export function isFlatDocument(text) {
-  const lines = text.split(/\r\n|\n/);
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
   const start = lines[0] === "---" && lines.indexOf("---", 1) > 0 ? lines.indexOf("---", 1) + 1 : 0;
-  return !/[\r\u0000]/.test(text) && !isContextual(lines, start);
+  return !/[\r\u0000]/.test(lines.join("\n")) && !isContextual(lines, start);
 }
 
 /** Whether the document uses anything the flat reading cannot place: see `documentUnits`. */
@@ -203,24 +209,33 @@ function isContextual(lines, start) {
   let fence;
   for (let index = start; index < lines.length; index++) {
     const line = lines[index];
-    if (fence) { if (fenceCloses(line, fence)) { fence = undefined; previous = ""; } continue; }
+    if (fence) {
+      if (fenceCloses(line, fence)) { fence = undefined; previous = ""; }
+      else if (FENCE_LIKE.test(line) && !FENCE_OPEN.test(line)) return true; // an indented fence-like line may or may not close it, depending on the renderer
+      continue;
+    }
     const opening = FENCE_OPEN.exec(line);
-    if (opening) { fence = { char: opening[1][0], length: opening[1].length }; previous = ""; previousIsHeading = false; continue; }
+    if (opening) {
+      if (opening[1][0] === "`" && line.slice(opening[1].length).includes("`")) return true; // not a fence at all: inline code
+      fence = { char: opening[1][0], length: opening[1].length };
+      previous = "";
+      previousIsHeading = false;
+      continue;
+    }
     if (POISON.some((pattern) => pattern.test(line))) return true;
-    if (SETEXT.test(line) && previous.trim() !== "") return true; // an underline turns the line above into a heading
-    if (/^(?: {4}|\t)/.test(line) && (previous.trim() === "" || previousIsHeading)) return true; // indented code (or a loose item's content)
+    if (SETEXT.test(line) && !BLANK.test(previous)) return true; // an underline turns the line above into a heading
+    if (/^ {4}/.test(line) && (BLANK.test(previous) || previousIsHeading)) return true; // indented code (or a loose item's content)
     previousIsHeading = ATX.test(line);
     previous = line;
   }
   return false;
 }
 
-/** One unit per physical line: the version 2 reading, with a list or heading marker and a quote marker left off the line it starts. */
+/** One unit per physical line: exactly the version 2 reading (a leading list or quote marker is not part of the line; nothing else is touched). */
 function lineUnits(lines) {
-  return lines.filter((line) => line.trim() !== "").map((line) => {
-    const heading = ATX.test(line);
-    const sentence = line.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : /^(?:\s*(?:>|[*+-](?=\s)))+/, "").replace(/\s+/g, " ").trim();
-    return { kind: heading ? "heading" : "paragraph", sentences: sentence ? [sentence] : [] };
+  return lines.filter((line) => !BLANK.test(line)).map((line) => {
+    const sentence = withoutMarker(line).replace(/\s+/g, " ").trim();
+    return { kind: ATX.test(line) ? "heading" : "paragraph", sentences: sentence ? [sentence] : [] };
   });
 }
 
@@ -231,7 +246,7 @@ function lineUnits(lines) {
  */
 export function statementInUnits(units, statement) {
   const wanted = cleanStatement(statement);
-  if (wanted === "") return false;
+  if (wanted === "" || wanted.length > MAX_STATEMENT_CHARS) return false;
   for (const { sentences } of units) {
     const keys = sentences.map(squash);
     const starts = [];
