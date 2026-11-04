@@ -982,6 +982,9 @@ describe("the block layer: a flat document is read as prose, anything contextual
       ["a definition title", "[x]: /url\n  \"The **key** is\n  reserved.\"\n", "\"The key is reserved.\""],
       ["a definition in a paragraph", "Do not\n[x]: /url\n**enable** signing.\n", "enable signing."],
       ["a nested list", "- Parent\n  - Child **x**\n  continues here.\n", "Child x continues here."],
+      ["a loose list item's next paragraph", "- Parent\n\n  The **key** is\n  reserved.\n2) Another **item**\n", "The key is reserved. 2) Another item"],
+      ["the same with CRLF", "- Parent\r\n\r\n  The **key** is\r\n  reserved.\r\n2) Another **item**\r\n", "The key is reserved. 2) Another item"],
+      ["an indented paragraph after a heading", "# Title\n  The **key** is reserved.\n", "The key is reserved."],
       ["indented code", "Intro.\n\n    The **key** is\n    reserved.\n", "The key is reserved."],
       ["an indented code marker after a bullet", "-     The **key** is\n      reserved.\n", "The key is reserved."],
       ["a fence straight after a bullet", "- ```\n  The **key** is\n  reserved.\n  ```\n", "The key is reserved."],
@@ -1019,6 +1022,15 @@ describe("the block layer: a flat document is read as prose, anything contextual
       assert.equal(await verdict("enable signing.", `Do not\n${separator}\n**enable** signing.\n`), "not-addressed", JSON.stringify(separator));
     }
     assert.equal(await verdict("Two.", "One.\n   \n**Two**.\n"), "supported", "spaces alone make a blank line");
+    // Only spaces and tabs separate an ATX heading's closing hashes from its text; any other space character leaves them in the heading.
+    for (const space of ["\u00a0", "\f", "\v", "\u2003"]) {
+      assert.equal(await verdict("Enable signing.", `# **Enable** signing.${space}#\n`), "not-addressed", JSON.stringify(space));
+      assert.equal(await verdict(`Enable signing.${space}#`, `# **Enable** signing.${space}#\n\nBody.\n`), "supported", `the hash stays text after ${JSON.stringify(space)}`);
+    }
+    assert.equal(await verdict("Enable signing.", "# **Enable** signing. #\r\n"), "supported", "...but a space does close it, with CRLF too");
+    // A claim made only of marker characters stays malformed, as in version 2.
+    assert.equal((await verifier.verify({ candidateId: "c", value: "*", evidence: [{ id: "e", excerpt: "> q\n*\n", locator: "l" }] })).result, "abstain");
+    assert.equal((await verifier.verify({ candidateId: "c", value: "- > *", evidence: [{ id: "e", excerpt: "- > *\n", locator: "l" }] })).result, "abstain");
     assert.ok(isFlatDocument("The **key** is\r\nreserved.\r\n"));
     assert.equal(await verdict("The key is reserved.", "The **key** is\r\nreserved.\r\n"), "supported");
     assert.equal(isFlatDocument("The **key** is\rreserved.\n"), false, "a lone CR is contextual");

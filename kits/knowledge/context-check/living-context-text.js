@@ -184,8 +184,9 @@ export function documentUnits(text) {
     const list = LIST_MARKER.exec(line);
     const listStart = list && !BLANK.test(line.slice(list[0].length)) && !(list[1] !== undefined && current?.kind === "paragraph" && Number(list[1]) !== 1);
     const heading = ATX.test(line);
-    let body = line.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : listStart ? LIST_MARKER : /^$/, "").replace(/\s+/g, " ").trim();
-    if (heading) body = body.replace(/\s+#+$/, ""); // an ATX heading's optional closing sequence is not displayed
+    let body = line.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : listStart ? LIST_MARKER : /^$/, "");
+    if (heading) body = body.replace(/[ \t]+#+[ \t]*$/, ""); // an ATX heading's optional closing sequence is not displayed (only spaces and tabs separate it)
+    body = body.replace(/\s+/g, " ").trim();
     if (heading || listStart || current === undefined) {
       current = { kind: heading ? "heading" : listStart ? "item" : "paragraph", parts: [body] };
       units.push(current);
@@ -224,7 +225,7 @@ function isContextual(lines, start) {
     }
     if (POISON.some((pattern) => pattern.test(line))) return true;
     if (SETEXT.test(line) && !BLANK.test(previous)) return true; // an underline turns the line above into a heading
-    if (/^ {4}/.test(line) && (BLANK.test(previous) || previousIsHeading)) return true; // indented code (or a loose item's content)
+    if (/^ {2}/.test(line) && (BLANK.test(previous) || previousIsHeading)) return true; // indented code, or a loose list item's next paragraph: both depend on the item above
     previousIsHeading = ATX.test(line);
     previous = line;
   }

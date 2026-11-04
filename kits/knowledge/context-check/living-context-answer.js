@@ -38,7 +38,8 @@ export function createLineSupportVerifier() {
     method: "deterministic",
     async verify(input) {
       const statement = cleanStatement(String(input.value));
-      if (statement === "") return { result: "abstain", abstainReason: "malformed" };
+      // Version 2 took every leading marker character off a claim, so a claim that is only markers was malformed; it still is.
+      if (statement === "" || String(input.value).replace(/^[\s>*+-]+/, "").trim() === "") return { result: "abstain", abstainReason: "malformed" };
       const supported = input.evidence.some((item) => item.excerpt.split(/\r?\n/).some((line) => cleanStatement(line) === statement)
         || statementInUnits(documentUnits(item.excerpt), String(input.value)));
       return { result: supported ? "supported" : "not-addressed" };
