@@ -13,5 +13,5 @@ test('fixture adapter returns the existing residue contract and does not mutate 
 });
 test('invalid and duplicate residues fail closed', async () => {
   await assert.rejects(readObservationResidues({ read: () => ({ residues: [fixture, fixture], cursor: {} }) }), /duplicate/);
-  await assert.rejects(readObservationResidues({ read: () => ({ residues: [{ ...fixture, source: 'unknown' }], cursor: {} }) }), /invalid/);
+  await assert.rejects(readObservationResidues({ read: () => ({ residues: [{ ...fixture, turns: [] }], cursor: {} }) }), /invalid/);
 });
