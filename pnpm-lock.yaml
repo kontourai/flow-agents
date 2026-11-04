@@ -39,6 +39,9 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
     devDependencies:
+      '@kontourai/corpus-store':
+        specifier: 0.1.0-next.0
+        version: 0.1.0-next.0
       '@kontourai/lookout':
         specifier: 0.3.2
         version: 0.3.2(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
@@ -1137,6 +1140,11 @@ packages:
   '@kontourai/conduit@0.7.1':
     resolution: {integrity: sha512-EiAd0KYVnysVy6I1lvW6vHoGTocLmG81HotMDsqJTIcqhMBImFAyojMs1qPqXrBnH/HpjrLI+yBlUSOzKtJwjw==}
     engines: {node: '>=22'}
+
+  '@kontourai/corpus-store@0.1.0-next.0':
+    resolution: {integrity: sha512-P81cVVEKjaxc5B3lopikvMCUeXjvRIiiUHnWRn45M/kW4ver66r94o45t78LUbj/GvCaWn7PfCa8hPWenQVT+A==}
+    engines: {node: '>=22'}
+    hasBin: true
 
   '@kontourai/datum@0.3.0':
     resolution: {integrity: sha512-wBMOZ72grkSwjXzt2soTykG2AUxitc29IsUb193KPcIChlVIvli/gQ0E1VDzMZGVi+AUQjFSl/zupIi66s4O0A==}
@@ -5494,6 +5502,10 @@ snapshots:
       - playwright
 
   '@kontourai/conduit@0.7.1': {}
+
+  '@kontourai/corpus-store@0.1.0-next.0':
+    dependencies:
+      js-yaml: 5.4.2
 
   '@kontourai/datum@0.3.0': {}
 

@@ -363,6 +363,7 @@
     "test:delegation-rounds": "npm run build --silent && node --test src/cli/delegation-group-rounds.test.mjs src/cli/delegation-flow-runtime.test.mjs"
   },
   "devDependencies": {
+    "@kontourai/corpus-store": "0.1.0-next.0",
     "@kontourai/lookout": "0.3.2",
     "@kontourai/traverse": "0.19.1",
     "@kontourai/veritas": "1.11.2",
