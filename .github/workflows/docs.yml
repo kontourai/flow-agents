@@ -13,13 +13,13 @@ permissions:
 jobs:
   gate:
     concurrency:
-      group: flow-agents-compute-1
+      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
       queue: max
       cancel-in-progress: false
     uses: kontourai/.github/.github/workflows/docs-gate.yml@fd058ed6fcc780d60cc22e26d8c327281a197932
   pages:
     concurrency:
-      group: flow-agents-compute-2
+      group: flow-agents-compute-v2-2-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
       queue: max
       cancel-in-progress: false
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

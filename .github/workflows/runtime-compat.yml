@@ -23,7 +23,7 @@ permissions:
 jobs:
   harness-canary:
     concurrency:
-      group: flow-agents-compute-1
+      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
       queue: max
       cancel-in-progress: false
     name: Harness canary (${{ matrix.runtime }})
@@ -70,7 +70,7 @@ jobs:
 
   framework-sdk-canary:
     concurrency:
-      group: flow-agents-compute-2
+      group: flow-agents-compute-v2-2-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
       queue: max
       cancel-in-progress: false
     name: Framework SDK canary
@@ -115,7 +115,7 @@ jobs:
 
   report:
     concurrency:
-      group: flow-agents-compute-1
+      group: flow-agents-compute-v2-1-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
       queue: max
       cancel-in-progress: false
     name: Open tracking issue on failure
