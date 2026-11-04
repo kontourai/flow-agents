@@ -23,6 +23,14 @@
  * and fenced code (also inside a quote), tables, HTML blocks, thematic breaks, setext underlines and link definitions are not. Nothing is ever rescanned, so removing one marker cannot turn another into formatting. A lone `_` inside
  * a word (`snake_case`) and a lone `*` between spaces are text, as in CommonMark. The scan is one pass over the paragraph.
  *
+ * Block structure follows CommonMark's rules for the constructs below and treats everything else as not prose: quote prefixes are a
+ * container (consecutive quoted lines are one paragraph; an unprefixed line continues a quoted paragraph unless it starts a block), a fence
+ * closes only in the container that opened it, a fence inside a list item may be indented, an ordered marker other than `1.` cannot
+ * interrupt a paragraph, HTML blocks, tables and link definitions are skipped to the end of their block, lone CR is a line ending and NUL
+ * becomes U+FFFD. Not modelled, so not claimed: nested lists beyond a continuation line, a list item's own container indentation, setext
+ * headings of several lines inside a quote, and block constructs this module does not list. This is a floor; production callers inject a
+ * model or human verifier.
+ *
  * Stated limits: a passage taken from a paragraph is normally found again by the verifier, but not always (a list nested in a list,
  * a code literal that begins with `-`, `>` or `*`); `bestPassage` checks it and `ask` abstains when it is not. The sentence cut is a heuristic (a full stop, space, then a capital, digit or opening quote). An abbreviation
  * it does not know can cut a sentence early, and then a sentence tail is supported as if it were a sentence. Negation is not read.
@@ -30,9 +38,17 @@
  * @module living-context-text
  */
 
-// A quote marker (`>`, `>>`, `> >`) needs no space after it; a list marker or heading needs one.
-const BLOCK_MARKER = /^\s*(?:(?:>\s*)+|(?:[-*+]|\d{1,3}[.)]|#{1,6})\s+)/;
-const HEADING = /^\s*#{1,6}\s/;
+// Block syntax, read from CommonMark and kept deliberately narrower than it: whatever is not recognised as prose is not prose.
+const QUOTE_PREFIX = /^(?:[ ]{0,3}>[ ]?)+/;
+const LIST_MARKER = /^[ \t]*(?:[-*+]|(\d{1,9})[.)])(?:[ \t]+|$)/;
+const ATX = /^[ ]{0,3}#{1,6}(?:[ \t]|$)/;
+const THEMATIC = /^[ ]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const SETEXT = /^[ ]{0,3}(?:=+|-+)[ \t]*$/;
+const FENCE = /^[ ]{0,3}(`{3,}|~{3,})/;
+const HTML_START = /^[ ]{0,3}<[!/?A-Za-z]/;
+const DEFINITION = /^[ ]{0,3}\[[^\]]+\]:/;
+// How an HTML block ends: a comment, a processing instruction, CDATA, a declaration and pre/script/style/textarea have their own closer; any other tag ends at a blank line.
+const HTML_CLOSERS = [[/^[ ]{0,3}<!--/, /-->/], [/^[ ]{0,3}<\?/, /\?>/], [/^[ ]{0,3}<!\[CDATA\[/, /\]\]>/], [/^[ ]{0,3}<![A-Za-z]/, />/], [/^[ ]{0,3}<(?:pre|script|style|textarea)\b/i, /<\/(?:pre|script|style|textarea)>/i]];
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`); tested on the last word only.
 const ABBREVIATION = /^(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
 
@@ -126,51 +142,65 @@ function splitSentences(text) {
  */
 export function documentUnits(text) {
   const units = [];
-  let current;
-  let fence;
-  let skip; // a table or an HTML block: everything up to its end is not prose
-  const lines = text.split(/\r?\n/);
+  let current; // the open paragraph, item or heading: { kind, parts, container }
+  let fence;   // { char, length, container }
+  let skip;    // a table, an HTML block or a link definition: not prose up to its end { until?, closed, container }
+  const lines = text.replace(/\u0000/g, "\uFFFD").split(/\r\n|\r|\n/);
   let index = 0;
   if (lines[0] === "---") {
     const end = lines.indexOf("---", 1);
     if (end > 0) index = end + 1;
   }
+  const blank = (line, container, core) => line.trim() === "" || (container === skip?.container && core.trim() === "");
   for (; index < lines.length; index++) {
     const line = lines[index];
-    const core = line.replace(/^(?:\s*>)+\s?/, ""); // what a quote contains
+    const prefix = QUOTE_PREFIX.exec(line)?.[0] ?? "";
+    const container = prefix.replace(/[^>]/g, ""); // the quote nesting this line is in: "", ">", ">>"
+    const core = line.slice(prefix.length);
     if (fence) {
-      const closing = /^\s{0,3}(`{3,}|~{3,})\s*$/.exec(core);
-      if (closing && closing[1][0] === fence.char && closing[1].length >= fence.length) fence = undefined;
+      // A fence opened in a container closes only on a line of that container: a `>` in code is code.
+      const closing = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(core);
+      if (container === fence.container && closing && closing[1][0] === fence.char && closing[1].length >= fence.length) fence = undefined;
       continue;
     }
     if (skip) {
-      if (skip.until ? skip.until.test(core) : core.trim() === "") { skip = undefined; current = undefined; }
+      if (skip.until && !skip.closed) { if (skip.until.test(core)) skip.closed = true; continue; }
+      if (blank(line, container, core)) { skip = undefined; current = undefined; }
       continue;
     }
-    const opening = /^\s{0,3}(`{3,}|~{3,})/.exec(core);
-    if (opening) { fence = { char: opening[1][0], length: opening[1].length }; current = undefined; continue; }
     if (core.trim() === "") { current = undefined; continue; }
-    if (current?.kind === "paragraph" && /^\s{0,3}(?:=+|-+)\s*$/.test(core)) { current.kind = "heading"; current = undefined; continue; } // a setext underline
-    if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(core)) { current = undefined; continue; } // a thematic break
-    // Not prose, and not allowed to leave a half paragraph behind. A table runs to the next blank line; an HTML block to its end
-    // (a comment to `-->`, pre/script/style/textarea to their closing tag, any other tag to the next blank line); a link definition is one line.
-    const html = /^\s{0,3}<[!/?A-Za-z]/.test(core);
-    if (core.includes("|") || html || /^\s{0,3}\[[^\]]+\]:/.test(core)) {
+    const list = LIST_MARKER.exec(core);
+    const orderedStart = list && list[1] !== undefined;
+    const listStart = list && core.slice(list[0].length).trim() !== "" && !(orderedStart && current?.kind === "paragraph" && Number(list[1]) !== 1);
+    const opensFence = FENCE.exec(core) ?? (current?.kind === "item" ? /^[ \t]+(`{3,}|~{3,})/.exec(core) : null);
+    const html = HTML_START.test(core);
+    const table = core.includes("|");
+    const startsBlock = ATX.test(core) || THEMATIC.test(core) || opensFence || html || table || listStart;
+    // A line that drops a quote prefix continues the quote's paragraph (laziness); anything that starts a block, or a different quote depth, does not.
+    if (current && current.container !== container) {
+      if (container === "" && !startsBlock && current.kind !== "heading") { current.parts.push(core.replace(/\s+/g, " ").trim()); continue; }
+      current = undefined;
+    }
+    if (opensFence) { fence = { char: opensFence[1][0], length: opensFence[1].length, container }; current = undefined; continue; }
+    if (current && (current.kind === "paragraph" || (current.kind === "item" && /^[ \t]{2,}/.test(core))) && SETEXT.test(core)) { current.kind = "heading"; current = undefined; continue; } // a setext underline
+    if (THEMATIC.test(core)) { current = undefined; continue; }
+    // Not prose, and not allowed to leave half a paragraph behind. A table runs to the next blank line; an HTML block to its end and then to
+    // the next blank line; a link definition (only at a block start: it cannot interrupt a paragraph) with whatever continues it.
+    if (table || html || (current === undefined && DEFINITION.test(core))) {
       if (current && units.at(-1) === current) units.pop();
       current = undefined;
-      if (core.includes("|") || html) {
-        const until = /^\s{0,3}<!--/.test(core) ? /-->/ : /^\s{0,3}<(?:pre|script|style|textarea)\b/i.test(core) ? /<\/(?:pre|script|style|textarea)>/i : undefined;
-        skip = until && !until.test(core.replace(/^\s{0,3}<!--/, "").replace(/^\s{0,3}<[a-z]+[^>]*>/i, "")) ? { until } : until ? undefined : { until: undefined };
-      }
+      const kind = html ? HTML_CLOSERS.find(([opener]) => opener.test(core)) : undefined;
+      // An HTML block that closes on its own opening line still skips to the next blank line: what follows a tag is not read as prose.
+      skip = { until: kind?.[1], closed: kind ? kind[1].test(core.replace(kind[0], "")) : true, container };
       continue;
     }
     if (current === undefined && /^(?: {4}|\t)/.test(core)) continue; // an indented code block
-    let body = line.replace(BLOCK_MARKER, "").replace(/\s+/g, " ").trim();
-    if (HEADING.test(line)) body = body.replace(/\s+#+$/, ""); // an ATX heading's optional closing sequence is not displayed
-    const starts = BLOCK_MARKER.test(line);
-    if (starts || current === undefined) {
-      const kind = HEADING.test(line) ? "heading" : starts ? "item" : "paragraph";
-      current = { kind, parts: [body] };
+    const heading = ATX.test(core);
+    let body = core.replace(heading ? /^[ ]{0,3}#{1,6}[ \t]*/ : list && listStart ? LIST_MARKER : /^$/, "").replace(/\s+/g, " ").trim();
+    if (heading) body = body.replace(/\s+#+$/, ""); // an ATX heading's optional closing sequence is not displayed
+    if (heading || listStart || current === undefined) {
+      const kind = heading ? "heading" : listStart ? "item" : "paragraph";
+      current = { kind, parts: [body], container };
       units.push(current);
       if (kind === "heading") current = undefined;
     } else current.parts.push(body);

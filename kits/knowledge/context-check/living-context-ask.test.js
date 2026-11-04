@@ -925,7 +925,7 @@ describe("review round 7: only prose is prose, and entity references are not tex
     for (const [claim, doc] of cases) assert.equal(await verdict(claim, doc), "not-addressed", JSON.stringify(doc));
     // ...while the same words after the block ends, as prose, a setext heading, or a list item still are.
     assert.equal(await verdict("The *allow* operator is reserved.", "<div>x</div>\n\nThe `*allow*` operator is reserved.\n"), "supported");
-    assert.equal(await verdict("The *allow* operator is reserved.", "<!-- note -->\nThe `*allow*` operator is reserved.\n"), "supported", "a one-line comment ends on its own line");
+    assert.equal(await verdict("The *allow* operator is reserved.", "<!-- note -->\nThe `*allow*` operator is reserved.\n"), "not-addressed", "an HTML block is skipped to the next blank line even after it closes: what follows a tag is not read as prose");
     assert.equal(await verdict("The *allow* operator is reserved.", "| a |\n|---|\n| b |\n\nThe `*allow*` operator is reserved.\n"), "supported", "a table ends at a blank line");
     assert.equal(await verdict("The *allow* operator is reserved.", "The `*allow*` operator is\nreserved.\n"), "supported");
     assert.equal(await verdict("The *allow* operator", "The `*allow*` operator\n---\n"), "supported", "a setext heading displays its text");
@@ -946,5 +946,51 @@ describe("review round 7: only prose is prose, and entity references are not tex
     const passage = bestPassage(body, ["operator", "reserved", "item", "nested"]);
     assert.equal(passage, "The operator is reserved for maintainers only.");
     assert.equal(bestPassage("`- literal` only\n", ["literal"]), "", "nothing else to offer: no passage");
+  });
+});
+
+describe("review round 8: block structure is read the way CommonMark reads it, or not at all", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("what a container line, a definition, an HTML block or a list-relative fence hides stays hidden", async () => {
+    const hidden = [
+      ["The key is reserved.", "```\n> ```\nThe **key** is\nreserved.\n"],
+      ["\"The key is reserved.\"", "[x]: /url\n  \"The **key** is\n  reserved.\"\n"],
+      ["enable signing.", "Do not\n[x]: /url\n**enable** signing.\n"],
+      ["The key is reserved.", "<!-- x --> <!--\nThe **key** is\nreserved.\n"],
+      ["The key is reserved.", "<pre></pre><script>\nThe **key** is\nreserved.\n"],
+      ["Intro ``` The key is reserved. ```", "- Intro\n    ```\n    The **key** is\n    reserved.\n    ```\n"],
+      ["The key is reserved.", "- Intro\n    ```\n    The **key** is\n    reserved.\n    ```\n"],
+      ["enable signing.", "> Do not\n> **enable** signing.\n"],
+      ["enable signing.", "> Do not\n**enable** signing.\n"],
+      ["enable signing.", "Do not\n2) **enable** signing.\n"],
+      ["1000) The key is reserved.", "1000) The **key** is\n reserved.\n"],
+      ["The key is reserved.", "<div>\n>\nThe **key** is\nreserved.\n"],
+      ["The key is reserved.", "<?pi\n\nx\n\n?>\nThe **key** is\nreserved.\n"],
+      ["The key is reserved.", "<![CDATA[\n\nx\n\n]]>\nThe **key** is\nreserved.\n"],
+      ["The key is reserved.", "<!DOCTYPE\n\nx\n\n>\nThe **key** is\nreserved.\n"],
+      ["The key is", "The **key** is\r\rreserved.".replace("The key is", "The **key** is")],
+      ["The key is reserved. ===", "- The **key** is\n  reserved.\n  ===\n"],
+      ["The key is reserved.", "#\u00a0The **key** is reserved. ##\n"],
+      ["The key is re\u0000served.", "The **key** is\nre\u0000served.\n"],
+    ];
+    for (const [claim, doc] of hidden) {
+      const result = await verdict(claim, doc);
+      // The CR case is the one where the first sentence IS a paragraph of its own: it is supported, the joined claim below is not.
+      if (doc.includes("\r\r")) { assert.equal(result, "supported"); continue; }
+      assert.equal(result, "not-addressed", JSON.stringify(doc));
+    }
+    assert.equal(await verdict("The key is reserved.", "The **key** is\r\rreserved.\n"), "not-addressed", "a lone CR ends a line, so a blank one ends the paragraph");
+  });
+
+  test("the same constructs still read correctly when they ARE prose", async () => {
+    assert.equal(await verdict("Do not enable signing.", "> Do not\n> **enable** signing.\n"), "supported", "consecutive quoted lines are one paragraph");
+    assert.equal(await verdict("Do not enable signing.", "> Do not\n**enable** signing.\n"), "supported", "a lazy continuation joins the quoted paragraph");
+    assert.equal(await verdict("The key is reserved.", "- The **key** is\n  reserved.\n  ===\n"), "supported", "a setext heading in a list item displays its text");
+    assert.equal(await verdict("Do not 2) enable signing.", "Do not\n2) **enable** signing.\n"), "supported", "a non-1 ordered marker does not interrupt a paragraph");
+    assert.equal(await verdict("The key is reserved.", "1) The **key** is\n   reserved.\n"), "supported");
+    assert.equal(await verdict("The key is reserved.", "<div>x</div>\n\nThe **key** is\nreserved.\n"), "supported", "prose after an HTML block's blank line");
+    assert.equal(await verdict("The key is reserved.", "```\ncode\n```\nThe **key** is\nreserved.\n"), "supported", "prose after a closed fence");
+    assert.equal(await verdict("The key is reserved.", "> ```\n> code\n> ```\n> The **key** is\n> reserved.\n"), "supported", "a quoted fence closes in its quote");
   });
 });

@@ -23,8 +23,9 @@ const DEFAULT_VERIFIER_TIMEOUT_MS = 5000;
  * Deterministic verifier, a floor and a fixture. The claim is plain text and must be exactly one of:
  *   - a whole physical line of the authority text (as in version 2, with no Markdown reading at all), or
  *   - a complete sentence, or a run of consecutive complete sentences, of one paragraph, list item or heading of the document as it
- *     DISPLAYS: hard wraps joined, and simple code, emphasis, strong, strike and link forms rendered to their text
- *     (`living-context-text.js` says exactly which, and that anything ambiguous leaves the paragraph as written).
+ *     DISPLAYS: hard wraps joined, and simple code, emphasis, strong and link forms rendered to their text
+ *     (`living-context-text.js` says exactly which, how block structure is read, and that anything ambiguous is not prose or is
+ *     left as written).
  * Case, whitespace, a leading list or quote marker and one trailing full stop are ignored. A fragment of a sentence, a paraphrase, or a
  * sentence inside a longer one is `not-addressed`. It never says `contradicted` and it cannot read negation: a document that states a
  * sentence only in order to reject it still "supports" it. Version 2 matched whole physical lines only, so a sentence of hard-wrapped
