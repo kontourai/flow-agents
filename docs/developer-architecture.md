@@ -255,10 +255,11 @@ process semantics. Surface's original trust-panel element and exact package
 metadata also ship with its entry; synchronous narrative reads and panel rendering
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
-The Knowledge projection separately pins Surface 6.3.0 through an npm alias for
-erasure semantics; the shared workflow trust gates keep the Surface 5 pin and
-its status-function behavior. A standalone Knowledge Kit may use an
-erasure-capable Surface package under its ordinary name instead.
+The shared workflow trust gates retain Surface 5 and its status-function behavior.
+The Knowledge projection and Living Context recall use Surface 6.3.0 through the
+`@kontourai/surface-knowledge` alias for erasure and derived visibility. A standalone
+Knowledge Kit may use an erasure-capable Surface package under its ordinary name.
+Survey is pinned to 8.3.0.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;

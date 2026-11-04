@@ -66,6 +66,18 @@ test("standalone Knowledge projection accepts ordinary erasure-capable Surface a
     mkdirSync(scope, { recursive: true });
     const publicName = join(scope, "surface");
     const packageRoot = (specifier) => resolve(fileURLToPath(import.meta.resolve(specifier)), "../../..");
+    const livingEntry = join(installed, "context-check/living-context.js");
+    const runLiving = (expectSuccess) => {
+      const program = `
+        import assert from "node:assert/strict";
+        import { pathToFileURL } from "node:url";
+        const { assertSurfaceVisibility } = await import(pathToFileURL(process.argv[1]));
+        if (${expectSuccess}) assert.doesNotThrow(() => assertSurfaceVisibility());
+        else assert.throws(() => assertSurfaceVisibility(), { code: "SURFACE_VISIBILITY_UNAVAILABLE" });
+      `;
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
+      return spawnSync(process.execPath, ["--input-type=module", "-e", program, livingEntry], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    };
     const run = (expectSuccess) => {
       const program = `
         import { pathToFileURL } from "node:url";
@@ -88,9 +100,13 @@ test("standalone Knowledge projection accepts ordinary erasure-capable Surface a
     symlinkSync(packageRoot("@kontourai/surface-knowledge"), publicName, "junction");
     let result = run(true);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    result = runLiving(true);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
     rmSync(publicName);
     symlinkSync(packageRoot("@kontourai/surface"), publicName, "junction");
     result = run(false);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    result = runLiving(false);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
 
     // A present alias with a missing transitive dependency is broken, not an
@@ -110,6 +126,10 @@ test("standalone Knowledge projection accepts ordinary erasure-capable Surface a
     `;
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
     result = spawnSync(process.execPath, ["--input-type=module", "-e", brokenProgram, adapter], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    const brokenLiving = `import assert from "node:assert/strict"; import { pathToFileURL } from "node:url";
+      await assert.rejects(import(pathToFileURL(process.argv[1])), (error) => error.code === "ERR_MODULE_NOT_FOUND" && error.message.includes("'flow-agents-missing-surface-test-dependency'"));`;
+    result = spawnSync(process.execPath, ["--input-type=module", "-e", brokenLiving, livingEntry], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
