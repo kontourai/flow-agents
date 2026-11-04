@@ -9,6 +9,10 @@ evidence:
     ref: kits/knowledge/docs/README.md
   - kind: doc
     ref: kits/knowledge/context-check/living-context.test.js
+  - kind: doc
+    ref: kits/knowledge/context-check/living-context-ask.test.js
+  - kind: issue
+    ref: https://github.com/kontourai/flow-agents/issues/1595
   - kind: url
     ref: https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md
 ---
@@ -85,7 +89,21 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
 - **Abstention is a separate step.** Recall returns evidence and never an answer. The answer step
   sends only a `current` recall to an independent `@kontourai/survey` `SupportVerifier` and keeps
   each verdict as Survey's `CandidateVerification`. Only `supported` answers. The verifier is a
-  required argument; the bundled deterministic one matches whole lines only and cannot read negation.
+  required argument; the bundled deterministic one (version 3) matches a whole physical line or a complete
+  sentence, or run of sentences, of a hard-wrapped paragraph, list item or heading, ignoring case, whitespace and inline Markdown, and
+  cannot read negation. Version 2 matched whole lines only, so natural sentences of wrapped prose always abstained (flow-agents#1597).
+  The verifier is the Kit's own: Survey ships the port (`runSupportVerifier`) and no deterministic implementation.
+- **A store is not a manifest, and a question is not a claim id** (flow-agents#1595, #1596). A claims manifest is *derived* from a
+  store's records at the pinned commit (`deriveStoreManifest`; distilled memory claims through `deriveMemoryManifest`), with the
+  per-claim decisions a record cannot make for itself fixed conservatively and documented in the Kit README: one claim per
+  record, titled; `current` only for `active` and `implemented` records with no successor; superseded by an explicit
+  `supersedes` edge; everything unrecognised `unverifiable`; `proposed` review; visibility declared by the host, not invented.
+  It reaches recall as `derivedManifests` in place of a `git show` of `manifest_path`, so the store is never modified. A question
+  reaches recall through a replaceable selector that nominates claim ids; the bundled one is lexical and declines rather than
+  nominate the least-bad record, and a record is quoted only when the quoted passage itself is on the question. `claim_ids`
+  alone is a complete request. `answered` means the passage is in the current cited record, not that it answers the question.
+  The store host's own `knowledge_context` is not reused: it belongs to that host, not to the Kit contract, and its link-count prior
+  outweighs its lexical score.
 - **Budget keeps or drops whole results.** An explicit `max_tokens` bounds recall results by a
   named deterministic estimator. A drop is listed and makes the verdict `not_verified`;
   reconciliation is never skipped for a dropped recall.

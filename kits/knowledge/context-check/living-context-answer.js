@@ -13,30 +13,43 @@
 import { runSupportVerifier, validateCandidateVerification } from "@kontourai/survey";
 import { error, gitRaw } from "./index.js";
 import { deriveLivingContext, parseInstant } from "./living-context.js";
+import { cleanStatement, documentUnits } from "./living-context-text.js";
 
 /** An authority document larger than this is refused (abstain), never truncated into a verifier. */
 export const MAX_EVIDENCE_BYTES = 65536;
 const DEFAULT_VERIFIER_TIMEOUT_MS = 5000;
 
-const normalize = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
-
 /**
- * Deterministic fixture verifier: the claim statement must be a whole line of its authority text (ignoring case,
- * whitespace, a list or quote marker, and one trailing full stop). Anything else, including paraphrase, is
- * `not-addressed`. It never says `contradicted` and it cannot read negation: a document that quotes a statement
- * on its own line in order to reject it still "supports" it. It exists for fixtures and as a floor; a caller
- * that needs entailment must inject a model or human `SupportVerifier`, which is why one is required.
+ * Deterministic verifier, a floor and a fixture. The claim must be exactly one of:
+ *   - a whole physical line of the authority text, or
+ *   - a complete sentence, or a run of consecutive complete sentences, of one paragraph, list item or heading, after the
+ *     paragraph's hard wraps are joined.
+ * Case, whitespace, a list or quote marker, inline Markdown (emphasis, code, link targets) and one trailing full stop are
+ * ignored. A fragment of a sentence, a paraphrase, or a sentence inside a longer one is `not-addressed`: matching stays
+ * exact, so nothing is supported that the document does not say as written. It never says `contradicted` and it cannot read
+ * negation: a document that states a sentence only in order to reject it still "supports" it. Version 2 matched whole
+ * physical lines only, so a sentence of hard-wrapped prose abstained. A caller that needs entailment must inject a model or
+ * human `SupportVerifier`, which is why one is required.
  */
 export function createLineSupportVerifier() {
-  const clean = (text) => normalize(text.replace(/^[\s>*+-]+/, "")).replace(/\.$/, "");
   return {
     id: "knowledge.living-context.statement-line-in-authority",
-    version: "2",
+    version: "3",
     method: "deterministic",
     async verify(input) {
-      const statement = clean(String(input.value));
+      const statement = cleanStatement(String(input.value));
       if (statement === "") return { result: "abstain", abstainReason: "malformed" };
-      const supported = input.evidence.some((item) => item.excerpt.split(/\r?\n/).some((line) => clean(line) === statement));
+      const supported = input.evidence.some((item) => {
+        if (item.excerpt.split(/\r?\n/).some((line) => cleanStatement(line) === statement)) return true;
+        return documentUnits(item.excerpt).some(({ sentences }) => {
+          for (let from = 0; from < sentences.length; from++) {
+            for (let to = from; to < sentences.length; to++) {
+              if (cleanStatement(sentences.slice(from, to + 1).join(" ")) === statement) return true;
+            }
+          }
+          return false;
+        });
+      });
       return { result: supported ? "supported" : "not-addressed" };
     },
   };
@@ -59,10 +72,10 @@ function readAuthority(repoRoot, revision, authorityPath) {
  *
  * @returns {Promise<{schema_version:"1.1", flow:"knowledge.living-context", revision:string, reader:string, answers:object[], verdict:"answered"|"not_verified"}>}
  */
-export async function answerLivingContext({ repoRoot, input, verifier, timeoutMs = DEFAULT_VERIFIER_TIMEOUT_MS } = {}) {
+export async function answerLivingContext({ repoRoot, input, verifier, timeoutMs = DEFAULT_VERIFIER_TIMEOUT_MS, derivedManifests, statements } = {}) {
   // No default: choosing what counts as support is the caller's decision, never an implicit weak one.
   if (!verifier || typeof verifier.verify !== "function") throw error("VERIFIER_REQUIRED", "answerLivingContext requires an explicit Survey SupportVerifier");
-  const { result, byId, repoRoot: resolvedRoot, revision } = deriveLivingContext({ repoRoot, input });
+  const { result, byId, repoRoot: resolvedRoot, revision } = deriveLivingContext({ repoRoot, input, derivedManifests });
   const createdAt = new Date(parseInstant(input.as_of.now, "as_of.now")).toISOString();
   const answers = [];
 
@@ -73,15 +86,18 @@ export async function answerLivingContext({ repoRoot, input, verifier, timeoutMs
     const claim = byId.get(recall.claim_id);
     const authority = readAuthority(resolvedRoot, revision, claim.authority.path);
     if (authority.abstain) { abstain(recall.claim_id, authority.abstain); continue; }
+    // A caller that answers a question may ask the verifier about the passage it quotes from the authority (`statements`),
+    // not about the claim's label (a store record's claim is its title). The default is the claim text.
+    const statement = statements?.[claim.id] ?? claim.claim;
     const record = await runSupportVerifier(verifier, {
       candidateId: claim.id,
-      value: claim.claim,
+      value: statement,
       valueType: "string",
       evidence: [{ id: `authority-${claim.id}`, excerpt: authority.text, locator: `${claim.authority.path}@${revision}` }],
     }, { timeoutMs, now: () => createdAt });
     // The record is stored as Survey wrote it; re-validate so a malformed verifier record never reaches a consumer.
     const verification = validateCandidateVerification(record);
-    if (verification.result === "supported") answers.push({ claim_id: claim.id, outcome: "answered", claim: claim.claim, authority: recall.authority, verification });
+    if (verification.result === "supported") answers.push({ claim_id: claim.id, outcome: "answered", claim: claim.claim, ...(statement === claim.claim ? {} : { statement }), authority: recall.authority, verification });
     else if (verification.result === "contradicted") answers.push({ claim_id: claim.id, outcome: "contradicted", verification });
     else abstain(claim.id, verification.result === "abstain" ? `verifier_abstained:${verification.abstainReason}` : "not_addressed", verification);
   }

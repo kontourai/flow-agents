@@ -400,7 +400,9 @@ claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surfa
 claim that would otherwise be current is `unverifiable`, while a superseded one stays `superseded` and
 reports `freshness.stale: true`), `review_posture` (`proposed` unless the manifest names a reviewer),
 `supersession_chain` (only edges this reader may see, whose ends were recorded by `known_at`), and
-`reasons`. The sparse plain `no_answer` entry carries none of these by design: it must say nothing. A requested `claim_ids` list keeps its own order; a default scan lists claims that
+`reasons`. The sparse plain `no_answer` entry carries none of these by design: it must say nothing. A requested `claim_ids` list keeps its own order, and `claim_ids` alone is a complete request (no
+`changed_surfaces` or `diff.paths` needed; reconciliation then has no surface to intersect and reports every claim `clean`; a
+request that names none of the three is refused with a message that says so); a default scan lists claims that
 intersect the change first, then by id. Order is the only ranking, and the reasons say why each
 result is there.
 
@@ -414,9 +416,11 @@ hides an affected claim.
 **Abstention is a separate step.** Recall returns evidence and never an answer.
 `answerLivingContext` re-derives recall and sends only a `current` recall, with its authority
 document read at the pinned revision, to an independent `@kontourai/survey` `SupportVerifier`;
-a verifier is a required argument. `createLineSupportVerifier` is a deterministic fixture floor (the
-claim statement must be a whole line of its authority text); it cannot read negation, so production
-callers inject a model or human verifier. Only `supported` answers; `contradicted` is
+a verifier is a required argument. `createLineSupportVerifier` is a deterministic floor (version 3): the claim must be a whole
+physical line of its authority text, or a complete sentence (or a run of consecutive sentences) of one paragraph, list item or
+heading after the paragraph's hard wraps are joined, ignoring case, whitespace, list and quote markers, inline Markdown and one
+trailing full stop. A fragment, a paraphrase or a sentence inside a longer one still abstains (`not-addressed`), and it cannot
+read negation, so production callers inject a model or human verifier. Only `supported` answers; `contradicted` is
 reported; `not-addressed`, an abstaining, throwing, or timed-out verifier, an unreadable, empty or
 oversized (`MAX_EVIDENCE_BYTES`) authority document, and budget drops all abstain, and any
 abstention makes the set `not_verified`. Each verdict is kept as Survey's immutable
@@ -428,12 +432,73 @@ structured-file sources over guarded HTTP (plus structural and proposal diff hel
 observations) and has no Git-revision source yet. It refuses an empty or oversized
 change (`maxPaths`, default 500) rather than truncating.
 
+### Recall on a real Knowledge store: ask a question
+
+Recall reads a claims manifest and takes claim ids; nothing in a store writes the manifest, and a person has a question
+(flow-agents#1595). Three small pieces close that gap without a new retrieval engine and without a model:
+
+1. **Producer** (`context-check/living-context-store.js`, `deriveStoreManifest`). Derives the manifest from the store's records
+   *as of the pinned commit*, read with the same sanitized `git` reads as recall, never the working tree. It is passed to
+   recall as `derivedManifests: { [rootId]: manifest }` (`runLivingContext`, `answerLivingContext`) in place of the `git show`
+   of `manifest_path`, which then only names it; the store is not modified. The same output can be committed as a file.
+2. **Selection** (`context-check/living-context-select.js`). A deterministic lexical ranker nominates claim ids for a question
+   or declines. It is a function the host can replace (`select`), and it is the only part that is a judgment of relevance.
+3. **Ask** (`context-check/living-context-ask.js`, CLI `context-check/ask-cli.js`). Derives, selects, recalls with the 1.1
+   as-of, reader and budget, and answers by quoting the best passage of each recalled record, asking the caller's verifier
+   whether the record says it.
+
+```bash
+node kits/knowledge/context-check/ask-cli.js --repo <worktree-root> --revision <40-hex> --reader <id> --now 2026-11-04T16:00:00Z \
+  "What is the CI compute policy?"          # read-only; --json for the full result; --manifest prints the derived manifest and exclusions
+```
+
+**What a record becomes.** One claim per record. The store has no per-claim review, validity or visibility, so each is decided
+here, conservatively, and the rules are the contract:
+
+| Manifest field | From the record |
+|---|---|
+| `id`, `claim` | the record id and title (whitespace collapsed). A title labels a record; it is not a verified statement. |
+| `authority`, `owning_source` | the record's file at the pinned revision |
+| `status` | a record that another record `supersedes` is `superseded` by it (the Kit derives supersession from the edge, never the stored status); several successors: `unverifiable`. Otherwise `active` and `implemented` are `current`; `retired` without a successor and any other status are `unverifiable`. Nothing unrecognised is current. |
+| `slot`, edge | the supersession lineage (`lineage:<smallest id>`); a record in no lineage has its own slot. The edge is a `succession` recorded when the successor's `supersede` was logged. |
+| `recorded_at`, `valid_time.from` | `created_at`. Missing or unreadable: omitted, and recall says `knowledge_time_unknown`. |
+| `expires_at`, `ttl_seconds` | the record's own, if any. A record without them never goes stale; its `updated_at` is returned for the reader to weigh. |
+| `visibility`, `readers` | the host declares who reads the store (`readers`); every record is visible to exactly those. The store carries no per-record visibility, and without `readers` there is no manifest. |
+| `review` | omitted, read as `proposed`: no record carries a per-claim human review. |
+
+Excluded, with a reason (`excluded` in the result): duplicate ids (every copy), a file over `MAX_RECORD_BYTES`, a blank title,
+an id that is not a safe claim id. `archive/`, dot directories, symlinks and Markdown without record frontmatter are not records
+and are only counted. Distilled memory claims map the same way through `deriveMemoryManifest`
+(`context-check/living-context-memory.mjs`; needs the built package): the text comes from `presentMemoryClaims`, so posture and
+review label stay in the claim; only `stated` is `current`; the repository file that grounds each claim and the instant the store
+recorded it are the host's to supply (`authorityFor`, `recordedAtFor`; the turn's own `observedAt` is never used); a claim is
+`reviewed` only when its review is a human promotion *and* the host names the reviewer (`reviewerFor`). Pass the result as
+`additional` to `askLivingContext` to answer from both.
+
+**What selection does, and does not.** Question terms are weighted by rarity across the store's records (a word in every record
+decides nothing), scored by the best field they match (title, then tags and category, then body), and a record is nominated only
+when it carries `minCoverage` (0.6) of the question's weight. A term found in no record counts against every record, so a question
+the store does not discuss nominates nothing and the answer is an abstention (`no_record_covers_question`, with the nearest records
+below the bar listed), not the least-bad record. There is no type or link prior: a raw capture is ranked on its words like a
+compiled note. The store host's own `knowledge_context` adds a link-count prior of up to 20 to a lexical score of at most 4 per
+keyword, which buries a recent, unlinked record under well-linked ones (flow-agents#1595 has the measurement); that tool also has no
+as-of, reader, supersession or abstention.
+
+**What `answered` means.** The quoted passage is in the cited record at the pinned revision (the verifier checked it) and the record
+is `current` as of `now`. The passage is chosen from the record's own sentences and is shown only if the passage together with the
+title carries `minPassageCoverage` (0.5) of the question's weight; otherwise the record is reported as nominated and abstained
+(`no_passage_on_question`). It does **not** mean the passage answers the question: word overlap cannot establish that, so the matched
+terms and coverage are returned beside each passage for the reader to judge, and a deployment that needs entailment passes its own
+`select` and a model or human `SupportVerifier`. A superseded record is returned with the record that replaced it, marked
+`superseded`, and is never answered from. Nothing in this path calls a model or needs a credential.
+
 Freshness is Surface's, not a second derivation. Ephemeris is the time actor that wakes a Flow run
 at a claim's deadline (it derives wake-up instants, not a trust or freshness status), so it is not a
 dependency of a synchronous, explicit-`now` check.
 
 ```bash
-node --test kits/knowledge/context-check/living-context.test.js
+node --test kits/knowledge/context-check/living-context.test.js kits/knowledge/context-check/living-context-ask.test.js
+node --test src/cli/living-context-memory.test.mjs   # memory-claim source; needs `npm run build`
 ```
 
 ---

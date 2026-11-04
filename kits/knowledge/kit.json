@@ -165,6 +165,26 @@
       "description": "Living Context adapter for issue #1131: runLivingContext({repoRoot, input, proposalDir}) validates the 1.1 input/result schemas, refuses a missing or unrecognised reader identity at every root before parsing any claim, reads selected git-repo Knowledge roots only at the pinned raw commit, evaluates visibility and per-viewer supersession with Surface's derived-visibility exports (Surface 6.3.0 or later) plus valid time and knowledge time per reader, derives freshness with Surface claimIntrinsicExpiry, keeps or drops whole results under an explicit token budget, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory. answerLivingContext (context-check/living-context-answer.js) is the separate answer step: it sends only current recalls to a Survey SupportVerifier and abstains otherwise."
     },
     {
+      "id": "knowledge.living-context-store",
+      "path": "context-check/living-context-store.js",
+      "description": "Living Context manifest producer: derives the claims manifest of a Knowledge store's records at a pinned Git revision, with a documented conservative mapping and named exclusions (flow-agents#1595)."
+    },
+    {
+      "id": "knowledge.living-context-select",
+      "path": "context-check/living-context-select.js",
+      "description": "Question-to-claim selection: deterministic lexical ranker that nominates claim ids for a question or declines; no model, no retrieval engine (flow-agents#1595)."
+    },
+    {
+      "id": "knowledge.living-context-ask",
+      "path": "context-check/living-context-ask.js",
+      "description": "Ask a Knowledge store a question: derive manifest, select, recall with as-of and reader, and answer by quoting the record in which the support verifier finds the passage (flow-agents#1595)."
+    },
+    {
+      "id": "knowledge.living-context-memory",
+      "path": "context-check/living-context-memory.mjs",
+      "description": "Living Context manifest producer for distilled memory claims, presented through presentMemoryClaims with posture and review label in the claim text (flow-agents#1595)."
+    },
+    {
       "id": "knowledge.change-observer",
       "path": "context-check/observe-change.js",
       "description": "Bounded repository-change observation: observeRepositoryChange({repoRoot, base, head, maxPaths}) lists the paths touched between two raw commits (sanitized Git, no hooks or textconv) as the diff.paths a Context Check takes, and refuses an empty or oversized change instead of truncating. A thin shim: Lookout has no Git-revision source yet."
@@ -190,6 +210,11 @@
       "id": "knowledge.ingest-flow-cli",
       "path": "ingest/cli.js",
       "description": "One-shot opt-in ingest CLI; requires an installed public Flow CLI and Surface package."
+    },
+    {
+      "id": "knowledge.living-context-ask-cli",
+      "path": "context-check/ask-cli.js",
+      "description": "Read-only CLI: ask a Knowledge store a question at a pinned commit through Living Context recall; --manifest prints the derived claims manifest and exclusions."
     }
   ],
   "evals": [
@@ -287,6 +312,11 @@
       "id": "knowledge.living-context-suite",
       "path": "context-check/living-context.test.js",
       "description": "Living Context contract suite (issue #1131): missing/blank/unknown reader refused at every root before any claim is parsed, hidden/absent/not-yet-known indistinguishable by id, Surface per-viewer supersession (a successor the reader cannot see leaves the predecessor current with no trace; a visible, recorded, same-slot, in-effect successor along an edge the reader may see never does on an acyclic chain (a cycle through hidden claims is Surface's rule); an ambiguous hidden id on the chain makes it unverifiable in any file order), edge visibility, valid-time and knowledge-time as-of, Surface freshness boundary, per-result reasons, whole-result budget boundaries, Survey support-verification abstention (thin support, throwing/timing-out/malformed verifier, unreadable/empty/oversized evidence, required verifier), result-validator consistency, and proposals-only containment."
+    },
+    {
+      "id": "knowledge.living-context-ask-suite",
+      "path": "context-check/living-context-ask.test.js",
+      "description": "Recall on a real store (flow-agents#1595-1597): a manifest derived from records written by the default store at a pinned revision, question-to-claim selection and abstention, claim_ids-only requests with an actionable error, and a verifier that tolerates hard-wrapped prose without supporting anything the document does not say."
     }
   ],
   "skills": [
