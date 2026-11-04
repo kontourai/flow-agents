@@ -11,7 +11,7 @@
  * runs it. What the Kit reads back is pinned by fixtures that were produced by running the real projection, and a test
  * replays them through the pinned release.
  */
-import type { AccumulationClaim, AccumulationQuery } from "@kontourai/surface";
+import type { AccumulationClaim, AccumulationQuery } from "@kontourai/surface-knowledge";
 import { MemoryClaimError, assertMemoryClaim, memoryInstant, readMemoryVisibility, type MemoryClaim } from "./memory-claims.js";
 import { types } from "node:util";
 import { jsonSnapshot, jsonSnapshotEach } from "./memory-json.js";

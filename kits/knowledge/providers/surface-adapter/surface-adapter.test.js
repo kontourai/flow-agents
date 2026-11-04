@@ -338,10 +338,179 @@ describe("MarkdownVaultProvider: version-keyed read memoization (wave 2 / findin
       const provider = new MarkdownVaultProvider({ store: noVersionStore, storeRoot: dir, agent: "t" });
       await provider.readGraph();
       const callsAfterFirst = listByTypeCalls;
+      assert.equal(callsAfterFirst, 5, "one graph read uses a single record set");
       await provider.readGraph();
-      assert.ok(listByTypeCalls > callsAfterFirst, "no getCacheVersion() means every read refetches");
+      assert.equal(listByTypeCalls, callsAfterFirst + 5, "no getCacheVersion() means every graph read refetches");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test("purged graph records round-trip as Surface deleted claims without content or evidence", async () => {
+  const at = "2026-11-02T12:00:00.000Z";
+  const erased = {
+    id: "opaque-erased-id", type: "note", title: "must-not-escape-title", body: "must-not-escape-body",
+    attributes: {
+      record_type: "raw", category: "purged", status: "purged", created_at: at, updated_at: at,
+      record_provenance: { agent: "test", source_ids: ["live-id"] },
+      mutation_log: [{ op: "purged", at, agent: "owner", rationale: "erasure request" }],
+    },
+    provenance: { source: "knowledge:opaque-erased-id", retrieved_at: at },
+  };
+  const live = {
+    id: "live-id", type: "note", title: "Live", body: "remaining support",
+    attributes: { record_type: "concept", category: "safe", status: "active", created_at: at, updated_at: at },
+    provenance: { source: "knowledge:live-id", retrieved_at: at },
+  };
+  const store = { readGraph: async () => ({
+    nodes: [erased, live],
+    edges: [
+      { from: "live-id", to: "opaque-erased-id", type: "evidence-of" },
+      { from: "opaque-erased-id", to: "live-id", type: "evidence-of" },
+    ],
+  }) };
+  const bundle = JSON.parse(JSON.stringify(await buildKnowledgeTrustBundle({ store, includeRetired: true })));
+  const claim = bundle.claims.find((c) => c.subjectId === erased.id);
+  assert.equal(claim.value, null);
+  assert.equal(claim.derivedFrom, undefined);
+  assert.deepEqual(claim.metadata.surfaceRetention, {
+    state: "deleted", erasedAt: at, actor: "owner", rationale: "erasure request",
+  });
+  assert.ok(!JSON.stringify(bundle).includes("must-not-escape"));
+  assert.ok(bundle.evidence.every((e) => e.claimId !== claim.id && !e.sourceRef.includes(erased.id)));
+  const { validateTrustBundle } = await import("@kontourai/surface-knowledge");
+  validateTrustBundle(bundle);
+});
+
+test("purged graph records without valid audit evidence fail closed", async () => {
+  const record = {
+    id: "erased", type: "note", title: "erased", attributes: { record_type: "raw", status: "purged" },
+    provenance: { source: "knowledge:erased", retrieved_at: "2026-11-02T12:00:00.000Z" },
+  };
+  const store = { readGraph: async () => ({ nodes: [record], edges: [] }) };
+  await assert.rejects(() => buildKnowledgeTrustBundle({ store }), /lacks valid erasure audit evidence/);
+  for (const at of ["2026-11-02", "Nov 2 2026"]) {
+    record.attributes.mutation_log = [{ op: "purged", at, agent: "owner", rationale: "request" }];
+    await assert.rejects(() => buildKnowledgeTrustBundle({ store }), /lacks valid erasure audit evidence/);
+  }
+  // Corpus's size-bounded vault fallback can omit the rationale. Surface
+  // requires it, so do not invent one when projecting that valid tombstone.
+  record.attributes.mutation_log = [{ op: "purged", at: "2026-11-02T12:00:00.000Z", agent: "owner", evidence: { compact: true } }];
+  await assert.rejects(() => buildKnowledgeTrustBundle({ store }), /lacks valid erasure audit evidence/);
+});
+
+test("Surface derivation inputs use provenance source ids and source links, not example links", async () => {
+  const at = "2026-11-02T12:00:00.000Z";
+  const makeNode = (id, extra = {}) => ({
+    id, type: "note", title: id, body: id,
+    attributes: { record_type: "raw", category: "test", created_at: at, updated_at: at, ...extra },
+    provenance: { source: `knowledge:${id}`, retrieved_at: at },
+  });
+  const store = { readGraph: async () => ({
+    nodes: [makeNode("dependent", { record_provenance: { agent: "test", source_ids: ["provenance-source"] } }),
+      makeNode("provenance-source"), makeNode("link-source"), makeNode("example")],
+    edges: [
+      { from: "dependent", to: "link-source", type: "evidence-of", attributes: { vault_link_kind: "source" } },
+      { from: "dependent", to: "example", type: "evidence-of", attributes: { vault_link_kind: "example" } },
+    ],
+  }) };
+  const bundle = await buildKnowledgeTrustBundle({ store });
+  const bySubject = new Map(bundle.claims.map((claim) => [claim.subjectId, claim]));
+  assert.deepEqual(new Set(bySubject.get("dependent").derivedFrom),
+    new Set([bySubject.get("provenance-source").id, bySubject.get("link-source").id]));
+  assert.ok(!bySubject.get("dependent").derivedFrom.includes(bySubject.get("example").id));
+});
+
+test("self-source references do not prevent projecting other records", async () => {
+  const at = "2026-11-02T12:00:00.000Z";
+  const makeNode = (id, extra = {}) => ({
+    id, type: "note", title: id, body: id,
+    attributes: { record_type: "raw", category: "test", created_at: at, updated_at: at, ...extra },
+    provenance: { source: `knowledge:${id}`, retrieved_at: at },
+  });
+  const store = { readGraph: async () => ({
+    nodes: [makeNode("self", { record_provenance: { agent: "test", source_ids: ["self", "other"] } }), makeNode("other")],
+    edges: [{ from: "self", to: "self", type: "evidence-of", attributes: { vault_link_kind: "source" } }],
+  }) };
+  const bundle = await buildKnowledgeTrustBundle({ store });
+  const self = bundle.claims.find((claim) => claim.subjectId === "self");
+  const other = bundle.claims.find((claim) => claim.subjectId === "other");
+  assert.deepEqual(self.derivedFrom, [other.id]);
+});
+
+for (const versioned of [false, true]) {
+  test(`${versioned ? "versioned" : "unversioned"} post-mutation reads do not join an older in-flight fetch`, async () => {
+    let releaseOld;
+    let startedOld;
+    const oldStarted = new Promise((resolve) => { startedOld = resolve; });
+    const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+    let first = true;
+    let version = 1;
+    let body = "OLD_ERASED_CONTENT";
+    const source = {
+      ...(versioned ? { getCacheVersion: () => version } : {}),
+      async listByType(type) {
+        if (type !== "raw") return [];
+        const snapshot = body;
+        if (first) { first = false; startedOld(); await oldGate; }
+        return [{ id: "record", type: "raw", title: "record", body: snapshot,
+          category: "test", provenance: { agent: "test" } }];
+      },
+    };
+    const provider = new MarkdownVaultProvider({ store: source });
+    const oldRead = provider.readNodes();
+    await oldStarted;
+    body = "new content";
+    version += 1;
+    let timer;
+    try {
+      const newRead = await Promise.race([
+        provider.readNodes(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("post-mutation read joined old fetch")), 2000); }),
+      ]);
+      assert.equal(newRead[0].body, "new content");
+    } finally {
+      clearTimeout(timer);
+      releaseOld();
+    }
+    await oldRead;
+    assert.equal((await provider.readNodes())[0].body, "new content");
+  });
+}
+
+test("default projection retains a bounded tombstone whose record type was omitted", async () => {
+  const at = "2026-11-02T12:00:00.000Z";
+  const tombstone = { id: "bounded", type: "[omitted]", title: "[purged]", body: "", category: "purged",
+    status: "purged", created_at: at, updated_at: at, provenance: { agent: "creator" },
+    mutation_log: [{ op: "purged", at, agent: "owner", rationale: "request", evidence: { compact: true, omitted_type_bytes: 1024 } }] };
+  const store = {
+    async listByType() { return []; },
+    async listByCategory(category) { return category === "purged" ? [tombstone] : []; },
+    async getLinks() { return { forward: [], reverse: [] }; },
+  };
+  const provider = new MarkdownVaultProvider({ store });
+  const bundle = await buildKnowledgeTrustBundle({ store: provider });
+  const claim = bundle.claims.find((item) => item.subjectId === "bounded");
+  assert.ok(claim, "default projection must not silently drop a bounded tombstone");
+  assert.equal(claim.value, null);
+  assert.equal(claim.metadata.surfaceRetention.state, "deleted");
+  const filtered = await buildKnowledgeTrustBundle({ store: provider, recordTypes: ["raw"] });
+  assert.equal(filtered.claims.some((item) => item.subjectId === "bounded"), false);
+});
+
+test("Knowledge erasure uses Surface 6 without changing the shared gate's v3 status function", async () => {
+  const gate = await import("@kontourai/surface");
+  const knowledge = await import("@kontourai/surface-knowledge");
+  assert.equal(gate.statusFunctionVersion, "3");
+  assert.equal(knowledge.statusFunctionVersion, "4");
+  const claim = { id: "c", claimType: "test", status: "verified" };
+  const evidence = [{ id: "e", claimId: "c", evidenceType: "test_output", method: "validation", passing: true, observedAt: "2026-01-01T00:00:00Z" }];
+  const policies = [{ id: "p", claimType: "test", requiredEvidence: ["test_output"], requiredMethods: ["validation"], validityRule: { kind: "manual" } }];
+  const events = [
+    { id: "d", claimId: "c", status: "disputed", createdAt: "2026-01-01T00:00:00.0001Z" },
+    { id: "v", claimId: "c", status: "verified", createdAt: "2026-01-01T00:00:00.0002Z" },
+  ];
+  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events }).status, "disputed");
+  assert.equal(knowledge.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
 });

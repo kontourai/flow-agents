@@ -192,6 +192,11 @@
   ],
   "assets": [
     {
+      "id": "knowledge.corpus-store-selection",
+      "path": "adapters/shared/corpus-store.js",
+      "description": "Explicit host-coordinated selection of Corpus-backed Knowledge stores; legacy stores refuse purge."
+    },
+    {
       "id": "knowledge.owned-artifact-publisher",
       "path": "adapters/shared/owned-artifacts.js",
       "description": "POSIX Python 3 standard-library descriptor-relative publisher shared by ingest JSON and trace artifacts; runtime support is checked before writes."

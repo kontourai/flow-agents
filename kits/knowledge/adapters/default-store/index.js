@@ -15,6 +15,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { openCorpusStore, purgeUnavailable, assertLegacyNotPurged, assertLegacySupportIsLive } from "../shared/corpus-store.js";
 
 // Record-identity resolution layer (short-id prefix + slug aliases, issue #339).
 // Both bundled adapters share identity resolution and frontmatter parsing.
@@ -227,8 +228,10 @@ export class DefaultKnowledgeStore {
   /**
    * @param {{ storeRoot: string }} options
    */
-  constructor({ storeRoot }) {
+  constructor({ storeRoot, corpusStore }) {
     if (!storeRoot) throw new Error("storeRoot is required");
+    const selected = openCorpusStore(corpusStore, { storeRoot }, "KitDefaultStoreAdapter");
+    if (selected) return selected;
     this._root = path.resolve(storeRoot);
     this._recordsDir = path.join(this._root, "records");
     this._graphPath = path.join(this._root, "graph-index.json");
@@ -237,6 +240,8 @@ export class DefaultKnowledgeStore {
     fs.mkdirSync(this._recordsDir, { recursive: true });
     this._initCacheVersion();
   }
+
+  async purge() { throw purgeUnavailable(); }
 
   _initCacheVersion() {
     if (!fs.existsSync(this._cacheVersionPath)) {
@@ -351,7 +356,10 @@ export class DefaultKnowledgeStore {
     if (!input.provenance?.agent)
       throw missingEvidenceError("create: missing required provenance field: provenance.agent");
 
+    assertLegacySupportIsLive(input, (id) => this._readRecord(id));
+
     const id = input.id || randomUUID();
+    assertLegacyNotPurged(this._readRecord(id));
     const recordPath = this._recordPath(id);
     if (recordPath === null)
       throw missingEvidenceError("Record path escapes records directory");
@@ -438,6 +446,8 @@ export class DefaultKnowledgeStore {
 
     const record = this._readRecord(id);
     if (!record) throw notFoundError(id);
+    assertLegacyNotPurged(record);
+    assertLegacySupportIsLive(fields, (targetId) => this._readRecord(targetId));
 
     const mutableKeys = ["title", "body", "category", "tags", "links", "aliases", "expires_at", "ttl_seconds"];
     const supplied = mutableKeys.filter((k) => fields[k] !== undefined);
@@ -524,9 +534,12 @@ export class DefaultKnowledgeStore {
 
     const source = this._readRecord(sourceId);
     if (!source) throw notFoundError(sourceId);
+    assertLegacyNotPurged(source);
 
     for (const l of links) {
-      if (!this._readRecord(l.target_id)) throw notFoundError(l.target_id);
+      const target = this._readRecord(l.target_id);
+      if (!target) throw notFoundError(l.target_id);
+      assertLegacyNotPurged(target);
     }
 
     const now = this._now();
@@ -582,10 +595,12 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
+    assertLegacyNotPurged(concept);
     // Any record type may receive a proposal (retire flow uses this for all types)
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
+    assertLegacyNotPurged(proposer);
 
     const now = this._now();
 
@@ -652,10 +667,12 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
+    assertLegacyNotPurged(concept);
     // Any record type may be the apply target
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
+    assertLegacyNotPurged(proposer);
 
     const proposerLinks = proposer.links || [];
     const hasProposesLink = proposerLinks.some(
@@ -697,10 +714,12 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
+    assertLegacyNotPurged(concept);
     // Any record type may be the reject target
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
+    assertLegacyNotPurged(proposer);
 
     const proposerLinks = proposer.links || [];
     const hasProposesLink = proposerLinks.some(
@@ -744,11 +763,13 @@ export class DefaultKnowledgeStore {
 
     const newRecord = this._readRecord(newId);
     if (!newRecord) throw notFoundError(newId);
+    assertLegacyNotPurged(newRecord);
 
     // Verify all superseded records exist
     for (const sid of supersededIds) {
       const rec = this._readRecord(sid);
       if (!rec) throw notFoundError(sid);
+      assertLegacyNotPurged(rec);
     }
 
     const now = this._now();
@@ -844,6 +865,7 @@ export class DefaultKnowledgeStore {
 
     const record = this._readRecord(id);
     if (!record) throw notFoundError(id);
+    assertLegacyNotPurged(record);
 
     const currentStatus = record.status || "active";
     const allowed = VALID_STATUS_TRANSITIONS[currentStatus];

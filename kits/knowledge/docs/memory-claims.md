@@ -321,7 +321,7 @@ consumed here, and `presentMemoryClaims` does not apply it.
 - Writing claims to the personal store (`#670`) and the dream pipeline's use of them
   (`#671`). Claims are returned and recorded as evidence; staging into a store is the
   next lane.
-- Anything newer than the pinned releases. This package pins `@kontourai/surface` 6.3.0 and `@kontourai/survey`
+- Anything newer than the pinned releases. This package pins `@kontourai/surface-knowledge` as an alias of Surface 6.3.0 and `@kontourai/survey`
   8.4.0 (exact versions, as released on npm). The Kit calls Surface's `meetVisibility` for the widening rule, takes
   Survey's `EntityProposal` as the type it reads and its `isReviewerKind` for the reviewer kind, and fills Surface's own `AccumulationClaim` and
   `AccumulationQuery`. Tests replay Surface's meet vectors and a 37 x 37 grid of good and malformed visibilities
