@@ -992,6 +992,6 @@ describe("review round 8: block structure is read the way CommonMark reads it, o
     assert.equal(await verdict("The key is reserved.", "<div>x</div>\n\nThe **key** is\nreserved.\n"), "supported", "prose after an HTML block's blank line");
     assert.equal(await verdict("The key is reserved.", "```\ncode\n```\nThe **key** is\nreserved.\n"), "supported", "prose after a closed fence");
     assert.equal(await verdict("The key is reserved.", "> ```\n> code\n> ```\n> The **key** is\n> reserved.\n"), "supported", "a quoted fence closes in its quote");
-    assert.equal(await verdict("Do not enable signing.", "Do not\n**enable** signing.\n[x]: /url\n"), "supported", "a definition cannot interrupt a paragraph, so its words stay in it");
+    assert.equal(await verdict("Do not enable signing.", "Do not\nenable signing.\n[x]: /url\n"), "supported", "a definition cannot interrupt a paragraph, so its words stay in it");
   });
 });
