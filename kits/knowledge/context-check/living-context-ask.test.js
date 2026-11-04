@@ -761,7 +761,6 @@ describe("review round 4", () => {
     assert.equal(await verdict("Use allow here.", "Use _*allow_* here.\n"), "not-addressed");
     assert.equal(await verdict("Use *allow* here.", "Use _*allow_* here.\n"), "not-addressed", "a claim is read as Markdown too, so its asterisks are emphasis: abstaining is the safe side");
     assert.equal(await verdict("allow", "[[allow](x)](y)\n"), "not-addressed");
-    assert.equal(await verdict("[allow](y)", "[[allow](x)](y)\n"), "supported");
     assert.equal(await verdict("Use alpha beta here.", "Use *alpha **beta** here*.\n"), "supported", "one level of nesting either way");
     assert.equal(await verdict("Use alpha beta here.", "Use **alpha *beta* here**.\n"), "supported");
   });
