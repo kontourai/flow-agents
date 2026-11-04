@@ -7,12 +7,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: veritas-advisory-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   readiness:
-    concurrency:
-      group: flow-agents-compute-v2-2-${{ (endsWith(github.run_id, '0') || endsWith(github.run_id, '2') || endsWith(github.run_id, '4') || endsWith(github.run_id, '6') || endsWith(github.run_id, '8')) && 'a' || 'b' }}
-      queue: max
-      cancel-in-progress: false
     uses: kontourai/.github/.github/workflows/veritas-advisory.yml@ea4c99c803a565f56cd18abbf9041f3467d1ee93 # Veritas 1.11.2
     with:
       require-ready: true
