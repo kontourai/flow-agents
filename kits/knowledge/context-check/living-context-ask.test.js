@@ -592,3 +592,105 @@ describe("review: the verifier supports only what the document says", () => {
     assert.equal(await verdict("Item 3 stays. Item 5 stays.", sentences), "not-addressed");
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Review round 2 on #1601 (delta review of the round-1 fixes; each case was reproduced before it was fixed).
+
+const sourceOf = (claims, records, readers = ["alice", "bob"]) => ({ manifest: { readers, claims }, records });
+const manifestClaim = (id, path_, overrides = {}) => ({ id, claim: `${id} claim`, status: "current", authority: { path: path_, citation: id }, owning_source: { owner: "o", path: path_ }, affected_surfaces: [path_], visibility: { audiences: ["alice", "bob"] }, recorded_at: "2026-10-01T00:00:00Z", slot: id, ...overrides });
+const recordOf = (id, path_, title, body, at = "2026-10-01T00:00:00Z") => ({ claim_id: id, path: path_, title, type: "memory-claim", category: "memory.claim", tags: [], record_status: "stated", created_at: at, updated_at: at, body });
+
+describe("review round 2: ask discloses only what recall shows this reader", () => {
+  test("an id carried by two records is left out for a reader who is entitled to only one, and refused for one entitled to both", async () => {
+    const m = await track(async ({ put }) => { put("docs/public.md", "Canary acquisition is public.\n"); put("docs/secret.md", "Secret canary acquisition costs 43 million.\n"); return {}; });
+    const copies = sourceOf(
+      [manifestClaim("dup", "docs/public.md"), manifestClaim("dup", "docs/secret.md", { visibility: { audiences: ["alice"] } })],
+      [recordOf("dup", "docs/public.md", "dup claim", "Canary acquisition is public.\n"), recordOf("dup", "docs/secret.md", "dup claim", "Secret canary acquisition costs 43 million.\n")],
+    );
+    const bob = await askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "canary acquisition costs", reader: "bob", readers: ["alice", "bob"], now: NOW, verifier, additional: [copies] });
+    assert.equal(JSON.stringify({ r: bob.results, b: bob.below_threshold }).match(/43 million|secret\.md/i), null, JSON.stringify(bob.results));
+    await assert.rejects(askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "canary acquisition costs", reader: "alice", readers: ["alice", "bob"], now: NOW, verifier, additional: [copies] }), (cause) => cause.code === "DUPLICATE_CLAIM_ID");
+    const future = sourceOf(
+      [manifestClaim("dup", "docs/public.md"), manifestClaim("dup", "docs/secret.md", { recorded_at: "2026-12-01T00:00:00Z" })],
+      [recordOf("dup", "docs/public.md", "dup claim", "Canary acquisition is public.\n"), recordOf("dup", "docs/secret.md", "dup claim", "Secret canary acquisition costs 43 million.\n", "2026-12-01T00:00:00Z")],
+    );
+    const later = await askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "canary acquisition costs", reader: "bob", readers: ["alice", "bob"], now: NOW, verifier, additional: [future] });
+    assert.equal(JSON.stringify(later.results).match(/43 million|secret\.md/i), null, JSON.stringify(later.results));
+  });
+
+  test("a supersession edge the reader may not see, or that is recorded later, is not followed or shown", async () => {
+    const m = await track(async ({ put }) => { put("docs/a.md", "Quartz pricing is flat.\n"); put("docs/z.md", "Zirconium pricing is tiered.\n"); return {}; });
+    const edge = (extra) => sourceOf(
+      [manifestClaim("edge-a", "docs/a.md", { status: "superseded", superseded_by: "edge-z", supersession_kind: "succession", supersession_recorded_at: "2026-10-02T00:00:00Z", slot: "pricing", ...extra }), manifestClaim("edge-z", "docs/z.md", { slot: "pricing", recorded_at: "2026-10-02T00:00:00Z", valid_time: { from: "2026-10-02T00:00:00Z" } })],
+      [recordOf("edge-a", "docs/a.md", "Quartz pricing", "Quartz pricing is flat.\n"), recordOf("edge-z", "docs/z.md", "Zirconium pricing", "Zirconium pricing is tiered.\n")],
+    );
+    const bobAsks = (source) => askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "Quartz pricing flat", reader: "bob", readers: ["alice", "bob"], now: NOW, verifier, additional: [source] });
+    for (const hidden of [{ supersession_visibility: { audiences: ["alice"] } }, { supersession_recorded_at: "2026-12-01T00:00:00Z" }]) {
+      const result = await bobAsks(edge(hidden));
+      assert.deepEqual(result.results.map((entry) => entry.claim_id), ["edge-a"], JSON.stringify(hidden));
+      assert.equal(result.results[0].status, "current");
+    }
+    const open = await bobAsks(edge({}));
+    assert.deepEqual(open.results.map((entry) => [entry.claim_id, entry.status, entry.via]), [["edge-a", "superseded", undefined], ["edge-z", "current", "successor_of:edge-a"]]);
+  });
+
+  test("an authority file whose bytes are not UTF-8 is not rewritten into text and verified", async () => {
+    const m = await track(async ({ repo }) => { fs.mkdirSync(path.join(repo, "docs")); fs.writeFileSync(path.join(repo, "docs/bytes.md"), Buffer.concat([Buffer.from("Grant "), Buffer.from([0xff]), Buffer.from(" access.\n")])); return {}; });
+    const source = sourceOf([manifestClaim("bytes", "docs/bytes.md")], [recordOf("bytes", "docs/bytes.md", "Grant access", "Grant \ufffd access.\n")]);
+    const result = await askLivingContext({ repoRoot: m.repo, revision: m.revision, question: "Grant access", reader: "bob", readers: ["alice", "bob"], now: NOW, verifier, additional: [source] });
+    assert.equal(result.results[0].outcome, "abstained");
+    assert.equal(result.results[0].reason, "evidence_not_utf8");
+  });
+});
+
+describe("review round 2: the producer keeps what the store recorded", () => {
+  test("recording the same supersession again does not move it later", async () => {
+    const m = await track(async ({ store, make }) => {
+      const old = await make("2026-10-01T00:00:00.000Z", { title: "Hafnium policy", body: "Hafnium policy v1.\n" });
+      const next = await make("2026-10-01T12:00:00.000Z", { title: "Iridium policy", body: "Iridium policy v2.\n" });
+      store.at = "2026-10-02T00:00:00.000Z";
+      await store.supersede(next, [old], { agent: "fixture", rationale: "first" });
+      store.at = "2026-10-04T00:00:00.000Z";
+      await store.supersede(next, [old], { agent: "fixture", rationale: "again" });
+      return { old, next };
+    });
+    const derived = deriveStoreManifest({ repoRoot: m.repo, revision: m.revision, readers: ["maintainer"] });
+    assert.equal(claimOf(derived, m.ids.old).supersession_recorded_at, "2026-10-02T00:00:00.000Z");
+    const midway = await ask({ repoRoot: m.repo, revision: m.revision, question: "Hafnium policy", now: "2026-10-03T00:00:00Z" });
+    assert.equal(midway.results.find((entry) => entry.claim_id === m.ids.old).status, "superseded");
+  });
+
+  test("a ttl the store accepts but whose expiry is not a date makes the record unverifiable instead of aborting the derivation", async () => {
+    const m = await track(async ({ make }) => ({ huge: await make("2026-10-01T00:00:00.000Z", { title: "Forever policy", body: "Forever policy holds.\n", ttl_seconds: 1e308 }), plain: await make("2026-10-01T00:00:00.000Z", { title: "Plain policy", body: "Plain policy holds.\n" }) }));
+    const derived = deriveStoreManifest({ repoRoot: m.repo, revision: m.revision, readers: ["maintainer"] });
+    assert.equal(claimOf(derived, m.ids.huge).status, "unverifiable");
+    assert.equal(derived.records.find((record) => record.claim_id === m.ids.huge).mapping, "unreadable_freshness");
+    assert.equal(claimOf(derived, m.ids.plain).status, "current");
+  });
+});
+
+describe("review round 2: the verifier judges a statement the same at any length, and in linear time", () => {
+  const verdict = async (value, excerpt) => (await verifier.verify({ candidateId: "c", value, evidence: [{ id: "e", excerpt, locator: "l" }] })).result;
+
+  test("code is never emphasis, however long the paragraph; an unpaired leading marker is a character; nested emphasis is formatting", async () => {
+    const padding = " Filler words keep the paragraph long.".repeat(140);
+    for (const doc of ["Use *allow* here.", `Use *allow* here.${padding}`]) {
+      assert.equal(await verdict("Use `*allow*` here.", doc), "not-addressed", `${doc.length} chars`);
+    }
+    assert.equal(await verdict("Admin is allowed.", "*Admin is allowed.\n"), "not-addressed");
+    assert.equal(await verdict("Admin is allowed.", "* Admin is allowed.\n"), "supported", "a list marker followed by a space is a marker");
+    assert.equal(await verdict("Use alpha beta here.", "Use **alpha *beta*\nhere**.\nContinue safely.\n"), "supported");
+  });
+
+  test("repeated prefixes cost one prefix test per sentence, not a rescan of the unit", async () => {
+    const document = `${"Alpha stays. ".repeat(1000)}Omega stays.`;
+    let started = Date.now();
+    assert.equal(await verdict(`${"Alpha stays. ".repeat(1000)}Wrong stays.`, document), "not-addressed");
+    assert.ok(Date.now() - started < 2000, `${Date.now() - started} ms`);
+    started = Date.now();
+    assert.equal(await verdict(`${"Alpha stays. ".repeat(1000)}Omega stays.`, document), "supported");
+    assert.equal(await verdict("Alpha stays. Omega stays.", document), "supported", "the last two sentences are consecutive");
+    assert.equal(await verdict("Omega stays. Alpha stays.", document), "not-addressed", "out of order");
+    assert.ok(Date.now() - started < 2000);
+  });
+});

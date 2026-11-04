@@ -3,8 +3,10 @@
  * whether a statement is in an authority document) and by question answering (which quotes a passage of a record). Sharing
  * it is what keeps the two honest with each other: a passage that is quoted is always a statement the verifier can find.
  *
- * Dependency-free on purpose, like `index.js`. Every step is linear in the text or bounded by `MAX_INLINE_CHARS`, because the
- * verifier runs synchronously and a timeout cannot interrupt it.
+ * Dependency-free on purpose, like `index.js`. Every pattern is bounded (a marker looks at most a few hundred or thousand characters
+ * ahead) and sentence matching is a prefix test per sentence start, because the verifier runs synchronously and a timeout cannot
+ * interrupt it. The same normalisation is applied to a unit of any length, so a statement is judged the same in a short paragraph
+ * and in a long one.
  *
  * Stated limits: the sentence cut is a heuristic (a full stop, space, then a capital, digit or opening quote). An abbreviation
  * it does not know can cut a sentence early, and then a sentence tail is supported as if it were a sentence. Negation is not read.
@@ -12,24 +14,30 @@
  * @module living-context-text
  */
 
-/** Longer than this, a unit is compared as written: inline Markdown is not stripped (on either side), so cost stays bounded. */
-export const MAX_INLINE_CHARS = 4000;
-
 const BLOCK_MARKER = /^\s*(?:[-*+>]|\d{1,3}[.)]|#{1,6})\s+/;
 const HEADING = /^\s*#{1,6}\s/;
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`).
 const ABBREVIATION = /(?:^|\s)(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
 const CODE_SPAN = /(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
 
-/** Emphasis and links that are formatting. Markers without a partner are characters and stay. */
+const EMPHASIS = [
+  [/!?\[([^\]\n]{0,300})\]\([^)\n]{0,500}\)/g, "$1"],
+  [/(^|[^\w*])\*(?=[^\s*])([^*\n]{1,2000}?)(?<=[^\s*])\*(?![\w*])/g, "$1$2"],
+  [/(^|[^\w])_(?=[^\s_])([^_\n]{1,2000}?)(?<=[^\s_])_(?!\w)/g, "$1$2"],
+  [/\*\*(?=\S)([^*\n]{1,2000}?)(?<=\S)\*\*/g, "$1"],
+  [/(^|[^\w])__(?=\S)([^_\n]{1,2000}?)(?<=\S)__(?!\w)/g, "$1$2"],
+  [/~~(?=\S)([^~\n]{1,2000}?)(?<=\S)~~/g, "$1"],
+];
+
+/** Emphasis and links that are formatting. Markers without a partner are characters and stay. Inner emphasis goes first, so a nested pair is stripped on the second pass. */
 function stripFormatting(text) {
-  return text
-    .replace(/!?\[([^\]\n]{0,300})\]\([^)\n]{0,500}\)/g, "$1")
-    .replace(/\*\*(?=\S)([^*\n]{1,2000}?)(?<=\S)\*\*/g, "$1")
-    .replace(/(^|[^\w])__(?=\S)([^_\n]{1,2000}?)(?<=\S)__(?!\w)/g, "$1$2")
-    .replace(/~~(?=\S)([^~\n]{1,2000}?)(?<=\S)~~/g, "$1")
-    .replace(/(^|[^\w*])\*(?=[^\s*])([^*\n]{1,2000}?)(?<=[^\s*])\*(?![\w*])/g, "$1$2")
-    .replace(/(^|[^\w])_(?=[^\s_])([^_\n]{1,2000}?)(?<=[^\s_])_(?!\w)/g, "$1$2");
+  let current = text;
+  for (let pass = 0; pass < 3; pass++) {
+    const before = current;
+    for (const [pattern, replacement] of EMPHASIS) current = current.replace(pattern, replacement);
+    if (current === before) break;
+  }
+  return current;
 }
 
 /**
@@ -37,7 +45,6 @@ function stripFormatting(text) {
  * while the code between them is kept exactly as written (a marker inside a code span is a character, never emphasis).
  */
 export function stripInlineMarkdown(text) {
-  if (text.length > MAX_INLINE_CHARS) return text;
   let out = "";
   let last = 0;
   for (const span of text.matchAll(CODE_SPAN)) {
@@ -49,7 +56,8 @@ export function stripInlineMarkdown(text) {
 
 const squash = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
 /** The form a statement is compared in, before the closing full stop is considered. */
-export const comparable = (text) => squash(stripInlineMarkdown(text.replace(/^[\s>*+-]+/, "")));
+// A list or quote marker is a marker only when whitespace follows it: `*Admin` and `-5` begin with a character of the statement.
+export const comparable = (text) => squash(stripInlineMarkdown(text.replace(/^(?:\s*[>*+-](?=\s))+/, "")));
 const withoutFinalStop = (text) => text.replace(/\.$/, "");
 /** Lower-cased, whitespace-collapsed, markup- and marker-free, without one trailing full stop: the form two statements are compared in. */
 export const cleanStatement = (text) => withoutFinalStop(comparable(text));
@@ -107,19 +115,28 @@ export function documentUnits(text) {
   return units.map(({ kind, parts }) => ({ kind, sentences: splitSentences(stripInlineMarkdown(parts.join(" "))).map((sentence) => sentence.trim()).filter(Boolean) }));
 }
 
-/** Whether `statement` is one sentence, or consecutive whole sentences, of one unit. Linear in the unit: a start is only extended while it is still a prefix. */
+/**
+ * Whether `statement` is one sentence, or consecutive whole sentences, of one unit. The unit's sentences are joined once; the statement
+ * must begin where a sentence begins and end where a sentence ends (with or without its final full stop). Work is one prefix test per
+ * sentence start, so it is bounded by the unit size times the number of sentences in it at worst and in practice by a single pass.
+ */
 export function statementInUnits(units, statement) {
-  const target = comparable(statement);
-  const wanted = withoutFinalStop(target);
+  const wanted = withoutFinalStop(comparable(statement));
+  if (wanted === "") return false;
   for (const { sentences } of units) {
     const keys = sentences.map(squash);
-    for (let from = 0; from < keys.length; from++) {
-      let run = "";
-      for (let to = from; to < keys.length; to++) {
-        run = to === from ? keys[to] : `${run} ${keys[to]}`;
-        if (withoutFinalStop(run) === wanted) return true;
-        if (!`${wanted}.`.startsWith(run) && !wanted.startsWith(run)) break;
-      }
+    const starts = [];
+    const ends = new Set();
+    let offset = 0;
+    for (const key of keys) {
+      starts.push(offset);
+      ends.add(offset + key.length);
+      if (key.endsWith(".")) ends.add(offset + key.length - 1);
+      offset += key.length + 1;
+    }
+    const joined = keys.join(" ");
+    for (const start of starts) {
+      if (joined.startsWith(wanted, start) && ends.has(start + wanted.length)) return true;
     }
   }
   return false;

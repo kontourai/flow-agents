@@ -62,7 +62,11 @@ export async function askLivingContext({
   // Only claims this reader may see, known at `now`, are ever scored or named: a score, a nearest miss or a successor link would
   // otherwise disclose what recall answers with a plain no-answer. The same admission refuses an unknown reader first.
   const admitted = admittedClaimIds({ repoRoot, input, derivedManifests });
-  const visibleRecords = store.records.filter((record) => admitted.has(record.claim_id));
+  // An id carried by more than one record cannot be matched to the copy recall admitted, so it is left out rather than guessed.
+  const copies = new Map();
+  for (const record of store.records) copies.set(record.claim_id, (copies.get(record.claim_id) ?? 0) + 1);
+  const answerable = new Set([...admitted].filter((id) => copies.get(id) === 1));
+  const visibleRecords = store.records.filter((record) => answerable.has(record.claim_id));
   const documents = visibleRecords.map((record) => ({ id: record.claim_id, title: record.title, tags: record.tags, category: record.category, body: record.body, updated_at: record.updated_at }));
   const selection = select({ question, documents, limit, minCoverage, minPassageCoverage });
   const base = { question, revision: store.revision, store: store.store, reader, as_of: now, store_stats: store.stats, excluded: store.excluded, terms: selection.terms, below_threshold: selection.below_threshold };
@@ -70,16 +74,17 @@ export async function askLivingContext({
   if (selection.terms.length === 0) return { ...base, outcome: "abstained", abstained: "no_question_terms", results: [] };
   if (selection.selected.length === 0) return { ...base, outcome: "abstained", abstained: "no_record_covers_question", results: [] };
 
-  // A superseded record is shown with the record that replaced it, so a reader never has to guess which is current.
-  const claimBy = new Map(store.manifest.claims.map((claim) => [claim.id, claim]));
   const recordBy = new Map(store.records.map((record) => [record.claim_id, record]));
-  const nominated = selection.selected.map((entry) => ({ ...entry }));
-  for (const entry of [...nominated]) {
-    for (let id = claimBy.get(entry.id)?.superseded_by, hops = 0; id && claimBy.has(id) && hops < 8; id = claimBy.get(id).superseded_by, hops++) {
-      if (!admitted.has(id) || nominated.some((other) => other.id === id)) continue;
-      const record = recordBy.get(id);
+  const nominated = selection.selected.filter((entry) => answerable.has(entry.id)).map((entry) => ({ ...entry }));
+  // A superseded record is shown with the record that replaced it. The successor is the one recall reports for this reader at this
+  // instant (an edge the reader may not see, or one recorded later, is not followed), and only one that may be answered from.
+  const first = runLivingContext({ repoRoot, input: { ...input, claim_ids: nominated.map((entry) => entry.id) }, derivedManifests, write: false });
+  for (const recalled of first.recalls) {
+    for (const link of recalled.supersession_chain ?? []) {
+      if (link.relation !== "superseded_by" || link.active !== true || !answerable.has(link.claim_id) || nominated.some((other) => other.id === link.claim_id)) continue;
+      const record = recordBy.get(link.claim_id);
       const candidate = bestPassage(record.body, selection.terms);
-      nominated.push({ id, via: `successor_of:${entry.id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
+      nominated.push({ id: link.claim_id, via: `successor_of:${recalled.claim_id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
     }
   }
 

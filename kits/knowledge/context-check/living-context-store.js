@@ -158,7 +158,8 @@ export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge
   const edge = (old, next, at) => {
     if (next === old) return;
     if (byId.has(next)) successors.get(old).add(next); else unresolved.get(old).add(next);
-    if (at && (!edgeTimes.has(`${old}>${next}`) || at > edgeTimes.get(`${old}>${next}`))) edgeTimes.set(`${old}>${next}`, at);
+    // The first time an edge was recorded stands: recording it again does not move it later (that would make the past look unreplaced).
+    if (at && (!edgeTimes.has(`${old}>${next}`) || at < edgeTimes.get(`${old}>${next}`))) edgeTimes.set(`${old}>${next}`, at);
   };
   for (const record of records) {
     for (const link of asList(record.meta.links)) {
@@ -188,8 +189,8 @@ export function deriveStoreManifest({ repoRoot, revision, storePath = "knowledge
     const declared = meta.expires_at !== undefined || meta.ttl_seconds !== undefined;
     if (!declared) return { declared };
     const expiryMs = effectiveExpiryMs(decodeFreshnessFields({ ...meta }));
-    const unreadable = expiryMs === null || (meta.expires_at !== undefined && Number.isNaN(Date.parse(meta.expires_at))) || (meta.ttl_seconds !== undefined && !Number.isFinite(Number(meta.ttl_seconds)));
-    return { declared, unreadable, ...(expiryMs === null ? {} : { expiresAt: new Date(expiryMs).toISOString() }) };
+    const unreadable = expiryMs === null || !Number.isFinite(new Date(expiryMs).getTime()) || (meta.expires_at !== undefined && Number.isNaN(Date.parse(meta.expires_at))) || (meta.ttl_seconds !== undefined && !Number.isFinite(Number(meta.ttl_seconds)));
+    return { declared, unreadable, ...(unreadable ? {} : { expiresAt: new Date(expiryMs).toISOString() }) };
   };
 
   const claims = [];

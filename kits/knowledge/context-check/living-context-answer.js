@@ -53,7 +53,10 @@ function readAuthority(repoRoot, revision, authorityPath) {
   if (!Number.isInteger(size)) return { abstain: "evidence_unreadable" };
   if (size === 0) return { abstain: "evidence_empty" };
   if (size > MAX_EVIDENCE_BYTES) return { abstain: "evidence_too_large" };
-  try { return { text: gitRaw(repoRoot, ["show", "--no-ext-diff", "--no-textconv", "--format=", spec]) }; } catch { return { abstain: "evidence_unreadable" }; }
+  let bytes;
+  try { bytes = gitRaw(repoRoot, ["show", "--no-ext-diff", "--no-textconv", "--format=", spec], { buffer: true }); } catch { return { abstain: "evidence_unreadable" }; }
+  // Bytes that are not UTF-8 are never rewritten into text a verifier could then support.
+  try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) }; } catch { return { abstain: "evidence_not_utf8" }; }
 }
 
 /**
