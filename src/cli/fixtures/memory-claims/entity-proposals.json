@@ -1,0 +1,242 @@
+{
+  "merge": {
+    "id": "sha256:3a97cb27f8b53a28dfd06e1d34378ca1071bcea39654c99c420ecf3ecca8e6a6",
+    "apiVersion": "survey.kontourai.io/v1alpha1",
+    "metadata": {
+      "name": "sha256:3a97cb27f8b53a28dfd06e1d34378ca1071bcea39654c99c420ecf3ecca8e6a6"
+    },
+    "kind": "EntityProposal",
+    "spec": {
+      "revision": "1",
+      "proposer": {
+        "id": "knowledge.memory-claims",
+        "rule": "spelling-variant"
+      },
+      "policy": {
+        "id": "entity-review",
+        "revision": "1"
+      },
+      "alternatives": [
+        {
+          "subjects": [
+            {
+              "subjectType": "person",
+              "subjectId": "m. chen"
+            },
+            {
+              "subjectType": "person",
+              "subjectId": "maya chen"
+            }
+          ],
+          "operation": "merge",
+          "evidence": [
+            {
+              "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+              "sourceRef": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "sourceId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "checksum": "sha256:e9dfb54a0f3113aa83d7efc718fa2035ed9b627cbd11e205af80e5b9af342940",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "locatorScheme": "text-span",
+              "locator": "chars:220-279",
+              "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+              "stance": "supports"
+            }
+          ],
+          "confidenceComponents": {
+            "name": 0.8
+          }
+        }
+      ]
+    }
+  },
+  "split": {
+    "id": "sha256:fb1cbf9754e6692b40040fd2d3076a7f126bba2e5564eb3fa5ea39e8506bf899",
+    "apiVersion": "survey.kontourai.io/v1alpha1",
+    "metadata": {
+      "name": "sha256:fb1cbf9754e6692b40040fd2d3076a7f126bba2e5564eb3fa5ea39e8506bf899"
+    },
+    "kind": "EntityProposal",
+    "spec": {
+      "revision": "1",
+      "proposer": {
+        "id": "knowledge.memory-claims",
+        "rule": "spelling-variant"
+      },
+      "policy": {
+        "id": "entity-review",
+        "revision": "1"
+      },
+      "alternatives": [
+        {
+          "subjects": [
+            {
+              "subjectType": "person",
+              "subjectId": "m. chen"
+            },
+            {
+              "subjectType": "person",
+              "subjectId": "maya chen"
+            }
+          ],
+          "operation": "split",
+          "evidence": [
+            {
+              "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+              "sourceRef": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "sourceId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "checksum": "sha256:e9dfb54a0f3113aa83d7efc718fa2035ed9b627cbd11e205af80e5b9af342940",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "locatorScheme": "text-span",
+              "locator": "chars:220-279",
+              "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+              "stance": "supports"
+            }
+          ],
+          "confidenceComponents": {
+            "name": 0.8
+          }
+        }
+      ]
+    }
+  },
+  "alias": {
+    "id": "sha256:532ad8f0cccecffd2a56d2166efa1f8afab12e7c71466a763b8a283fa59c27ca",
+    "apiVersion": "survey.kontourai.io/v1alpha1",
+    "metadata": {
+      "name": "sha256:532ad8f0cccecffd2a56d2166efa1f8afab12e7c71466a763b8a283fa59c27ca"
+    },
+    "kind": "EntityProposal",
+    "spec": {
+      "revision": "1",
+      "proposer": {
+        "id": "knowledge.memory-claims",
+        "rule": "spelling-variant"
+      },
+      "policy": {
+        "id": "entity-review",
+        "revision": "1"
+      },
+      "alternatives": [
+        {
+          "subjects": [
+            {
+              "subjectType": "person",
+              "subjectId": "m. chen"
+            },
+            {
+              "subjectType": "person",
+              "subjectId": "maya chen"
+            }
+          ],
+          "operation": "alias",
+          "evidence": [
+            {
+              "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+              "sourceRef": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "sourceId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "checksum": "sha256:e9dfb54a0f3113aa83d7efc718fa2035ed9b627cbd11e205af80e5b9af342940",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "locatorScheme": "text-span",
+              "locator": "chars:220-279",
+              "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+              "stance": "supports"
+            }
+          ],
+          "confidenceComponents": {
+            "name": 0.8
+          }
+        }
+      ]
+    }
+  },
+  "multi": {
+    "id": "sha256:7c320a8a3168127535847b09ff52e8762dd827bcc8302a44182d2d4f2587ba35",
+    "apiVersion": "survey.kontourai.io/v1alpha1",
+    "metadata": {
+      "name": "sha256:7c320a8a3168127535847b09ff52e8762dd827bcc8302a44182d2d4f2587ba35"
+    },
+    "kind": "EntityProposal",
+    "spec": {
+      "revision": "1",
+      "proposer": {
+        "id": "knowledge.memory-claims",
+        "rule": "spelling-variant"
+      },
+      "policy": {
+        "id": "entity-review",
+        "revision": "1"
+      },
+      "alternatives": [
+        {
+          "subjects": [
+            {
+              "subjectType": "person",
+              "subjectId": "maya c."
+            },
+            {
+              "subjectType": "person",
+              "subjectId": "maya chen"
+            }
+          ],
+          "operation": "same-as",
+          "evidence": [
+            {
+              "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+              "sourceRef": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "sourceId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "checksum": "sha256:e9dfb54a0f3113aa83d7efc718fa2035ed9b627cbd11e205af80e5b9af342940",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "locatorScheme": "text-span",
+              "locator": "chars:220-279",
+              "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+              "stance": "supports"
+            },
+            {
+              "id": "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02",
+              "sourceRef": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "sourceId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "checksum": "sha256:e9dfb54a0f3113aa83d7efc718fa2035ed9b627cbd11e205af80e5b9af342940",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "locatorScheme": "text-span",
+              "locator": "chars:280-323",
+              "excerpt": "Our retry budget is 5 attempts per request.",
+              "stance": "context"
+            }
+          ],
+          "confidenceComponents": {
+            "name": 0.6
+          }
+        },
+        {
+          "subjects": [
+            {
+              "subjectType": "person",
+              "subjectId": "m. chen"
+            },
+            {
+              "subjectType": "person",
+              "subjectId": "maya chen"
+            }
+          ],
+          "operation": "merge",
+          "evidence": [
+            {
+              "id": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
+              "sourceRef": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "sourceId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "checksum": "sha256:e9dfb54a0f3113aa83d7efc718fa2035ed9b627cbd11e205af80e5b9af342940",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "locatorScheme": "text-span",
+              "locator": "chars:220-279",
+              "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+              "stance": "supports"
+            }
+          ],
+          "confidenceComponents": {
+            "name": 0.8
+          }
+        }
+      ]
+    }
+  }
+}

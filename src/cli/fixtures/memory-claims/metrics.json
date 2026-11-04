@@ -1,0 +1,58 @@
+{
+  "after": {
+    "claimsProposed": 8,
+    "decisions": 8,
+    "reviewSeconds": 180,
+    "reviewSecondsPerCaughtDefect": 90,
+    "reviewTimedDecisions": 3,
+    "reviewer": {
+      "annotated": 0,
+      "confirmed": 1,
+      "corrected": 1,
+      "decisions": 3,
+      "defectsCaught": 2,
+      "held": 0,
+      "pending": 1,
+      "rejected": 1,
+      "unmatched": 1
+    },
+    "routed": 4,
+    "routedByRule": {
+      "consequential-supersession": 1,
+      "contested-by-accumulation": 2,
+      "low-extraction-agreement": 2
+    },
+    "routedShare": 0.5,
+    "runId": "memory-run-1",
+    "schema_version": "1.0",
+    "uncontested": 4
+  },
+  "before": {
+    "claimsProposed": 8,
+    "decisions": 8,
+    "reviewSeconds": null,
+    "reviewSecondsPerCaughtDefect": null,
+    "reviewTimedDecisions": 0,
+    "reviewer": {
+      "annotated": 0,
+      "confirmed": 0,
+      "corrected": 0,
+      "decisions": 0,
+      "defectsCaught": 0,
+      "held": 0,
+      "pending": 4,
+      "rejected": 0,
+      "unmatched": 0
+    },
+    "routed": 4,
+    "routedByRule": {
+      "consequential-supersession": 1,
+      "contested-by-accumulation": 2,
+      "low-extraction-agreement": 2
+    },
+    "routedShare": 0.5,
+    "runId": "memory-run-1",
+    "schema_version": "1.0",
+    "uncontested": 4
+  }
+}

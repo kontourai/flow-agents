@@ -969,3 +969,14 @@ as `NO_CONVERSATION` rather than blocked as drift.
 review, activation for context consumers, observed effects and retirement from
 ordinary Knowledge record storage status. It is exposed through the declared
 `knowledge.learning-lifecycle` adapter and public package exports.
+
+## Memory claims and routed review
+
+[The memory claim contract](memory-claims.md) defines the claim shape handed to Traverse as
+a caller-owned schema, the routed-review policy that sends only contradictions,
+consequential supersessions, entity changes, low-agreement extractions and visibility
+widenings to Survey review, the Flow evidence that makes each routing decision
+recomputable, and the per-run metrics. Uncontested claims are recorded as `proposed`,
+recallable and labelled unreviewed; `presentMemoryClaims` never shows a claim without
+its posture. It is exposed through the declared `knowledge.memory-claims` adapter and
+the `memory-claims`, `memory-routing` and `memory-routing-flow` package exports.
