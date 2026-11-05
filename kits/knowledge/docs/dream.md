@@ -258,13 +258,15 @@ id is the sitting's working-directory name. Nothing else decides scope.
   from `dream/index.js`, and both store adapters accept the option. Any host that erases must open
   its store this way. Every `purge` (and `purgeProposal`, where the package has it) then does this:
   1. Opens the gate (`purging`, new token) and makes it durable **before** the store is touched. If
-     the gate cannot be opened or synced to disk, the purge does not run.
+     the gate cannot be opened or synced to disk (a permission or I/O error), the purge does not run.
+     A platform that cannot sync a directory at all is the one exception: it skips the sync.
   2. Runs the purge.
   3. Deletes the brief files, then settles the gate with another new token, whether the purge returned
      or threw. A file that cannot be deleted is reported through `onScrub` and does not fail the
      purge, because the token already stops it being served. If the gate itself cannot be confirmed
-     settled, the purge throws `PURGE_GATE_NOT_SETTLED`; briefs compiled before the purge stay refused
-     either way, but the new gate may already allow fresh briefs.
+     settled, a purge that succeeded throws `PURGE_GATE_NOT_SETTLED`, and a purge that failed throws its own
+     error with the settle error attached as `gateSettleError`. Briefs compiled before the purge stay
+     refused either way, but the new gate may already allow fresh briefs.
 
   Guarantees:
   - A brief compiled before the purge is never served, even if its file is put back (a restored
