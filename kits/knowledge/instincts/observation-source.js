@@ -26,7 +26,8 @@ export function ingestObservationSources(sources, saved, seen, toResidue, { isol
     try {
     const key = `source:${source.sourceId}`;
     const savedSource = Object.hasOwn(saved, key) ? saved[key] : undefined;
-    if (savedSource !== undefined && (!savedSource || typeof savedSource !== 'object' || !Object.hasOwn(savedSource, 'project') || savedSource.project !== source.project)) throw new Error('observation scope changed; reconcile the source before retrying');
+    if (savedSource?.version === 1 && savedSource.sourceId === source.sourceId) throw Object.assign(new Error('earlier draft cursor needs scope reconciliation'), { code: 'OBSERVATION_CURSOR_LEGACY' });
+    if (savedSource !== undefined && (!savedSource || typeof savedSource !== 'object' || !Object.hasOwn(savedSource, 'project') || savedSource.project !== source.project)) throw Object.assign(new Error('observation scope changed; reconcile the source before retrying'), { code: 'OBSERVATION_SCOPE_CHANGED' });
     const old = savedSource?.cursor;
     if (savedSource !== undefined && (!old || typeof old !== 'object' || old.version !== 1 || old.sourceId !== source.sourceId || !Number.isSafeInteger(old.lines) || old.lines < 0 || !/^[a-f0-9]{64}$/.test(old.digest ?? ''))) throw new Error('invalid observation cursor');
     const result = importObservationSource(source.importer, source.data, { sourceId: source.sourceId, maxMalformed: 0, ...(old ? { cursor: old } : {}) });
@@ -43,7 +44,7 @@ export function ingestObservationSources(sources, saved, seen, toResidue, { isol
       const residue = toResidue(event, source.project);
       const observedProject = residue.provenance.projectId;
       if (projectIdentity === undefined || projectIdentity === null) projectIdentity = observedProject;
-      else if (observedProject !== null && projectIdentity !== observedProject) throw new Error('observation project identity changed; reconcile the source');
+      else if (observedProject !== null && projectIdentity !== observedProject) throw Object.assign(new Error('observation project identity changed; reconcile the source'), { code: 'OBSERVATION_PROJECT_CHANGED' });
       if (ids.has(residue.sittingId)) throw new Error('duplicate observation event'); ids.add(residue.sittingId);
       if (Object.hasOwn(seen, residue.sittingId)) { if (seen[residue.sittingId] !== residue.contentHash) throw new Error('previously processed observation changed'); }
       else residues.push(residue);
@@ -53,7 +54,8 @@ export function ingestObservationSources(sources, saved, seen, toResidue, { isol
     batches.push({ key, cursor: { project: source.project, ...(projectIdentity === undefined ? {} : { projectIdentity }), cursor: nextCursor }, partial: result.partial, residues, eventIds: [...ids] });
     } catch (error) {
       if (!isolateFailures) throw error;
-      blocked.push({ sourceId: source.sourceId, reason: 'OBSERVATION_SOURCE_BLOCKED' });
+      const known = ['OBSERVATION_CURSOR_LEGACY', 'OBSERVATION_SCOPE_CHANGED', 'OBSERVATION_PROJECT_CHANGED'];
+      blocked.push({ sourceId: source.sourceId, reason: known.includes(error?.code) ? error.code : 'OBSERVATION_SOURCE_BLOCKED' });
     }
   }
   return { cursors, batches, blocked };

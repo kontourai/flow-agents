@@ -53,6 +53,9 @@ test('planned source and compiled shapes retain confidence through real Corpus r
   const value = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: '2026-01-02T00:00:00Z', confidence_at: '2026-01-02T00:00:00Z', confidence: 0.1234567, source_ids: [id] };
   const plan = planLegacyInstinct(value, [source], 'fixture');
   assert.equal(decodeEnvelope(plan.candidate.body).sitting.visibilityKey, visibilityKey(undefined));
+  const visiblePlan = planLegacyInstinct(value, [source], 'fixture', { visibility: { kind: 'public' } });
+  assert.equal(decodeEnvelope(visiblePlan.candidate.body).sitting.visibilityKey, visibilityKey({ kind: 'public' }));
+  assert.notEqual(decodeEnvelope(visiblePlan.candidate.body).sitting.visibilityKey, decodeEnvelope(plan.candidate.body).sitting.visibilityKey);
   for (const raw of [plan.legacyRaw, ...plan.observationRaw]) {
     const proposal = await store.proposeCreate(raw, 'migrator', { agent: 'migrator', proposal: 'source' }, { requestKey: `fixture:${raw.id}` });
     await store.applyCreate(proposal, 'reviewer');

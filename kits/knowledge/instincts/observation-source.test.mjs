@@ -41,3 +41,9 @@ test('observation ingestion asks the importer to refuse malformed lines', () => 
   const result = ingestObservationSources([{ sourceId, project: null, data: '', importer }], {}, {}, () => { throw new Error('no events'); });
   assert.equal(result.batches.length, 1);
 });
+
+test('an earlier draft cursor is reported as needing scope reconciliation', () => {
+  const sourceId = 'fixture'; const old = { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) };
+  const result = ingestObservationSources([{ sourceId, project: null, data: '', importer: () => { throw new Error('must not run'); } }], { [`source:${sourceId}`]: old }, {}, () => { throw new Error('must not map'); }, { isolateFailures: true });
+  assert.equal(result.batches.length, 0); assert.equal(result.blocked[0].reason, 'OBSERVATION_CURSOR_LEGACY'); assert.deepEqual(result.cursors[`source:${sourceId}`], old);
+});
