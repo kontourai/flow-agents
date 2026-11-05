@@ -20,7 +20,7 @@ assert(deterministic.action.beforeReview.outcome === "refused" && deterministic.
 assert(deterministic.action.afterReview.outcome === "allowed", "reviewed grounding did not allow the action");
 assert(deterministic.action.drifted.outcome === "refused" && deterministic.action.drifted.gaps.some((gap) => gap.kind === "source-not-current") && deterministic.action.drifted.dimensions[0].sourceState.extractedValueChanged === false, "unchanged-value drift was not a typed visible refusal");
 assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && deterministic.failures.tamperedPreparedContent.diagnostics[0].kind === "digest-mismatch", "tampered content did not fail at a typed boundary");
-// traverse,survey,lookout,surface -- pinned so that moving a public dependency is a
+// forage,traverse,survey,lookout,surface -- pinned so that moving a public dependency is a
 // deliberate edit here rather than a silent drift. surface: 2.13.0 -> 2.17.0 with
 // kontourai/flow-agents#1362, which collapsed its duplicate devDependencies/
 // optionalDependencies declarations into one exact dependencies entry. Safe for this
@@ -32,7 +32,10 @@ assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && 
 // decision made without claims, so run.mjs now supplies the claim it would publish.
 // Survey 8.4.0 supplies the reviewed public producer/session contracts.
 // Knowledge uses isolated Surface 6.3.0; the shared workflow retains Surface 5.0.0.
-assert(Object.values(deterministic.revisions).join(",") === "0.19.1,8.4.0,0.3.2,5.0.0", "public revisions are not pinned");
+// Lookout 0.8.9 requires acquisition's exact snapshot store and the recorder's
+// last extracted reference. The reference now uses Forage's real in-memory
+// store/ref builder/resolver and Lookout's extractedSnapshotRef contract.
+assert(Object.values(deterministic.revisions).join(",") === "1.0.2,5.0.3,8.4.0,0.8.9,5.0.0", "public revisions are not pinned");
 assert(!deterministic.action.afterReview.gaps.some((gap) => gap.kind === "claims-not-supplied" || gap.kind === "value-mismatch"), "the reviewed claim value is not bound to the decision");
 assert(deterministic.failures.valueMismatch.outcome === "refused" && deterministic.failures.valueMismatch.gaps.some((gap) => gap.kind === "value-mismatch"), "a claim publishing a value other than the reviewed one was not refused with value-mismatch");
 assert(live.liveTelemetry.provider === "reference-provider-adapter" && live.liveTelemetry.model === "reference-provider-model" && live.liveTelemetry.taskDigest === deterministic.extraction.taskDigest && live.liveTelemetry.usageTokens === 42 && live.liveTelemetry.latencyMs >= 0 && live.liveTelemetry.fixtureRevision === "reviewed-grounding-fixture/v1", "optional live execution telemetry is incomplete or unbound");
