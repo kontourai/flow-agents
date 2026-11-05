@@ -413,7 +413,7 @@ test("the invocation contract a host scheduler binds to is pinned: ids, exports,
   const host = hostFor(ws, noApplyStore(new FakeCorpusStore(ws.memoryRoot)), await scriptedExtract());
   const report = await index.runDream(host, runOptions(ws, { trigger: "station-scheduler" }));
   assert.deepEqual(Object.keys(report).sort(), [
-    "brief_excluded", "briefs", "claims", "cursor", "dry_run", "finished_at", "ingest", "metrics", "obsolete_briefs_removed", "receipts",
+    "brief_excluded", "briefs", "briefs_held", "claims", "cursor", "dry_run", "finished_at", "ingest", "metrics", "obsolete_briefs_removed", "receipts",
     "redaction_hits", "review_items", "run_id", "schema_version", "sittings", "started_at", "status", "trigger", "unreadable_proposals",
   ]);
   assert.equal(report.schema_version, "1.0");

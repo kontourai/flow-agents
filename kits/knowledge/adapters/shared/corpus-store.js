@@ -16,7 +16,24 @@ export function openCorpusStore(selection, options, exportName) {
   if (!selection.services || typeof selection.services !== "object") {
     throw new Error("Corpus Store selection requires host coordination services");
   }
-  return new Adapter({ ...selection.services, ...options });
+  const store = new Adapter({ ...selection.services, ...options });
+  return selection.purgeFence === undefined ? store : fencePurges(store, selection.purgeFence);
+}
+
+/**
+ * Run every erasing verb the store has inside the host's fence, so a projection the host built from the store
+ * (a compiled brief, an index) is invalidated by the same call that erases. The fence is
+ * `async (run) => result`: it opens before `run` touches the store and must not let a purge go unfenced. The
+ * kit's brief fence is `createPurgeFence` in `dream/purge-gate.js`. Read-only previews are not fenced.
+ */
+function fencePurges(store, fence) {
+  if (typeof fence !== "function") throw new Error("Corpus Store purgeFence must be a function");
+  for (const verb of ["purge", "purgeProposal"]) {
+    if (typeof store[verb] !== "function") continue;
+    const erase = store[verb].bind(store);
+    store[verb] = (...args) => fence(() => erase(...args));
+  }
+  return store;
 }
 
 /** Legacy stores do not have a safe purge implementation. */
