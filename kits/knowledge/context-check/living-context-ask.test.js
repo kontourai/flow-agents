@@ -998,6 +998,9 @@ describe("the block layer: a flat document is read as prose, anything contextual
       ["a table row with a leading pipe inside a list item", "- P\n  | a\n  | ---\n  The **key** is reserved.\n", "The key is reserved."],
       ["a table straight after a list item", "- P\n|a|\n|---|\nThe **key** is reserved.\n", "P The key is reserved."],
       ["a wide gap after a bullet", "-    X\nThe **key** is\nreserved.\n", "X The key is reserved."],
+      ["indented code after a rule", "***\n    K\nR\n", "K R"],
+      ["a deep continuation inside an item", "- P\n    deep\nR\n", "P deep R"],
+      ["a seven-hash line inside an item", "- P\n####### H\nR\n", "P ####### H R"],
       ["an indented paragraph after a heading", "# Title\n  The **key** is reserved.\n", "The key is reserved."],
       ["indented code", "Intro.\n\n    The **key** is\n    reserved.\n", "The key is reserved."],
       ["an indented code marker after a bullet", "-     The **key** is\n      reserved.\n", "The key is reserved."],
@@ -1026,6 +1029,12 @@ describe("the block layer: a flat document is read as prose, anything contextual
     // The fallback is exactly the version 2 reading: not even a heading marker is taken off a line.
     assert.equal(await verdict("**Enable** signing.", "> Quote\n# **Enable** signing.\n"), "not-addressed");
     assert.equal(await verdict("# **Enable** signing.", "> Quote\n# **Enable** signing.\n"), "supported");
+    // A claim made only of markers and a full stop is still malformed in the fallback.
+    assert.equal((await verifier.verify({ candidateId: "c", value: "*.", evidence: [{ id: "e", excerpt: "> Q\n*\n", locator: "l" }] })).result, "abstain");
+    // A paragraph whose markup the reader declined is read line by line, never joined: its lines are not yet read as the page shows them.
+    assert.equal(await verdict("[x] **Y**", "[x]\n**Y**\n"), "not-addressed");
+    assert.equal(await verdict("[x]", "[x]\n**Y**\n"), "supported", "...but each line is still a line");
+    assert.equal(await verdict("snake_case word and bold here.", "snake_case word\nand **bold** here.\n"), "supported", "an intraword underscore is not a reason to decline");
     // A claim may leave off a sentence's closing full stop but may not add another one, in a flat document and in the fallback alike.
     assert.equal(await verdict("P..", "> Q\nP.\n"), "not-addressed");
     assert.equal(await verdict("Para one..", "Para one.\n\nPara **two**.\n"), "not-addressed");
@@ -1061,6 +1070,13 @@ describe("the block layer: a flat document is read as prose, anything contextual
     assert.deepEqual(documentUnits("Intro words\nmore words.\n| a |\n|---|\n| c |\n\nAfter.\n").map((unit) => unit.sentences), [["After."]], "the half paragraph before a table row is dropped");
     assert.equal(await verdict(`${"Alpha stays. ".repeat(400)}Omega stays.`, `${"Alpha stays. ".repeat(400)}Omega stays.\n`), "supported", "...a statement beyond the bound is still a whole physical line");
     assert.equal(await verdict(`${"Alpha stays. ".repeat(400)}Omega stays.`, `${"Alpha stays. ".repeat(399)}\nAlpha stays. Omega stays.\n`), "not-addressed", "...but is not matched as a sentence run");
+  });
+
+  test("a very long line of spaces costs one pass", async () => {
+    const started = Date.now();
+    assert.equal(await verdict("Nothing matches this.", `${" ".repeat(65000)}x\n`), "not-addressed");
+    assert.equal(isFlatDocument(`- item\n${" ".repeat(65000)}x\n`), true);
+    assert.ok(Date.now() - started < 500, `${Date.now() - started} ms`);
   });
 
   test("a fence at column 0 swallows its lines and keeps nothing else out; its closer must match", () => {

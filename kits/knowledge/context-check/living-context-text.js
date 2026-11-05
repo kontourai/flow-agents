@@ -18,7 +18,8 @@
  * the closer is not followed by a letter or digit, so that a CommonMark renderer reads it the same way. Everything else that
  * could be markup (a nested pair, a run of three markers, an unpaired marker, an escape, an entity reference, a double-backtick
  * span, an image, HTML, an intraword `*`, GFM strikethrough, which CommonMark does not have) makes the WHOLE paragraph be taken
- * exactly as written: it then matches only a claim that is a verbatim sentence of its source, and otherwise the verifier abstains.
+ * exactly as written and read one physical line at a time: it then matches only a claim that is a verbatim line (or a sentence of a single
+ * line) of its source, and otherwise the verifier abstains.
  * Block structure is read the same cautious way (`documentUnits`): only paragraphs, list items and headings are prose; indented
  * and fenced code (also inside a quote), tables, HTML blocks, thematic breaks, setext underlines and link definitions are not. Nothing is ever rescanned, so removing one marker cannot turn another into formatting. A lone `_` inside
  * a word (`snake_case`) and a lone `*` between spaces are text, as in CommonMark. The scan is one pass over the paragraph.
@@ -74,30 +75,30 @@ const OPENS_AFTER = new Set([" ", "(", "[", "{", "\"", "'"]);
  * The text a paragraph displays, for the forms in the module comment; the paragraph itself, unchanged, when it holds anything else
  * that could be markup. Never returns text that a CommonMark renderer would display differently.
  */
-export function renderInline(text) {
-  if (ENTITY.test(text)) return text; // `&amp;` displays `&`: a reference is not text a claim can match without reading it
+function renderOrNull(text) {
+  if (ENTITY.test(text)) return null; // `&amp;` displays `&`: a reference is not text a claim can match without reading it
   let out = "";
   for (let i = 0; i < text.length;) {
     const c = text[i];
     if (!MARKUP.test(c) && c !== "!") { out += c; i++; continue; }
     if (c === "!") {
-      if (text[i + 1] === "[") return text; // an image displays its alt text, not "!"
+      if (text[i + 1] === "[") return null; // an image displays its alt text, not "!"
       out += c; i++; continue;
     }
     if (c === "`") {
-      if (text[i + 1] === "`") return text;
+      if (text[i + 1] === "`") return null;
       const close = text.indexOf("`", i + 1);
       const content = close === -1 ? "" : text.slice(i + 1, close);
-      if (close === -1 || content === "" || text[close + 1] === "`" || /^\s|\s$/.test(content)) return text;
+      if (close === -1 || content === "" || text[close + 1] === "`" || /^\s|\s$/.test(content)) return null;
       out += content; i = close + 1; continue;
     }
     if (c === "[") {
       const close = text.indexOf("]", i + 1);
       const label = close === -1 ? "" : text.slice(i + 1, close);
-      if (close === -1 || label === "" || MARKUP.test(label) || text[close + 1] !== "(") return text;
+      if (close === -1 || label === "" || MARKUP.test(label) || text[close + 1] !== "(") return null;
       const end = text.indexOf(")", close + 2);
       const target = end === -1 ? "" : text.slice(close + 2, end);
-      if (end === -1 || !/^[^\s()\\<>`*_[\]]*$/.test(target)) return text;
+      if (end === -1 || !/^[^\s()\\<>`*_[\]]*$/.test(target)) return null;
       out += label; i = end + 1; continue;
     }
     if (c === "*" || c === "_") {
@@ -108,18 +109,22 @@ export function renderInline(text) {
       // Text, as in CommonMark: a lone `_` inside a word, and a lone marker between spaces.
       if (run === 1 && ((c === "_" && isAlnum(prev) && isAlnum(next)) || (isSpace(prev) && isSpace(next)))) { out += c; i++; continue; }
       const width = run === 1 || run === 2 ? run : 0;
-      if (width === 0 || (prev !== undefined && !OPENS_AFTER.has(prev)) || !isAlnum(next)) return text;
+      if (width === 0 || (prev !== undefined && !OPENS_AFTER.has(prev)) || !isAlnum(next)) return null;
       const close = text.indexOf(c, i + width);
-      if (close === -1) return text;
+      if (close === -1) return null;
       let closeRun = 1;
       while (text[close + closeRun] === c) closeRun++;
       const content = text.slice(i + width, close);
-      if (closeRun !== width || MARKUP.test(content) || isSpace(content[content.length - 1]) || isAlnum(text[close + width])) return text;
+      if (closeRun !== width || MARKUP.test(content) || isSpace(content[content.length - 1]) || isAlnum(text[close + width])) return null;
       out += content; i = close + width; continue;
     }
-    return text; // `~`, `\`, `<`, `>`, `]`: strikethrough (an extension), an escape, HTML, a quote marker or a stray bracket
+    return null; // `~`, `\`, `<`, `>`, `]`: strikethrough (an extension), an escape, HTML, a quote marker or a stray bracket
   }
   return out;
+}
+
+export function renderInline(text) {
+  return renderOrNull(text) ?? text;
 }
 
 const squash = (text) => text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -154,7 +159,7 @@ function splitSentences(text) {
  * block, a reference definition, a nested list item, indented code, a setext underline, a lone CR or a NUL), it is read one physical
  * line per unit, which is the version 2 rule and nothing more.
  *
- * @returns {{kind: "heading"|"item"|"paragraph", sentences: string[]}[]}
+ * @returns {{kind: "heading"|"item"|"paragraph", sentences: string[], standalone?: boolean}[]}
  */
 export function documentUnits(text) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -195,7 +200,13 @@ export function documentUnits(text) {
       if (heading) current = undefined;
     } else current.parts.push(body);
   }
-  return units.map(({ kind, parts }) => ({ kind, sentences: splitSentences(renderInline(parts.join(" "))).map((sentence) => sentence.trim()).filter(Boolean) }));
+  return units.map(({ kind, parts }) => {
+    const joined = parts.join(" ");
+    const rendered = renderOrNull(joined);
+    // A paragraph the renderer declined is taken as written, line by line: joining physical lines is only safe once their markup has been read.
+    const sentences = rendered === null && parts.length > 1 ? parts.map((part) => part.trim()).filter(Boolean) : splitSentences(rendered ?? joined).map((sentence) => sentence.trim()).filter(Boolean);
+    return { kind, sentences, ...(rendered === null && parts.length > 1 ? { standalone: true } : {}) }; // standalone: each line stands alone, none joins another
+  });
 }
 
 /** Whether `documentUnits` reads this document as prose (the flat reading) rather than one line per unit. */
@@ -229,13 +240,14 @@ function isContextual(lines, start) {
     if (POISON.some((pattern) => pattern.test(line))) return true;
     if (/^ {2,}(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$)/.test(line)) return true; // a heading or a rule inside a list item (indented): it resets the item's paragraph
     if (SETEXT_ANY.test(line) && !BLANK.test(previous)) return true; // an underline, at any indentation, turns the paragraph above into a heading
-    if (/^ {2,}.*\|/.test(line)) return true; // an indented table row (a table inside a list item)
+    if (/^ {2}.*\|/.test(line)) return true; // an indented table row (a table inside a list item)
+    if (inItem && (/^ {4}\S/.test(line) || /^#{7}/.test(line))) return true; // a deep continuation or a 7-hash line inside an item: renderers disagree on where the item's content starts
     if (inItem && line.includes("|")) return true; // a table row straight after a list item, with no blank line between: the table may belong to the item
     if (BLANK.test(line)) inItem = false;
     else if (LIST_MARKER.test(line)) inItem = true;
     if (/^ {2}/.test(line) && (BLANK.test(previous) || previousIsHeading)) return true; // indented code, or a loose list item's next paragraph: both depend on the item above
     previousIsHeading = ATX.test(line);
-    previous = line;
+    previous = THEMATIC.test(line) ? "" : line; // a rule is not a paragraph: what follows it starts a block
   }
   return false;
 }
@@ -256,8 +268,9 @@ function lineUnits(lines) {
 export function statementInUnits(units, statement) {
   const wanted = cleanStatement(statement);
   if (wanted === "" || wanted.length > MAX_STATEMENT_CHARS) return false;
-  for (const { sentences } of units) {
+  for (const { sentences, standalone } of units) {
     const keys = sentences.map(squash);
+    if (standalone) { if (keys.some((key) => withoutFinalStop(key) === wanted)) return true; continue; }
     const starts = [];
     const ends = new Set();
     let offset = 0;
