@@ -788,7 +788,8 @@ describe("review round 5", () => {
       assert.equal(await verdict(`A${mark}`, `_A_${mark}\n`), "not-addressed", JSON.stringify(mark));
       assert.equal(await verdict(`A${mark}`, `*A*${mark}\n`), "not-addressed", JSON.stringify(mark));
     }
-    for (const after of [".", ")", " B", "\u2014x", "\u00bb"]) assert.equal(await verdict(`A${after}`, `_A_${after}\n`), "supported", `closes before ${JSON.stringify(after)}`);
+    assert.equal(await verdict("Use a\u0301_b here.", "First. Use a\u0301_b here.\n"), "supported", "an underscore between two non-space, non-punctuation characters is text");
+        for (const after of [".", ")", " B", "\u2014x", "\u00bb"]) assert.equal(await verdict(`A${after}`, `_A_${after}\n`), "supported", `closes before ${JSON.stringify(after)}`);
     assert.equal(await verdict("Use allow here.", "Use ~~allow~~ here.\n"), "not-addressed", "strikethrough is a GFM extension, not rendered");
     assert.equal(await verdict("Use snake_case_name here.", "Use snake_case_name here.\n"), "supported", "an intraword underscore is text");
     assert.equal(await verdict("Total is 2*3*4.", "Total is 2*3*4.\n"), "supported", "intraword asterisks are text on both sides");
