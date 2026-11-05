@@ -29,7 +29,7 @@ async function fixture(t, { observationAt = '2026-01-01T00:00:00Z', baselineAt =
 
 const plan = ({ store, compiled, input }) => planClusterInstincts({ store, cluster: [compiled], inputs: [input] });
 test('unreviewed confidence changes are refused', async (t) => {
-  const f = await fixture(t); await f.store.update(f.compiled, { confidence: 0.5 }, { agent: 'other' });
+  const f = await fixture(t, { metadataConfidence: 0.5 }); await f.store.update(f.compiled, { confidence: 0.5 }, { agent: 'other' });
   await assert.rejects(plan(f), /active reviewed compiled claim/);
 });
 test('the claim source must belong to the original baseline', async (t) => {
