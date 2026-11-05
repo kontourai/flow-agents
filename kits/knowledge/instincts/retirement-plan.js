@@ -12,7 +12,7 @@ export const retirementPlan = Object.freeze({
     'After owner approval, migrate into the authorized memory root. Verify record retrieval, provenance and brief quality before retiring anything.',
     'After independent verification and owner approval, save the old job configuration, disable that job using its scheduler, and preserve the old store as a read-only archive. Do not delete it.',
     'Before rollback, stop the new dream path to avoid two writers. If earlier draft testing wrote version 1.3 proposals, review each: an applied proposal may prevent rollback, and its recovery path is not verified.',
-    'Do not apply pending confidence proposals with an older store version: it may drop confidence. Leave them pending and verify them after upgrading again.',
+    'Do not apply proposals carrying confidence with a Corpus version before 0.1.0-next.3: it may drop confidence. Leave them pending and verify them after upgrading again.',
     'Once a recovery path is confirmed, restore access to the archive and the saved job configuration. How to withdraw migrated proposals remains unverified.',
   ],
   missing: ['live migration command', 'real-store dry run', 'retrieval and brief verification', 'owner approval'],

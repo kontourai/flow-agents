@@ -113,7 +113,7 @@ async function briefItems(store, index, proposerId, proposals) {
       if (!record || record.type !== "raw" || ["retired", "purged"].includes(record.status)) return false;
       const origin = (record.mutation_log ?? []).find((entry) => entry.op === "apply-create" && typeof entry.evidence?.proposal_id === "string");
       const source = origin && proposalsById.get(origin.evidence.proposal_id);
-      if (!source || source.state !== "applied" || source.record_id !== id || !source.reviewer_id || source.reviewer_id === source.proposer_id || source.candidate?.body !== record.body || source.candidate?.type !== "raw") return false;
+      if (!source || source.state !== "applied" || source.record_id !== id || !source.reviewer_id || source.reviewer_id === source.proposer_id || source.candidate?.body !== record.body || source.candidate?.type !== "raw" || source.candidate?.category !== record.category) return false;
       if (id === envelope.claim.source.ref) {
         const range = /^chars:(\d+)-(\d+)$/.exec(envelope.claim.source.locator);
         const start = range ? Number(range[1]) : NaN; const end = range ? Number(range[2]) : NaN;
@@ -137,7 +137,7 @@ async function briefItems(store, index, proposerId, proposals) {
       if (proposal.state === "pending") return "pending";
       if (proposal.state !== "applied" || !proposal.reviewer_id || proposal.reviewer_id === proposerId || proposal.reviewer_id === proposal.proposer_id) return "invalid";
       const record = store.get && proposal.record_id ? await store.get(proposal.record_id) : null;
-      return record && !["retired", "purged"].includes(record.status) && record.body === proposal.candidate.body && (record.mutation_log ?? []).some((entry) => entry.op === "apply-create" && entry.evidence?.proposal_id === proposal.id) ? "approved" : "invalid";
+      return record && !["retired", "purged"].includes(record.status) && record.type === proposal.candidate.type && record.category === proposal.candidate.category && record.body === proposal.candidate.body && (record.mutation_log ?? []).some((entry) => entry.op === "apply-create" && entry.evidence?.proposal_id === proposal.id) ? "approved" : "invalid";
     } catch { return "invalid"; }
   }
   for (const { proposal, envelope } of index.byClaim.values()) {
@@ -146,13 +146,13 @@ async function briefItems(store, index, proposerId, proposals) {
       continue;
     }
     if (proposal.candidate?.type === "compiled" && !(await approvedCompiledSources(proposal, envelope))) {
-      excluded.observation_unreviewed += 1;
+      excluded.observation_unreviewed = (excluded.observation_unreviewed ?? 0) + 1;
       continue;
     }
     let observationSourceApproved;
     if (envelope.sitting.id.startsWith("tool-event:")) {
       const state = await observationState(envelope);
-      if (state !== "approved") excluded.observation_unreviewed += 1;
+      if (state !== "approved") excluded.observation_unreviewed = (excluded.observation_unreviewed ?? 0) + 1;
       if (state === "invalid" || state === "rejected") continue;
       observationSourceApproved = state === "approved";
     }
@@ -316,7 +316,7 @@ export async function runDream(host, options = {}) {
     const observations = host.observationSources === undefined ? null : ingestObservationSources(host.observationSources, cursor.observations ?? {}, cursor.sittings, toolEventResidue, { isolateFailures: true });
     if (observations) {
       ingest.residues.push(...observations.batches.flatMap((batch) => batch.residues));
-      report.ingest.observations = { sources: observations.batches.length, events_returned: observations.batches.reduce((n, batch) => n + batch.eventIds.length, 0), events_emitted: observations.batches.reduce((n, batch) => n + batch.residues.length, 0), partial_sources: observations.batches.filter((batch) => batch.partial > 0).length, blocked: observations.blocked.map(({ sourceId, reason }) => ({ source_ref: `sha256:${sha256(sourceId)}`, reason })) };
+      report.ingest.observations = { sources: observations.batches.length, events_returned: observations.batches.reduce((n, batch) => n + batch.eventIds.length, 0), events_emitted: observations.batches.reduce((n, batch) => n + batch.residues.length, 0), partial_sources: observations.batches.filter((batch) => batch.partial > 0).length, blocked: observations.blocked.map(({ sourceId, reason, errorClass }) => ({ source_ref: `sha256:${sha256(sourceId)}`, reason, error_class: errorClass })) };
     }
     report.sittings.seen = ingest.residues.length;
     report.redaction_hits = redactionHits(ingest.residues);

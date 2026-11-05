@@ -16,6 +16,6 @@ test('plan and help print without creating files or executing retirement', (t) =
   }
   assert.equal(retirementPlan.executed, false); assert.equal(retirementPlan.status, 'not-ready');
   assert.match(retirementPlan.steps.join(' '), /stop the new dream path/);
-  assert.match(retirementPlan.steps.join(' '), /older store version/);
+  assert.match(retirementPlan.steps.join(' '), /before 0\.1\.0-next\.3/);
   assert.equal(spawnSync(process.execPath, [command, '--apply'], { cwd }).status, 2);
 });

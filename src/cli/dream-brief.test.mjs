@@ -591,6 +591,10 @@ test('compiled claims require independently reviewed sources supporting the exce
   const selfApproved = JSON.parse(proposalBefore); selfApproved.reviewer_id = selfApproved.proposer_id; fs.writeFileSync(file, JSON.stringify(selfApproved));
   assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
   fs.writeFileSync(file, proposalBefore);
+  store.records.set(plan.legacyRaw.id, { ...recordBefore, category: 'memory.other' });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1, 'the source category must match its approved proposal');
+  store.records.set(plan.legacyRaw.id, { ...recordBefore, body: 'different source text' });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1, 'the source record must match its approved proposal');
   const changed = JSON.parse(proposalBefore); changed.candidate.body = 'different source text'; fs.writeFileSync(file, JSON.stringify(changed));
   store.records.set(plan.legacyRaw.id, { ...recordBefore, body: changed.candidate.body });
   assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
@@ -608,4 +612,17 @@ test('an out-of-range stored confidence cannot enter a brief', async (t) => {
   await store.applyCreate(id, 'reviewer');
   const report = await runDream(hostFor(ws, store, await scriptedExtract()), runOptions(ws));
   assert.equal(report.brief_excluded.unverified, 1); assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+});
+
+test('an orphaned tool-event claim is counted as unverified rather than producing a null count', async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import('../../kits/knowledge/dream/envelope.js');
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, ''); const store = new FakeCorpusStore(ws.memoryRoot);
+  const sittingId = `tool-event:${'a'.repeat(64)}`;
+  const c = memoryClaim({ subject: { type: 'service', id: 'fixture' }, claimType: 'knowledge.memory-claim', property: 'pattern', value: 'fixture', speaker: 'unknown', source: { ref: sittingId, locator: 'chars:0-7', excerpt: 'fixture', observedAt: NOW_ISO }, posture: 'proposed', visibility: { kind: 'public' } });
+  const entry = { claim: c, agreement: null, project: null }; const decision = routeMemoryChange({ type: 'claim', claim: c, current: [], agreement: null, sourceVisibility: { kind: 'public' } });
+  const body = encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: sittingId, contentHash: 'fixture', visibilityKey: visibilityKey(c.visibility) } });
+  await store.proposeCreate({ type: 'raw', title: 'fixture', category: 'memory.claim', body }, 'another-producer', { agent: 'another-producer', proposal: 'fixture' });
+  const report = await runDream(hostFor(ws, store, await scriptedExtract()), runOptions(ws));
+  assert.equal(report.brief_excluded.observation_unreviewed, 1);
+  assert.equal(JSON.parse(JSON.stringify(report)).brief_excluded.observation_unreviewed, 1);
 });

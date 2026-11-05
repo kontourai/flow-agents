@@ -1291,6 +1291,10 @@ test('a tool-derived claim needs an independently applied source before briefing
   assert.equal(report.brief_excluded.observation_unreviewed, 0);
   assert.equal(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries.length, 1);
   const sourceRecord = store.records.get(rawId);
+  for (const change of [{ type: 'compiled' }, { category: 'memory.other' }]) {
+    store.records.set(rawId, { ...sourceRecord, ...change });
+    assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
+  }
   store.records.set(rawId, { ...sourceRecord, body: 'tampered' });
   report = await runDream(host, runOptions(ws));
   assert.equal(report.brief_excluded.observation_unreviewed, 1);
@@ -1348,7 +1352,7 @@ test('a changed observation at the same source line fails without advancing the 
   assert.equal(fs.existsSync(ws.cursorFile), false); assert.equal((await store.listProposals()).length, 2);
 });
 
-test('a source changing its observed project identity fails before another write', async (t) => {
+test('a changed observation project identity is blocked before another write', async (t) => {
   const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
   const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-project-change';
   const importer = (_data, options) => {
@@ -1390,4 +1394,30 @@ test('a blocked observation source holds only its own cursor while a healthy sou
   const cursor = JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8'));
   assert.equal(cursor.observations[`source:${badId}`], undefined); assert.equal(cursor.observations[`source:${goodId}`].cursor.lines, 1);
   const second = await runDream(host, runOptions(ws)); assert.equal(second.status, 'blocked'); assert.equal((await store.listProposals()).length, 2);
+});
+
+test('an unknown project field does not erase an established source identity', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-project-gap';
+  const importer = (_data, options) => {
+    const ordinal = options.cursor ? 2 : 1; const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+    return { events: [{ id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: ordinal === 1 ? 'known' : '', projectName: 'Fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." }], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: ordinal, digest: 'a'.repeat(64) } };
+  };
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: 'fixture', data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws)); await runDream(host, runOptions(ws));
+  const saved = JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`];
+  assert.equal(saved.projectIdentity, createHash('sha256').update('known').digest('hex')); assert.equal(saved.cursor.lines, 2);
+});
+
+test('an importer cannot change a source scope after host admission', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-scope-snapshot'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'Fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const source = { sourceId, project: 'approved', data: 'fixture' };
+  source.importer = () => { source.project = 'changed'; return { events: [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } }; };
+  const host = hostFor(ws, store, extract, { observationSources: [source] }); await runDream(host, runOptions(ws));
+  const proposal = (await store.listProposals()).find((item) => item.candidate.category === 'memory.claim');
+  assert.equal(JSON.parse(proposal.candidate.body).project, 'approved');
+  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].project, 'approved');
 });
