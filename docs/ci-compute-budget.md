@@ -24,6 +24,11 @@ run side by side; the platform's own runner limits are the only ceiling. The one
 shared group left is the Pages callee's own deployment group, which belongs to
 the pinned callee and not to this policy.
 
+Action version updates preserve this admission model: CI uploads use
+`actions/upload-artifact` 7.0.2 and Runtime Compatibility setup uses
+`actions/setup-python` 7.1.0, with the existing workflow groups, runner inventory
+and permissions. A version bump does not establish that a hosted run completed.
+
 ## Why there is no cap
 
 The repository previously bounded participating compute with native job-level
