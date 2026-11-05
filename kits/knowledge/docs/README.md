@@ -488,6 +488,7 @@ A: ANSWERED - at least one record states the sentence quoted below.
 - `replaced by` names the newer record. It is in the same list, usually as the ANSWERED item.
 - `matched` lists the question words the record contains. `covers` is the share of the question they make up, from 0 to 1.
 - The quoted line is the sentence from the record. Trust it only on an ANSWERED item. On an ABSTAINED item it is context.
+- `not in this sentence or the title` lists the question words the quoted sentence leaves out. If one of them carries your meaning (for example "rule" or "decide"), the sentence is probably not your answer.
 
 **ANSWERED** means the quoted sentence is word for word in the cited record at that commit, and the record is current at `--now`. It does not mean the sentence answers your question: the tool matches words and does not understand them. Read the sentence and judge.
 
@@ -524,7 +525,7 @@ Skipped records are listed under `excluded`: repeated ids (every copy), files ov
 
 #### How it picks records
 
-Rare words count more than common ones. A word in every record decides nothing. A title match beats a tag or category match, which beats a body match. A record is picked only when it covers 60% of the question (`--min-coverage`). A question word found in no record counts against every record, so an off-topic question picks nothing. A raw note and a compiled note are ranked the same way. A sentence is quoted only if it, together with the record title, carries at least half of the question's words (`--min-passage-coverage`), counted both by rarity weight and by number of words; two rare words in a long line are not enough. A host can replace the picker (`select`).
+Rare words count more than common ones. A word in every record decides nothing. A title match beats a tag or category match, which beats a body match. A record is picked only when it covers 60% of the question (`--min-coverage`). A question word found in no record counts against every record, so an off-topic question picks nothing. A raw note and a compiled note are ranked the same way. A sentence is quoted only if it, together with the record title, carries at least half of the question's rarity weight (`--min-passage-coverage`). Under that bar a long line that holds only a few of the question's words can still be quoted, so each quoted sentence is followed by the question words it leaves out. If those are the words that carry your meaning, the sentence is not your answer. A host can replace the picker (`select`).
 
 It only considers records this reader may see and that existed at `--now`. A hidden or later record is never scored, quoted or listed as a near miss.
 

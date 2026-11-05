@@ -71,7 +71,10 @@ function render(result) {
     lines.push(`      from ${item.path} [${item.status}${stored}], updated ${item.updated_at}`);
     if (item.superseded_by) lines.push(`      replaced by "${titles.get(item.superseded_by) ?? item.superseded_by}"`);
     lines.push(item.via ? `      shown because it replaces "${titles.get(item.via.replace("successor_of:", "")) ?? item.via.replace("successor_of:", "")}"` : `      matched: ${item.matched_terms.join(", ")} (covers ${item.coverage} of the question)`);
-    if (item.passage) lines.push(`      ${answered ? "" : "context only, not an answer: "}"${item.passage}"`);
+    if (item.passage) {
+      lines.push(`      ${answered ? "" : "context only, not an answer: "}"${item.passage}"`);
+      if (item.missing_terms?.length) lines.push(`      not in this sentence or the title: ${item.missing_terms.join(", ")}`);
+    }
   }
   return lines.join("\n");
 }

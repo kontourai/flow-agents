@@ -182,7 +182,7 @@ describe("#1595: question to claim", () => {
     assert.deepEqual(selectClaimsForQuestion({ question: "what is the?", documents: docs }).terms, [], "a question of stop words has no terms");
   });
 
-  test("a long line that holds two rare question words is not an answer to a question of five", () => {
+  test("a long line that holds two rare question words is quoted, and the words it leaves out are returned beside it", () => {
     const body = "Queues, not loops. Procedure skills the human invokes; gates live in the harness; recurring cheap jobs (daily cron security sweep). Thesis: harness over model.";
     const question = "What did we decide about the no-cron rule for product loops?";
     const documents = [
@@ -190,12 +190,11 @@ describe("#1595: question to claim", () => {
       ...Array.from({ length: 12 }, (_, i) => ({ id: `x${i}`, title: `Other ${i}`, tags: [], category: "x", body: "We decide things.\nThe product rule is simple.\n" })),
     ];
     const picked = selectClaimsForQuestion({ question, documents, minCoverage: 0.1 });
-    const weights = picked.weights;
-    const share = ["cron", "loop"].reduce((sum, t) => sum + weights.get(t), 0) / [...weights.values()].reduce((sum, w) => sum + w, 0);
-    assert.ok(share > 0.5, `the two rare words carry most of the weight (${share.toFixed(2)}), which is why weight alone let this through`);
-    assert.equal(picked.selected.find((entry) => entry.id === "radar").passage, "", "two of five words: nominated, not quoted");
-    const full = selectClaimsForQuestion({ question: "cron loops", documents, minCoverage: 0.1 });
-    assert.match(full.selected.find((entry) => entry.id === "radar").passage, /Queues, not loops/, "...but it is a fine answer to a question made of those two words");
+    const radar = picked.selected.find((entry) => entry.id === "radar");
+    assert.match(radar.passage, /cron security sweep/);
+    assert.deepEqual(radar.missing, ["decide", "rule", "product"], "the reader is shown what the sentence does not say");
+    const cron = selectClaimsForQuestion({ question: "cron loops", documents, minCoverage: 0.1 }).selected.find((entry) => entry.id === "radar");
+    assert.deepEqual(cron.missing, []);
   });
 
   test("a term in every record decides nothing: the rare term picks the record", () => {
@@ -855,6 +854,7 @@ describe("review round 5", () => {
     assert.match(plain.stdout, /context only, not an answer: "Flow Agents bounds CI compute/);
     assert.match(plain.stdout, /replaced by "CI compute policy: no repository-wide caps"/);
     assert.match(plain.stdout, /\[superseded\]/);
+    assert.doesNotMatch(plain.stdout, /not in this sentence or the title: (ci|compute|policy)/);
     assert.doesNotMatch(plain.stdout, /current_at_as_of|superseded_by_known_successor/);
     assert.doesNotMatch(plain.stdout, /WARNING/);
     const starved = spawnSync(process.execPath, [cli, ...base, "--nomination-budget", "1", "What is the CI compute policy?"], { encoding: "utf8" });

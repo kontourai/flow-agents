@@ -20,7 +20,7 @@ import { error, isIdentity } from "./index.js";
 import { admittedClaimIds, runLivingContext, parseInstant } from "./living-context.js";
 import { answerLivingContext } from "./living-context-answer.js";
 import { deriveStoreManifest, storeKnowledgeRoot, DEFAULT_STORE_ROOT_ID } from "./living-context-store.js";
-import { DEFAULT_LIMIT, DEFAULT_MIN_COVERAGE, DEFAULT_MIN_PASSAGE_COVERAGE, bestPassage, passageCoverage, selectClaimsForQuestion } from "./living-context-select.js";
+import { DEFAULT_LIMIT, DEFAULT_MIN_COVERAGE, DEFAULT_MIN_PASSAGE_COVERAGE, bestPassage, missingTerms, passageCoverage, selectClaimsForQuestion } from "./living-context-select.js";
 
 export const DEFAULT_BUDGET_TOKENS = 4000;
 const MAX_NOMINATED = 200;
@@ -97,7 +97,8 @@ export async function askLivingContext({
       if (nominated.length >= MAX_NOMINATED) { unresolved.push(recalled.claim_id); continue; }
       const record = recordBy.get(link.claim_id);
       const candidate = bestPassage(record.body, selection.terms);
-      nominated.push({ id: link.claim_id, via: `successor_of:${recalled.claim_id}`, matched: [], passage: passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage ? candidate : "" });
+      const on = passageCoverage(candidate, record.title, selection.terms, selection.weights) >= minPassageCoverage;
+      nominated.push({ id: link.claim_id, via: `successor_of:${recalled.claim_id}`, matched: [], passage: on ? candidate : "", missing: on ? missingTerms(candidate, record.title, selection.terms) : [] });
     }
   }
 
@@ -125,7 +126,7 @@ export async function askLivingContext({
       created_at: record.created_at,
       updated_at: record.updated_at,
       ...(entry.via ? { via: entry.via } : { matched_terms: entry.matched, coverage: entry.coverage }),
-      ...(entry.passage ? { passage: entry.passage } : {}),
+      ...(entry.passage ? { passage: entry.passage, missing_terms: entry.missing ?? [] } : {}),
       // Without an on-question passage the verifier was only asked about the title, which is not an answer to the question.
       ...(answered?.outcome === "answered" && entry.passage
         ? { outcome: "answered" }

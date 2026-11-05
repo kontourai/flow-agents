@@ -20,7 +20,7 @@
  * caller abstains with a reason instead of being handed the least-bad record.
  *
  * Overlap across a whole record is weak evidence (a long report mentions most words), so a nominated record is only quoted
- * when the passage itself, with the record title, carries `minPassageCoverage` of the question's words, by rarity weight and by count. A record that is
+ * when the passage itself, with the record title, carries `minPassageCoverage` of the question's rarity weight. The words it leaves out are returned (`missing`) so the reader can judge. A record that is
  * nominated but has no such passage is reported as nominated and is not answered from.
  *
  * @module living-context-select
@@ -100,16 +100,18 @@ export function bestPassage(body, questionTerms, maxChars = DEFAULT_PASSAGE_CHAR
   return "";
 }
 
-/**
- * How much of the question a passage (read together with its record title) carries: the smaller of the share of the question's rarity
- * weight and the share of its distinct words. Weight alone lets two rare words carry a long line that is about something else; the count
- * keeps a passage that matches only a few of the question's words from passing.
- */
+/** The share of the question's rarity weight that a passage (read together with its record title) carries. */
 export function passageCoverage(passage, title, questionTerms, weights) {
   const present = termSet(`${title} ${passage}`);
-  let have = 0, all = 0, haveCount = 0;
-  for (const t of questionTerms) { all += weights.get(t); if (present.has(t)) { have += weights.get(t); haveCount++; } }
-  return all === 0 || questionTerms.length === 0 ? 0 : Math.min(have / all, haveCount / questionTerms.length);
+  let have = 0, all = 0;
+  for (const t of questionTerms) { all += weights.get(t); if (present.has(t)) have += weights.get(t); }
+  return all === 0 ? 0 : have / all;
+}
+
+/** The question words that neither the passage nor its record title contains: shown beside an answer so the reader can see what it leaves out. */
+export function missingTerms(passage, title, questionTerms) {
+  const present = termSet(`${title} ${passage}`);
+  return questionTerms.filter((t) => !present.has(t));
 }
 
 /**
@@ -145,7 +147,7 @@ export function selectClaimsForQuestion({ question, documents, limit = DEFAULT_L
       const candidate = bestPassage(entry.doc.body, entry.matched);
       const onQuestion = passageCoverage(candidate, entry.doc.title, questionTerms, weights);
       // A record whose passage is off the question is nominated, never quoted.
-      return { id: entry.doc.id, score: round(entry.score), coverage: round(entry.coverage), matched: entry.matched, passage: onQuestion >= minPassageCoverage ? candidate : "", passage_coverage: round(onQuestion) };
+      return { id: entry.doc.id, score: round(entry.score), coverage: round(entry.coverage), matched: entry.matched, passage: onQuestion >= minPassageCoverage ? candidate : "", passage_coverage: round(onQuestion), missing: onQuestion >= minPassageCoverage ? missingTerms(candidate, entry.doc.title, questionTerms) : [] };
     });
   const below = scored.filter((entry) => entry.coverage < minCoverage).slice(0, 3).map((entry) => ({ id: entry.doc.id, coverage: round(entry.coverage), matched: entry.matched }));
   return { terms: questionTerms, weights, selected, below_threshold: below };
