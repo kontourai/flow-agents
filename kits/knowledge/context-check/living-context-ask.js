@@ -126,7 +126,7 @@ export async function askLivingContext({
       created_at: record.created_at,
       updated_at: record.updated_at,
       ...(entry.via ? { via: entry.via } : { matched_terms: entry.matched, coverage: entry.coverage }),
-      ...(entry.passage ? { passage: entry.passage, missing_terms: entry.missing ?? [] } : {}),
+      ...(entry.passage ? { passage: entry.passage, missing_terms: missingTerms(entry.passage, record.title, selection.terms) } : {}),
       // Without an on-question passage the verifier was only asked about the title, which is not an answer to the question.
       ...(answered?.outcome === "answered" && entry.passage
         ? { outcome: "answered" }

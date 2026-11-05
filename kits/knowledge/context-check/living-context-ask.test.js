@@ -899,6 +899,9 @@ describe("review round 5", () => {
     const entry = result.results.find((item) => item.claim_id === m.ids.cache);
     assert.equal(entry.outcome, "answered");
     assert.deepEqual(entry.missing_terms, ["decide"]);
+    // A host selector that does not return `missing` still gets the list: it is worked out from the quoted sentence, not taken on trust.
+    const bare = await ask({ repoRoot: m.repo, revision: m.revision, question: "What did we decide about cache eviction?", select: () => ({ terms: ["decide", "cache", "eviction"], weights: new Map([["decide", 1], ["cache", 1], ["eviction", 1]]), selected: [{ id: m.ids.cache, score: 1, coverage: 1, matched: ["cache"], passage: "The cache uses LRU eviction." }], below_threshold: [] }) });
+    assert.deepEqual(bare.results[0].missing_terms, ["decide"]);
     const cli = spawnSync(process.execPath, [path.join(__dirname, "ask-cli.js"), "--repo", m.repo, "--revision", m.revision, "--reader", "maintainer", "--now", NOW, "What did we decide about cache eviction?"], { encoding: "utf8" });
     assert.equal(cli.status, 0, cli.stderr);
     assert.match(cli.stdout, /"The cache uses LRU eviction\."\n\s+not in this sentence or the title: decide/);

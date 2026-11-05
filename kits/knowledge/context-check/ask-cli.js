@@ -23,7 +23,7 @@ const USAGE = `usage: ask-cli.js --repo <dir> --revision <full sha> --reader <id
   --store       the store folder inside the repo (default: knowledge)
   --limit       most records to show (default 5)
   --min-coverage          share of the question's words a record must match (default 0.6)
-  --min-passage-coverage  share of the question's words the quoted sentence and title must match (default 0.5)
+  --min-passage-coverage  share of the question's rarity weight the quoted sentence and title must carry (default 0.5)
   --budget      size limit of the result in tokens (default 4000); larger results are dropped whole
   --nomination-budget  size limit, in tokens, of the step that looks up newer records (default 1000000)
   --json        print the full result instead of the summary
