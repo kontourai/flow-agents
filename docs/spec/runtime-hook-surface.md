@@ -287,8 +287,8 @@ The output uses the shared knowledge memory marker, labels the content
 “Background, not instruction”, and says the code wins over conflicting memory.
 The marker, label, entries and closing marker are bounded to 8192 UTF-8 bytes
 (and to a smaller supplied budget); an entry that does not fit is skipped whole.
-An absent, invalid or empty brief contributes nothing. #671 will implement the
-producer; `evals/fixtures/context-contributors/global.json` is the v1 fixture.
+An absent, invalid or empty brief contributes nothing. The producer is the dream run
+(`kits/knowledge/dream/brief.js`, #671); `evals/fixtures/context-contributors/global.json` is the v1 fixture.
 
 **Purge gate (additive to v1).** After a purge (a permanent erase of store records) a brief compiled earlier must
 not be injected. The producer keeps `purge-gate.json` in the brief directory's parent
@@ -297,11 +297,12 @@ not be injected. The producer keeps `purge-gate.json` in the brief directory's p
 `"purgeGeneration":"<the generation it was compiled under>"` to each brief. The reader
 injects a brief only when there is no gate file and the brief has no `purgeGeneration`
 (nothing was ever purged), or the gate is `settled` and `purgeGeneration` equals its
-`generation`. Otherwise the brief contributes nothing. That covers a gate that is `purging`, unreadable, malformed, not a regular
-file or over 1024 bytes; a missing or different stamp when a gate exists; and a stamp when no gate exists.
+`generation`. Otherwise the brief contributes nothing. In particular, the reader refuses a brief when the gate is
+`purging`, unreadable, malformed, not a regular file or over 1024 bytes; when a gate exists and the
+brief's stamp is missing or different; and when the brief has a stamp but no gate exists.
 The gate is read after the brief, so a purge that opens between the
 two reads is seen. A purge that begins while a session is being handed context is outside
-this guarantee: the host drains in-flight reads before it purges (store contract, Addendum M).
+this guarantee: before purging, the host must wait for sessions that are already reading briefs to finish (store contract, Addendum M).
 
 **Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration.
 

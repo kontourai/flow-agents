@@ -2030,8 +2030,7 @@ and every erasing call (`purge`, and `purgeProposal` where the package has it, b
 read-only previews) deletes the brief files, while sessions refuse any brief written
 before the purge (see [dream.md](./dream.md#the-briefs), "After a purge"). A purge on a
 store opened without the fence is not covered, and neither is any other projection.
-Host-built projections,
-backups, snapshots, and migration manifests are outside Corpus Store's purge
+Host-built projections, backups, snapshots, and migration manifests are outside Corpus Store's purge
 transaction. Context Check and Living Context also read claim manifests from
 Git at pinned revisions; Corpus purge cannot erase those manifests or their Git
 history. Hosts must account for those copies and prevent erased content from
