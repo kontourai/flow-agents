@@ -1421,3 +1421,23 @@ test('an importer cannot change a source scope after host admission', async (t) 
   assert.equal(JSON.parse(proposal.candidate.body).project, 'approved');
   assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].project, 'approved');
 });
+
+test('null and malformed events block only their sources and retain safe error diagnostics', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract();
+  const goodId = 'fixture-good-isolation'; const nullId = 'fixture-null'; const invalidId = 'fixture-invalid-event'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([goodId, ordinal])).digest('hex');
+  const event = { id, sourceId: goodId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'Fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const response = (sourceId, events) => ({ events, malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, store, extract, { observationSources: [
+    { sourceId: nullId, project: null, data: '', importer: () => response(nullId, [null]) },
+    { sourceId: invalidId, project: null, data: '', importer: () => response(invalidId, [{ sourceId: invalidId, ordinal: 1, id: 'invalid' }]) },
+    { sourceId: goodId, project: null, data: '', importer: () => response(goodId, [event]) },
+  ] });
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.status, 'blocked'); assert.equal(report.ingest.observations.blocked.length, 2);
+  for (const blocked of report.ingest.observations.blocked) { assert.equal(blocked.reason, 'OBSERVATION_EVENT_INVALID'); assert.equal(blocked.error_class, 'Error'); }
+  assert.equal((await store.listProposals()).length, 2);
+  const cursors = JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations;
+  assert.equal(cursors[`source:${nullId}`], undefined); assert.equal(cursors[`source:${invalidId}`], undefined); assert.equal(cursors[`source:${goodId}`].cursor.lines, 1);
+});

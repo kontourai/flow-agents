@@ -53,6 +53,8 @@ test('an over-budget source is reported separately and can be retried', () => {
   const sources = ['one', 'two'].map((sourceId) => ({ sourceId, project: null, data: '', importer }));
   const result = ingestObservationSources(sources, {}, {}, (event) => ({ sittingId: `${event.sourceId}:${event.ordinal}`, contentHash: 'fixture', provenance: { projectId: null } }), { isolateFailures: true });
   assert.equal(result.batches.length, 1); assert.equal(result.blocked[0].reason, 'OBSERVATION_EVENT_LIMIT'); assert.equal(result.blocked[0].errorClass, 'Error');
+  const retry = ingestObservationSources([sources[1]], {}, {}, (event) => ({ sittingId: `${event.sourceId}:${event.ordinal}`, contentHash: 'fixture', provenance: { projectId: null } }), { isolateFailures: true });
+  assert.equal(retry.batches.length, 1); assert.deepEqual(retry.blocked, []);
 });
 
 test('unexpected mapping errors fail the run instead of being hidden as bad input', () => {

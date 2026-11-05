@@ -125,7 +125,7 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | knowledge-capture | kits/knowledge/skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
 | knowledge-instinct-analysis | kits/knowledge/skills/knowledge-instinct-analysis/SKILL.md | Plan confidence changes for reviewed instinct records. |
 | knowledge-instinct-review | kits/knowledge/skills/knowledge-instinct-review/SKILL.md | Review proposed instinct records and their source observations. |
-| knowledge-observation-ingest | kits/knowledge/skills/knowledge-observation-ingest/SKILL.md | Keep an observation available for the Knowledge dream run. |
+| knowledge-observation-ingest | kits/knowledge/skills/knowledge-observation-ingest/SKILL.md | Provide observation sources to the dream run without changing capture behavior. |
 | pickup-probe | kits/builder/skills/pickup-probe/SKILL.md | Provider-grounded pickup probe used at the Builder design-probe step before planning. |
 | review-existing | kits/builder/skills/review-existing/SKILL.md | Record an existing exact-head change as pre-existing implementation for a builder.review-existing or builder.deliver-existing run; no implementation claim. |
 | search-first | skills/search-first/SKILL.md | Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. |

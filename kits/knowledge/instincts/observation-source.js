@@ -47,6 +47,7 @@ export function ingestObservationSources(sources, saved, seen, toResidue, { isol
     let projectIdentity = savedSource && Object.hasOwn(savedSource, 'projectIdentity') ? savedSource.projectIdentity : undefined;
     if (projectIdentity !== undefined && projectIdentity !== null && (typeof projectIdentity !== 'string' || !/^[a-f0-9]{64}$/.test(projectIdentity))) throw sourceError('OBSERVATION_CURSOR_INVALID', 'invalid observation project identity');
     for (const event of result.events) {
+      if (!event || typeof event !== 'object' || Array.isArray(event)) throw sourceError('OBSERVATION_EVENT_INVALID', 'invalid observed tool event');
       if (!Number.isSafeInteger(event.ordinal) || event.ordinal <= lastOrdinal || event.ordinal > result.cursor.lines) throw sourceError('OBSERVATION_EVENT_ORDER', 'invalid observation event order');
       lastOrdinal = event.ordinal;
       if (event.sourceId !== source.sourceId) throw sourceError('OBSERVATION_SOURCE_IDENTITY', 'observation source identity mismatch');

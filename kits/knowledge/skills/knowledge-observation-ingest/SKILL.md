@@ -1,6 +1,6 @@
 ---
 name: "knowledge-observation-ingest"
-description: "Keep an observation available for the Knowledge dream run."
+description: "Provide observation sources to the dream run without changing capture behavior."
 ---
 
 # Observe
