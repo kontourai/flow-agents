@@ -49,7 +49,10 @@ receiver-recorded knowledge instant Surface's projection takes as its own input.
 `MEMORY_CLAIM_TARGET_SCHEMA` is the `TargetFieldSchema[]` the Kit gives Traverse:
 `subject`, `subjectType`, `property`, `value`, `speaker`, `posture`, `validFrom`,
 `validUntil` (exclusive), `replacesPrior`. It deliberately asks for no visibility and no
-consequence flag; those belong to the host and the policy, not to a model.
+consequence flag; those belong to the host and the policy, not to a model. For a date
+proposal carrying Traverse's `valueNormalization` facts, validity checks also read
+the original literal and require the same strict ISO instant. Normalizing a
+written date cannot turn a value the Kit would reject into an accepted interval.
 
 `distillMemoryClaims({sitting, extract, passes})` formats a runtime-session sitting
 (the `kontourai/flow-agents#669` residue shape) one turn per line, runs `passes`
