@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/knowledge-purge-gate.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
-node -e 'const p = require(process.argv[1]); if (p.version !== "0.1.0-next.0") throw new Error("unexpected Corpus Store version")' "$ROOT_DIR/node_modules/@kontourai/corpus-store/package.json"
+node -e 'const p = require(process.argv[1]); if (p.version !== "0.1.0-next.3") throw new Error("unexpected Corpus Store version")' "$ROOT_DIR/node_modules/@kontourai/corpus-store/package.json"
 mkdir "$WORK_DIR/package"
 cp -R "$ROOT_DIR/node_modules/@kontourai/corpus-store/dist" "$WORK_DIR/package/dist"
 cp "$ROOT_DIR/node_modules/@kontourai/corpus-store/package.json" "$WORK_DIR/package/package.json"
