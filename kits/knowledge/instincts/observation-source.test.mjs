@@ -23,5 +23,5 @@ test('propagates importer errors without advancing or replacing the cursor', () 
   assert.throws(() => importObservationSource(() => { throw new Error('prefix changed'); }, '', options), /prefix changed/);
   assert.equal(options.cursor.lines, 1);
   assert.throws(() => importObservationSource(null, '', options), (error) => error instanceof TypeError && error.message === 'observation importer must be a function');
-  assert.throws(() => importObservationSource(fixtureImporter, '', { sourceId: '' }), /sourceId/);
+  for (const sourceId of ['', '   ']) assert.throws(() => importObservationSource(() => 'wrong', '', { sourceId }), /sourceId/);
 });
