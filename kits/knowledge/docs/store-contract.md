@@ -2024,7 +2024,20 @@ for producer review: their own content may reproduce erased content and is not
 automatically scrubbed. This follows Surface's producer-owned erasure boundary.
 
 The host must rebuild or invalidate each content-bearing projection before it
-serves it again, including any compiled briefs and indexes. Host-built projections,
+serves it again, including any compiled briefs and indexes. For compiled briefs
+the kit provides the mechanism: a store selection may carry `purgeFence`, an
+`async (run) => result` that wraps every erasing call (`purge`, and
+`purgeProposal` where the package has it) and is not applied to read-only
+previews. The dream run's `createPurgeFence({ dreamDir })`
+([dream.md](./dream.md#the-briefs), "After a purge") opens a gate file before the
+store is touched, settles it with a new token afterwards, and deletes the brief
+files. Each brief records the gate token it was compiled under, and the
+session-start reader serves a brief only while the gate is settled and the
+tokens match, so a brief compiled before a purge is not served even if its file
+is restored. A purge made on a store opened without the fence is not covered, and
+neither is any other projection. Corpus's `previewPurge` revision is not used:
+it digests the whole store and changes on every write, so it cannot mark a
+purge. Host-built projections,
 backups, snapshots, and migration manifests are outside Corpus Store's purge
 transaction. Context Check and Living Context also read claim manifests from
 Git at pinned revisions; Corpus purge cannot erase those manifests or their Git

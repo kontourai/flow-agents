@@ -240,6 +240,59 @@ test("two purges at once: the second is refused while the first holds the gate",
   assert.equal(await fence(async () => "third"), "third");
 });
 
+test("settling the gate issues a new token: a brief stamped with the opening token is not served afterwards", async (t) => {
+  const env = readerWorkspace(t);
+  let opening;
+  await createPurgeFence({ dreamDir: env.dreamDir })(async () => { opening = readPurgeGate(env.dreamDir); });
+  assert.equal(opening.state, "purging");
+  const settled = readPurgeGate(env.dreamDir);
+  assert.equal(settled.state, "settled");
+  assert.notEqual(settled.generation, opening.generation);
+  fs.mkdirSync(path.dirname(env.global), { recursive: true });
+  fs.writeFileSync(env.global, JSON.stringify({ version: 1, entries: ["[stated · unreviewed] written while the purge was open"], purgeGeneration: opening.generation }));
+  assert.equal(injectedContext(env.xdg), null);
+  fs.writeFileSync(env.global, JSON.stringify({ version: 1, entries: ["[stated · unreviewed] written after it settled"], purgeGeneration: settled.generation }));
+  assert.match(injectedContext(env.xdg), /written after it settled/);
+});
+
+test("the reader's gate rules: only a settled gate with a matching stamp, or no gate and no stamp, serves a brief", async (t) => {
+  const env = readerWorkspace(t);
+  const token = "a".repeat(32);
+  const entry = "[stated · unreviewed] gate rules";
+  const brief = (stamp) => JSON.stringify({ version: 1, entries: [entry], ...(stamp === undefined ? {} : { purgeGeneration: stamp }) });
+  const gateJson = (fields) => JSON.stringify({ version: 1, generation: token, state: "settled", ...fields });
+  const outside = path.join(env.ws.root, "outside-gate.json");
+  fs.writeFileSync(outside, gateJson({}));
+  const cases = [
+    ["no gate, no stamp", null, undefined, true],
+    ["no gate, but a stamp (the gate was deleted)", null, token, false],
+    ["settled gate, matching stamp", gateJson({}), token, true],
+    ["settled gate, no stamp", gateJson({}), undefined, false],
+    ["settled gate, other stamp", gateJson({}), "b".repeat(32), false],
+    ["settled gate, stamp of another type", gateJson({}), 7, false],
+    ["purging gate, matching stamp", gateJson({ state: "purging" }), token, false],
+    ["unknown state", gateJson({ state: "open" }), token, false],
+    ["unknown gate version", gateJson({ version: 2 }), token, false],
+    ["generation that is not 32 hex digits", gateJson({ generation: "short" }), "short", false],
+    ["gate that is not JSON", "{", token, false],
+    ["gate that is JSON null", "null", token, false],
+    ["gate over 1024 bytes", gateJson({ padding: "x".repeat(1100) }), token, false],
+    ["gate that is a symlink to a valid gate", { link: outside }, token, false],
+    ["gate that is a directory", { directory: true }, token, false],
+  ];
+  fs.mkdirSync(path.dirname(env.global), { recursive: true });
+  for (const [label, gate, stamp, served] of cases) {
+    fs.rmSync(env.gate, { recursive: true, force: true });
+    if (typeof gate === "string") fs.writeFileSync(env.gate, gate);
+    else if (gate?.link) fs.symlinkSync(gate.link, env.gate);
+    else if (gate?.directory) fs.mkdirSync(env.gate);
+    fs.writeFileSync(env.global, brief(stamp));
+    const context = injectedContext(env.xdg);
+    if (served) assert.ok(context?.includes(entry), label);
+    else assert.equal(context, null, label);
+  }
+});
+
 test("a brief file that cannot be deleted is reported, does not fail the purge, and is still not served", async (t) => {
   const env = readerWorkspace(t);
   fs.mkdirSync(path.join(env.dreamDir, "briefs", "global.json"), { recursive: true }); // a directory where the file should be

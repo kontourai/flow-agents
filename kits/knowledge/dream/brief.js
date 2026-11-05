@@ -33,6 +33,9 @@
  * project brief drops other projects' claims. Ties break on newer observation,
  * then claim id, so the order is deterministic.
  *
+ * Purge: when the store has been purged through a fence, every brief also records the gate token it was compiled
+ * under (`purgeGeneration`) and the reader refuses it once the token is stale (see purge-gate.js).
+ *
  * Budget: a brief's size is the UTF-8 byte length of its entries joined by a
  * blank line, the way #672 joins them. Bytes are a hard upper bound on tokens.
  *
