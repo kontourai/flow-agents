@@ -18,3 +18,9 @@ test('tool input is scrubbed and injected memory is excluded', () => {
   assert.ok(!value.turns[0].text.includes('private'));
   assert.ok(value.turns[0].text.includes('retained'));
 });
+
+test('an observed event without a session retains an unknown session', () => {
+  const residue = toolEventResidue({ ...event, session: '' });
+  assert.equal(residue.provenance.session, null);
+  assert.equal(validate(residue, schema).valid, true);
+});

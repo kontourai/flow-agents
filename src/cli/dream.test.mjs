@@ -1196,15 +1196,17 @@ test('tool observations replay by stable request key after a crash before cursor
   const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
   await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash before cursor'); } })), /crash before cursor/);
   assert.equal(fs.existsSync(ws.cursorFile), false);
-  assert.equal((await store.listProposals()).length, 1);
-  const proposal = (await store.listProposals())[0];
-  assert.equal(JSON.parse(proposal.candidate.body).claim.source.role, undefined, 'tool output is not attributed to a human or assistant turn');
+  assert.equal((await store.listProposals()).length, 2);
+  const proposal = (await store.listProposals()).find((item) => item.candidate.category === 'memory.claim');
+  const stored = JSON.parse(proposal.candidate.body);
+  assert.equal(stored.claim.source.role, undefined, 'tool output is not attributed to a human or assistant turn');
+  assert.equal(stored.decision.outcome, 'routed', 'tool-derived claims require review');
   const provenance = JSON.parse(proposal.candidate.provenance.note);
   assert.equal(provenance.source_id, sourceId); assert.equal(provenance.ordinal, ordinal);
   const before = store.calls.proposeCreate;
   await runDream(host, runOptions(ws));
-  assert.equal(store.calls.proposeCreate, before + 1, 'replay re-sends the same request key');
-  assert.equal((await store.listProposals()).length, 1, 'replay creates no duplicate proposal');
+  assert.equal(store.calls.proposeCreate, before + 2, 'replay re-sends both stable request keys');
+  assert.equal((await store.listProposals()).length, 2, 'replay creates no duplicate proposal');
   assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].lines, 1);
   const after = store.calls.proposeCreate;
   const replay = await runDream(host, runOptions(ws));
@@ -1219,13 +1221,13 @@ test('observation cursor waits for all events when the run cap defers work', asy
   const importer = (_data, options) => ({ events: options.cursor ? [] : events, malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 2, digest: 'b'.repeat(64) } });
   const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
   await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
-  assert.equal((await store.listProposals()).length, 1);
+  assert.equal((await store.listProposals()).length, 2);
   assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`], undefined);
   await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
-  assert.equal((await store.listProposals()).length, 2);
+  assert.equal((await store.listProposals()).length, 4);
   assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].lines, 2);
   await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
-  assert.equal((await store.listProposals()).length, 2);
+  assert.equal((await store.listProposals()).length, 4);
 });
 
 test('malformed observations fail before proposals or cursor commit', async (t) => {
@@ -1235,4 +1237,72 @@ test('malformed observations fail before proposals or cursor commit', async (t) 
   const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
   await assert.rejects(runDream(host, runOptions(ws)), /incomplete or invalid/);
   assert.equal((await store.listProposals()).length, 0); assert.equal(fs.existsSync(ws.cursorFile), false);
+});
+
+test('an observation without a session can be proposed without inventing one', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-empty-session'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: '', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws));
+  const proposal = (await store.listProposals()).find((item) => item.candidate.category === 'memory.claim'); assert.ok(proposal);
+  assert.equal(proposal.candidate.provenance.session_id, undefined);
+  assert.equal(JSON.parse(proposal.candidate.provenance.note).session_id, null);
+});
+
+test('a rejected observation with a pending dependent claim stops before cursor commit', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-rejected'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = () => ({ events: [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash'); } })), /crash/);
+  const raw = (await store.listProposals()).find((item) => item.candidate.category === 'memory.observation');
+  await store.rejectCreate(raw.id, 'reviewer', 'not suitable');
+  await assert.rejects(runDream(host, runOptions(ws)), (error) => error.code === 'DREAM_OBSERVATION_RECONCILE');
+  assert.equal(fs.existsSync(ws.cursorFile), false);
+});
+
+test('a tool-derived claim needs an independently applied source before briefing', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-source-review'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws)); const proposals = await store.listProposals();
+  const raw = proposals.find((item) => item.candidate.category === 'memory.observation');
+  const claim = proposals.find((item) => item.candidate.category === 'memory.claim');
+  await store.applyCreate(claim.id, 'independent-reviewer');
+  let report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+  const rawId = await store.applyCreate(raw.id, 'independent-reviewer');
+  report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.observation_unreviewed, 0);
+  assert.equal(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries.length, 1);
+  const sourceRecord = store.records.get(rawId);
+  store.records.set(rawId, { ...sourceRecord, body: 'tampered' });
+  report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+  store.records.set(rawId, sourceRecord);
+  store.retire(rawId);
+  report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+});
+
+test('the observation cursor is snapshotted before asynchronous dream effects', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-cursor'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const next = { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) };
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer: () => ({ events: [event], malformed: 0, partial: 0, cursor: next }) }] });
+  await runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'distill') next.lines = 99; } }));
+  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].lines, 1);
 });

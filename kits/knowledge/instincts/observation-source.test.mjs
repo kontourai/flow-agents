@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { importObservationSource } from './observation-source.js';
+import { importObservationSource, ingestObservationSources } from './observation-source.js';
 
 // Fixture only: supplies an already-constructed Ferry result and parses no data.
 function fixtureImporter(data, options) {
@@ -24,4 +24,10 @@ test('propagates importer errors without advancing or replacing the cursor', () 
   assert.equal(options.cursor.lines, 1);
   assert.throws(() => importObservationSource(null, '', options), (error) => error instanceof TypeError && error.message === 'observation importer must be a function');
   for (const sourceId of ['', '   ']) assert.throws(() => importObservationSource(() => 'wrong', '', { sourceId }), /sourceId/);
+});
+
+test('the combined event limit fails before a second source is accepted', () => {
+  const importer = (_data, { sourceId }) => ({ events: Array.from({ length: 50001 }, (_, i) => ({ sourceId, ordinal: i + 1 })), malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 50001, digest: 'a'.repeat(64) } });
+  const sources = ['one', 'two'].map((sourceId) => ({ sourceId, data: '', importer }));
+  assert.throws(() => ingestObservationSources(sources, {}, {}, (event) => ({ sittingId: `${event.sourceId}:${event.ordinal}`, contentHash: 'fixture' })), /event limit/);
 });

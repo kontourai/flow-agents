@@ -236,8 +236,40 @@ test('real Corpus deduplicates a tool-event retry after a crash before cursor co
   const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { observationSources: [{ sourceId, data: 'fixture', importer }] });
   await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash before cursor'); } })), /crash before cursor/);
   assert.equal(fs.existsSync(ws.cursorFile), false);
-  const first = await store.listProposals(); assert.equal(first.length, 1);
+  const first = await store.listProposals(); assert.equal(first.length, 2);
   await runDream(host, runOptions(ws));
-  const second = await store.listProposals(); assert.equal(second.length, 1); assert.equal(second[0].id, first[0].id);
+  const second = await store.listProposals(); assert.equal(second.length, 2); assert.deepEqual(second.map((item) => item.id).sort(), first.map((item) => item.id).sort());
   assert.equal((await runDream(host, runOptions(ws))).sittings.seen, 0);
+});
+
+test('real Corpus accepts tool-event provenance with an unavailable session', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = await realStore(ws); const sourceId = 'fixture-no-session'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: '', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws)); const proposal = (await store.listProposals()).find((item) => item.candidate.category === 'memory.claim');
+  assert.ok(proposal); assert.equal(proposal.candidate.provenance.session_id, undefined);
+  assert.equal(JSON.parse(proposal.candidate.provenance.note).session_id, null);
+});
+
+test('real Corpus: a tool-derived claim stays out of briefs until its raw source is independently applied', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = await realStore(ws); const sourceId = 'fixture-source-review'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws)); const proposals = await store.listProposals();
+  const raw = proposals.find((item) => item.candidate.category === 'memory.observation'); const claim = proposals.find((item) => item.candidate.category === 'memory.claim');
+  await store.applyCreate(claim.id, 'independent-reviewer');
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+  const rawId = await store.applyCreate(raw.id, 'independent-reviewer');
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 0);
+  assert.equal(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries.length, 1);
+  await store.retire(rawId, 'retired', { agent: 'independent-reviewer', rationale: 'not current' });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
 });

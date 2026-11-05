@@ -199,6 +199,7 @@ export function effectiveItems(items, reviewDecisions = []) {
 }
 
 export function isEligible(item, { includeUnreviewed = false } = {}) {
+  if (item.observationSourceApproved === false) return false;
   if (isSealed(item.claim)) return false;
   if (item.state === "applied") return true;
   return item.state === "pending" && includeUnreviewed && item.routing?.outcome === "proposed";

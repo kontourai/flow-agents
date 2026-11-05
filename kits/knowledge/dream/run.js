@@ -35,6 +35,7 @@ import {
   routeMemoryChange,
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
+import { proposeMemory } from "../promote/store-target.js";
 import { ingestObservationSources } from "../instincts/observation-source.js";
 import { toolEventResidue } from "../instincts/tool-event-residue.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, classifyCurrent, effectiveItems, isSealed, writeBriefs } from "./brief.js";
@@ -84,13 +85,50 @@ function narrowStore(store) {
  * is the one Corpus made from it: the record's `apply-create` entry names this proposal and the record's body is the
  * proposal's. A settlement that points at some other record, or at none, is not trusted.
  */
-async function briefItems(store, index, proposerId) {
+async function briefItems(store, index, proposerId, proposals) {
   const items = [];
-  const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0 };
+  const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0, observation_unreviewed: 0 };
+  const observationSources = new Map();
+  for (const proposal of proposals) {
+    if (proposal?.proposer_id !== proposerId || proposal?.candidate?.category !== "memory.observation") continue;
+    try {
+      const noteText = proposal.candidate?.provenance?.note;
+      if (typeof noteText !== "string" || Buffer.byteLength(noteText) > 8192) continue;
+      const note = JSON.parse(noteText);
+      if (typeof note.sitting_id !== "string" || !note.sitting_id.startsWith("tool-event:")) continue;
+      const list = observationSources.get(note.sitting_id) ?? [];
+      list.push({ proposal, note }); observationSources.set(note.sitting_id, list);
+    } catch { /* An unreadable source cannot authorize a brief. */ }
+  }
+  async function observationState(envelope) {
+    const found = observationSources.get(envelope.sitting.id) ?? [];
+    if (found.length !== 1) return "invalid";
+    const { proposal, note } = found[0];
+    if (note.content_hash !== envelope.sitting.contentHash) return "invalid";
+    try {
+      if (typeof proposal.candidate.body !== "string" || Buffer.byteLength(proposal.candidate.body) > 8 * 1024 * 1024) return "invalid";
+      const raw = JSON.parse(proposal.candidate.body);
+      if (raw.provenance?.eventId !== envelope.sitting.id.slice("tool-event:".length) || raw.turn?.role !== "tool") return "invalid";
+      const expected = `sha256:${sha256(JSON.stringify({ sittingId: envelope.sitting.id, provenance: raw.provenance, turns: [raw.turn] }))}`;
+      if (expected !== envelope.sitting.contentHash || envelope.claim.source.ref !== envelope.sitting.id) return "invalid";
+      if (proposal.state === "rejected") return "rejected";
+      if (proposal.state === "pending") return "pending";
+      if (proposal.state !== "applied" || !proposal.reviewer_id || proposal.reviewer_id === proposerId || proposal.reviewer_id === proposal.proposer_id) return "invalid";
+      const record = store.get && proposal.record_id ? await store.get(proposal.record_id) : null;
+      return record && !["retired", "purged"].includes(record.status) && record.body === proposal.candidate.body && (record.mutation_log ?? []).some((entry) => entry.op === "apply-create" && entry.evidence?.proposal_id === proposal.id) ? "approved" : "invalid";
+    } catch { return "invalid"; }
+  }
   for (const { proposal, envelope } of index.byClaim.values()) {
     if (proposal.state === "rejected") {
       excluded.rejected += 1;
       continue;
+    }
+    let observationSourceApproved;
+    if (envelope.sitting.id.startsWith("tool-event:")) {
+      const state = await observationState(envelope);
+      if (state !== "approved") excluded.observation_unreviewed += 1;
+      if (state === "invalid" || state === "rejected") continue;
+      observationSourceApproved = state === "approved";
     }
     // A sealed claim never reaches a brief, but it still contests a rival: whether two claims disagree does not
     // depend on who may read them.
@@ -114,7 +152,7 @@ async function briefItems(store, index, proposerId) {
         continue;
       }
     }
-    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, ...(envelope.instinctConfidence === undefined ? {} : { instinctConfidence: envelope.instinctConfidence }), state: proposal.state, routing: envelope.decision });
+    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, ...(observationSourceApproved === undefined ? {} : { observationSourceApproved }), ...(envelope.instinctConfidence === undefined ? {} : { instinctConfidence: envelope.instinctConfidence }), state: proposal.state, routing: envelope.decision });
   }
   return { items, excluded };
 }
@@ -209,6 +247,8 @@ export async function runDream(host, options = {}) {
     sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
     claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, facts_truncated: 0, rerouted: 0, contested_routed: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
+    observation_proposals: [],
+    observation_rejected: 0,
     review_items: 0,
     unreadable_proposals: 0,
     redaction_hits: 0,
@@ -366,7 +406,10 @@ export async function runDream(host, options = {}) {
 
         const project = projectFromCwd(residue.provenance?.cwd ?? null);
         const ordered = [...distilled.claims].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-        const fitted = fitPlan(ordered.map((claim) => ({ claim, agreement: distilled.agreement[claim.id] ?? null, project })));
+        // Tool output is untrusted external data, not an independently asserted
+        // human statement. Keep its agreement unmeasured so the common router
+        // sends it to review rather than promoting it through opt-in briefing.
+        const fitted = fitPlan(ordered.map((claim) => ({ claim, agreement: residue.source === "tool-event" ? null : distilled.agreement[claim.id] ?? null, project })));
         plan = fitted.plan;
         report.claims.truncated += fitted.dropped; // reported, never silent
         report.claims.distilled += plan.length;
@@ -385,6 +428,22 @@ export async function runDream(host, options = {}) {
       }
 
       await stage("propose");
+      if (residue.source === "tool-event") {
+        // Raw observations are staged as Corpus proposals, not applied. Their key
+        // is anchored to the same source event on every retry.
+        const raw = await proposeMemory({ residue, candidates: [{ title: "Observed tool event", category: "memory.observation", body: JSON.stringify({ provenance: residue.provenance, turn: residue.turns[0] }) }], proposerId, store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName, requestScope: "observation-raw-v1", positions: [0] });
+        const proposalId = raw.proposals[0];
+        const proposal = (await store.listProposals()).find((item) => item.id === proposalId);
+        if (!proposal) throw dreamError("DREAM_OBSERVATION_UNCONFIRMED", "the observation proposal cannot be confirmed");
+        report.observation_proposals.push({ sitting_id: residue.sittingId, proposal_id: proposalId, state: proposal.state });
+        if (proposal.state === "rejected") {
+          const prior = index.sitting(residue.sittingId, residue.contentHash, vKey);
+          if (prior?.plan.some((entry) => index.byClaim.get(entry.claim.id)?.proposal.state !== "rejected")) {
+            throw dreamError("DREAM_OBSERVATION_RECONCILE", "rejected observation has dependent claims requiring review");
+          }
+          report.observation_rejected += 1; processed.add(residue.sittingId); continue;
+        }
+      }
       const result = await proposeSitting({ residue, plan, decisions: decided.map((entry) => entry.decision), visibilityKey: vKey, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true })
         .catch((error) => {
           // What landed before the failure is real, and the report must say so.
@@ -412,12 +471,13 @@ export async function runDream(host, options = {}) {
     // Briefs derive from the store every run, because review changes them without any new telemetry. The briefs are
     // written below; what they hold back as contested is decided here, once, and both the brief and the review queue
     // use that verdict: a contested claim belongs in the review queue, not the brief.
-    const latest = indexProposals(await store.listProposals(), proposerId);
+    const proposalSnapshot = await store.listProposals();
+    const latest = indexProposals(proposalSnapshot, proposerId);
     // Routing in the backfill below must look at the same snapshot the brief judged, or a claim another writer adds
     // between the two reads would be named by the verdict and missing from the peers.
     index = latest;
     reslot();
-    const { items, excluded } = await briefItems(store, latest, proposerId);
+    const { items, excluded } = await briefItems(store, latest, proposerId, proposalSnapshot);
     const { views, byView } = effectiveItems(items, reviewDecisions);
     const contestedNow = classifyCurrent(views, policy).contested.map((view) => byView.get(view));
     const contestedBySlot = new Map();

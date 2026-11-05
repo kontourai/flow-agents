@@ -32,7 +32,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
     throw new Error('store target requires a schema-valid complete runtime-session or tool-event residue');
   }
   const isTool = residue.source === 'tool-event';
-  const sessionId = required(isTool ? residue.provenance?.session : residue.provenance?.sessionId, 'sessionId');
+  const sessionId = isTool ? residue.provenance.session : required(residue.provenance?.sessionId, 'sessionId');
   const transcriptRef = required(isTool ? residue.provenance?.sourceId : residue.provenance?.transcriptRef, 'transcriptRef');
   const sittingId = required(residue.sittingId, 'sittingId');
   if (isTool ? sittingId !== `tool-event:${residue.provenance.eventId}` : !sittingId.startsWith(`${residue.provenance.harness}:${sessionId}:`)) {
@@ -62,7 +62,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
       title: required(item?.title, 'candidate title'),
       body: required(item?.body, 'candidate body'),
       category: required(item?.category, 'candidate category'),
-      provenance: { agent: proposerId, session_id: sessionId, note: JSON.stringify(provenance) },
+      provenance: { agent: proposerId, ...(sessionId === null ? {} : { session_id: sessionId }), note: JSON.stringify(provenance) },
     };
   });
   if (!write) return { root: rootName, posture: 'preview', proposals: [], candidates: prepared };

@@ -26,7 +26,7 @@
             "eventId": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "ordinal": { "type": "integer", "minimum": 1 },
             "timestamp": { "type": "string", "minLength": 1 },
-            "session": { "type": "string", "minLength": 1 },
+            "session": { "type": ["string", "null"], "minLength": 1 },
             "tool": { "type": "string", "minLength": 1 },
             "event": { "enum": ["tool_start", "tool_complete"] }
           }
