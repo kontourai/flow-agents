@@ -155,7 +155,13 @@ const extensionFor = (reader, knownAtMs) => {
 
 /** Validate a Living Context (1.1) input through its shared JSON schema plus the real-instant check. */
 export function validateLivingContextInput(input) {
-  const errors = validate(input, INPUT_SCHEMA).errors;
+  let errors = validate(input, INPUT_SCHEMA).errors;
+  // The schema's anyOf reports its two or three alternatives as separate "missing" lines, which does not say what a caller
+  // should add. When none of the three request selectors is present, name them (claim_ids alone is enough).
+  if (errors.length && plainObject(input) && ["claim_ids", "changed_surfaces", "diff"].every((key) => input[key] === undefined)) {
+    errors = errors.filter((message) => !/does not satisfy any allowed schema/.test(message));
+    errors.push("$: say what to recall: provide claim_ids (recall exactly those claims), changed_surfaces or diff.paths (recall and reconcile claims that declare those surfaces), or both");
+  }
   if (errors.length === 0) {
     for (const key of ["now", "valid_at", "known_at"]) {
       if (input.as_of[key] === undefined) continue;
@@ -487,10 +493,35 @@ function orderedRequestIds(input, byId, changedSurfaces, ctx) {
 }
 
 /**
+ * The ids of the claims this reader may see and that are known at `known_at`, after the same reader admission, parsing and
+ * duplicate handling as recall. A caller that selects claims for a question must choose only among these: the choice itself
+ * (a score, a nearest miss) would otherwise disclose a claim that recall answers with a plain no-answer. `input` is a Living
+ * Context input without its request selector (`claim_ids`, `changed_surfaces`, `diff`).
+ */
+export function admittedClaimIds({ repoRoot, input, derivedManifests }) {
+  assertSurfaceVisibility();
+  const inputErrors = validateLivingContextInput({ ...input, claim_ids: ["admission-probe"] });
+  if (inputErrors.length) {
+    const identityMissing = inputErrors.some((message) => /missing required property 'reader'|\$\/reader/.test(message));
+    throw error(identityMissing ? "READER_IDENTITY_REQUIRED" : "INVALID_CONTEXT_CHECK_INPUT", inputErrors.join("; "));
+  }
+  const ctx = buildContext(input);
+  const { root: resolvedRoot, revision } = resolveRevisionBoundRepository(repoRoot, input.revision);
+  if (new Set(input.knowledge_roots.map((knowledgeRoot) => knowledgeRoot.id)).size !== input.knowledge_roots.length) {
+    throw error("DUPLICATE_KNOWLEDGE_ROOT_ID", "selected Knowledge root ids must be unique");
+  }
+  const extension = extensionFor(input.reader, ctx.knownAt);
+  const documents = input.knowledge_roots.map((knowledgeRoot) => readManifestDocument(resolvedRoot, revision, knowledgeRoot, extension, derivedManifests?.[knowledgeRoot.id]));
+  const manifests = documents.map((document, index) => normalizeManifestClaims(document, input.knowledge_roots[index], extension));
+  const { byId } = indexClaims(manifests, ctx);
+  return new Set([...byId.values()].filter((claim) => isVisible(claim, ctx) && isKnown(claim, ctx)).map((claim) => claim.id));
+}
+
+/**
  * Pure Living Context derivation (no writes). Exposed so the answer step re-derives recall itself
  * instead of trusting a caller-supplied result.
  */
-export function deriveLivingContext({ repoRoot, input }) {
+export function deriveLivingContext({ repoRoot, input, derivedManifests }) {
   assertSurfaceVisibility();
   const inputErrors = validateLivingContextInput(input);
   if (inputErrors.length) {
@@ -499,13 +530,16 @@ export function deriveLivingContext({ repoRoot, input }) {
   }
   const ctx = buildContext(input);
   const { root: resolvedRoot, revision } = resolveRevisionBoundRepository(repoRoot, input.revision);
-  const changedSurfaces = [...new Set(input.changed_surfaces || input.diff.paths)].map((surface) => safeRelativePath(surface, "changed surface"));
+  // A claim_ids-only request names no surface: nothing intersects, and reconciliation reports every claim clean.
+  const changedSurfaces = [...new Set(input.changed_surfaces || input.diff?.paths || [])].map((surface) => safeRelativePath(surface, "changed surface"));
   if (new Set(input.knowledge_roots.map((knowledgeRoot) => knowledgeRoot.id)).size !== input.knowledge_roots.length) {
     throw error("DUPLICATE_KNOWLEDGE_ROOT_ID", "selected Knowledge root ids must be unique");
   }
   const extension = extensionFor(input.reader, ctx.knownAt);
   // Phase one admits the reader at every root before phase two parses a single claim of any root.
-  const documents = input.knowledge_roots.map((knowledgeRoot) => readManifestDocument(resolvedRoot, revision, knowledgeRoot, extension));
+  // `derivedManifests` maps a root id to a manifest the caller derived from this same revision (see living-context-store.js);
+  // it takes the place of the `git show` of that root's manifest_path and goes through the same parsing and admission.
+  const documents = input.knowledge_roots.map((knowledgeRoot) => readManifestDocument(resolvedRoot, revision, knowledgeRoot, extension, derivedManifests?.[knowledgeRoot.id]));
   const manifests = documents.map((document, index) => normalizeManifestClaims(document, input.knowledge_roots[index], extension));
   const { byId, ambiguous } = indexClaims(manifests, ctx);
   const supersession = evaluateSupersession(byId, ambiguous, ctx);
@@ -577,8 +611,8 @@ export function deriveLivingContext({ repoRoot, input }) {
  * Run the Living Context (1.1) recall and reconciliation. Proposals-only: with `write: true` it creates
  * new no-follow files below an explicit private proposalDir and never modifies the repository.
  */
-export function runLivingContext({ repoRoot, input, proposalDir, write = true } = {}) {
-  const { result } = deriveLivingContext({ repoRoot, input });
+export function runLivingContext({ repoRoot, input, proposalDir, write = true, derivedManifests } = {}) {
+  const { result } = deriveLivingContext({ repoRoot, input, derivedManifests });
   const errors = validateLivingContextResult(result);
   if (errors.length) throw error("INVALID_CONTEXT_CHECK_RESULT", errors.join("; "));
   if (write) writeResult(proposalDir, result);

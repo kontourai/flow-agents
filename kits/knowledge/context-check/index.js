@@ -54,7 +54,7 @@ function sanitizedGitEnvironment() {
 }
 
 /** Run Git with all inherited Git overrides cleared and replace/graft behavior disabled; output is untrimmed. */
-export function gitRaw(repoRoot, args) {
+export function gitRaw(repoRoot, args, { input, buffer = false } = {}) {
   try {
     return execFileSync("git", [
       "-C", repoRoot,
@@ -63,8 +63,10 @@ export function gitRaw(repoRoot, args) {
       "--no-replace-objects",
       ...args,
     ], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
+      encoding: buffer ? null : "utf8",
+      ...(input === undefined ? {} : { input }),
+      maxBuffer: 1 << 30,
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       env: sanitizedGitEnvironment(),
     });
   } catch (cause) {
@@ -127,11 +129,16 @@ export function readManifestAtRevision(repoRoot, revision, root, extension) {
  * Phase one: read the manifest document and admit it (for 1.1, refuse an unrecognised reader) without
  * parsing a single claim. The 1.1 flow runs this for every selected root before phase two for any root.
  */
-export function readManifestDocument(repoRoot, revision, root, extension) {
+export function readManifestDocument(repoRoot, revision, root, extension, supplied) {
   const manifestPath = safeRelativePath(root.manifest_path, "knowledge_roots[].manifest_path");
-  const bytes = git(repoRoot, ["show", "--no-ext-diff", "--no-textconv", "--format=", `${revision}:${manifestPath}`]);
   let parsed;
-  try { parsed = JSON.parse(bytes); } catch { throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} at ${revision} is not valid JSON`); }
+  if (supplied !== undefined) {
+    // A manifest the caller derived from this revision. Round-tripped through JSON so it is checked as the bytes a file would be.
+    try { parsed = JSON.parse(JSON.stringify(supplied)); } catch { throw error("INVALID_CLAIM_MANIFEST", `${manifestPath}: the supplied manifest is not JSON data`); }
+  } else {
+    const bytes = git(repoRoot, ["show", "--no-ext-diff", "--no-textconv", "--format=", `${revision}:${manifestPath}`]);
+    try { parsed = JSON.parse(bytes); } catch { throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} at ${revision} is not valid JSON`); }
+  }
   const allowedManifestKeys = new Set(["claims", ...(extension?.manifestKeys ?? [])]);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).some((key) => !allowedManifestKeys.has(key)) || !Array.isArray(parsed.claims)) {
     throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} must contain only a claims array${extension ? " and declared extension keys" : ""}`);
