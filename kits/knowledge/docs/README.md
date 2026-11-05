@@ -1161,7 +1161,7 @@ the `memory-claims`, `memory-routing` and `memory-routing-flow` package exports.
 
 ## Dream run
 
-[The dream run](dream.md) turns accumulated Claude Code and Codex sessions into
+[The dream run](dream.md) turns accumulated agent sessions into
 proposed memory claims and re-renders the budgeted profile briefs. A host scheduler or an
 opt-in `SessionEnd`/`PreCompact` hook starts it. It is disabled until an operator
 enables it, it consumes the residue, claim, routing and proposal contracts above rather

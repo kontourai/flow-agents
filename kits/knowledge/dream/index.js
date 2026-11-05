@@ -15,6 +15,7 @@ export {
   rankItems,
   writeBriefs,
 } from "./brief.js";
+export { PURGE_GATE_FILE, createPurgeFence, readPurgeGate, scrubBriefs } from "./purge-gate.js";
 export { MEMORY_CATEGORY, decodeEnvelope, encodeEnvelope, indexProposals } from "./envelope.js";
 export { TRIGGER_EVENTS, handleTrigger } from "./hook-trigger.js";
 export { bindTraverseExtract, createRelayExtractionProvider, createRoleRuntime, extractForRuntime } from "./model.js";
