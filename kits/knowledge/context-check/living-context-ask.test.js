@@ -187,9 +187,12 @@ describe("#1595: question to claim", () => {
     const question = "What did we decide about the no-cron rule for product loops?";
     const documents = [
       { id: "radar", title: "Radar: a third party's agentic workflow", tags: [], category: "radar", body: `${body}\n` },
-      { id: "x1", title: "Other", tags: [], category: "x", body: "We decide things.\nThe product rule is simple.\n" },
+      ...Array.from({ length: 12 }, (_, i) => ({ id: `x${i}`, title: `Other ${i}`, tags: [], category: "x", body: "We decide things.\nThe product rule is simple.\n" })),
     ];
     const picked = selectClaimsForQuestion({ question, documents, minCoverage: 0.1 });
+    const weights = picked.weights;
+    const share = ["cron", "loop"].reduce((sum, t) => sum + weights.get(t), 0) / [...weights.values()].reduce((sum, w) => sum + w, 0);
+    assert.ok(share > 0.5, `the two rare words carry most of the weight (${share.toFixed(2)}), which is why weight alone let this through`);
     assert.equal(picked.selected.find((entry) => entry.id === "radar").passage, "", "two of five words: nominated, not quoted");
     const full = selectClaimsForQuestion({ question: "cron loops", documents, minCoverage: 0.1 });
     assert.match(full.selected.find((entry) => entry.id === "radar").passage, /Queues, not loops/, "...but it is a fine answer to a question made of those two words");
