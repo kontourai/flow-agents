@@ -30,6 +30,12 @@ Proposals with a score use envelope version 1.3; existing proposals without one 
 
 Once Ferry publishes the API, pass in the real importer. Its tool events are not dream session records; the mapping from events to dream input and the cursor commit path still need to be built and tested.
 
+## Retiring the old instinct store
+
+Run `node kits/knowledge/instincts/retirement-plan.js` to print the current plan. The command only prints a checklist; it does not migrate data, change a schedule, alter an installed skill, or archive a store. The migration command is not available yet.
+
+Before retiring the old job, the owner must review a dry run against a copy, approve the live migration, and independently verify retrieval and brief quality. Keep the old store on disk as a read-only archive and retain the old job configuration. For rollback, restore access to that archive and its job configuration, then review any migrated proposals before withdrawing them. Do not delete the old store.
+
 ## The run
 
 ```
