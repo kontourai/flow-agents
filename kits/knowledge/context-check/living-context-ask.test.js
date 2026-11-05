@@ -995,6 +995,9 @@ describe("the block layer: a flat document is read as prose, anything contextual
       ["a rule right after a bullet", "- ***\n  **A**.\n2) **B**\n", "A. 2) B"],
       ["a table inside a list item", "- P\n  | a | b |\n  |---|---|\n  | c | d |\n  The **key** is reserved.\n", "The key is reserved."],
       ["an indented table row", "Intro.\n\n   | a | b |\n   |---|---|\n", "| a | b | |---|---|"],
+      ["a table row with a leading pipe inside a list item", "- P\n  | a\n  | ---\n  The **key** is reserved.\n", "The key is reserved."],
+      ["a table straight after a list item", "- P\n|a|\n|---|\nThe **key** is reserved.\n", "P The key is reserved."],
+      ["a wide gap after a bullet", "-    X\nThe **key** is\nreserved.\n", "X The key is reserved."],
       ["an indented paragraph after a heading", "# Title\n  The **key** is reserved.\n", "The key is reserved."],
       ["indented code", "Intro.\n\n    The **key** is\n    reserved.\n", "The key is reserved."],
       ["an indented code marker after a bullet", "-     The **key** is\n      reserved.\n", "The key is reserved."],
@@ -1023,6 +1026,11 @@ describe("the block layer: a flat document is read as prose, anything contextual
     // The fallback is exactly the version 2 reading: not even a heading marker is taken off a line.
     assert.equal(await verdict("**Enable** signing.", "> Quote\n# **Enable** signing.\n"), "not-addressed");
     assert.equal(await verdict("# **Enable** signing.", "> Quote\n# **Enable** signing.\n"), "supported");
+    // A claim may leave off a sentence's closing full stop but may not add another one, in a flat document and in the fallback alike.
+    assert.equal(await verdict("P..", "> Q\nP.\n"), "not-addressed");
+    assert.equal(await verdict("Para one..", "Para one.\n\nPara **two**.\n"), "not-addressed");
+    assert.equal(await verdict("Para one", "Para one.\n\nPara **two**.\n"), "supported");
+    assert.equal(await verdict("Para two.", "Para one.\n\nPara **two**.\n"), "supported");
     // ...and a physical line is still a physical line.
     assert.equal(await verdict("Do not", "> Do not\n> **enable** signing.\n"), "supported");
     assert.equal(await verdict("Child **x**", "- Parent\n  - Child **x**\n"), "supported");

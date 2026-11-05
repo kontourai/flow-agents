@@ -57,6 +57,7 @@ const POISON = [
   /^[ \t]{2,}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/, // a nested list item
   // A list item whose content is itself a block: a quote, a fence, a heading, HTML, another item, or indented code (five spaces after the marker).
   /^[ ]?(?:[-*+]|\d{1,9}[.)])(?:[ \t]+(?:>|`{3,}|~{3,}|#{1,6}(?:[ \t]|$)|<[!/?A-Za-z]|\[[^\]]+\]:|([-*_])(?:[ \t]*\1){2,}[ \t]*$|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))|[ ]{5,}\S|\t)/,
+  /^[ ]?(?:[-*+]|\d{1,9}[.)])[ ]{3,}\S/, // wide space after the marker: where the item's content starts depends on the renderer (indented code, lazy lines)
 ];
 // Words that end in a full stop without ending a sentence, and dotted initialisms (`U.S.`, `e.g.`, `a.m.`); tested on the last word only.
 const ABBREVIATION = /^(?:(?:[a-z]\.)*[a-z]|etc|vs|cf|approx|fig|no|dr|mr|mrs|ms|st|inc|ltd)\.$/i;
@@ -208,6 +209,7 @@ export function isFlatDocument(text) {
 function isContextual(lines, start) {
   let previous = ""; // the previous line, "" at the start, after a blank line and around a fence
   let previousIsHeading = false;
+  let inItem = false; // a list item is open: no blank line since its marker
   let fence;
   for (let index = start; index < lines.length; index++) {
     const line = lines[index];
@@ -227,7 +229,10 @@ function isContextual(lines, start) {
     if (POISON.some((pattern) => pattern.test(line))) return true;
     if (/^ {2,}(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$)/.test(line)) return true; // a heading or a rule inside a list item (indented): it resets the item's paragraph
     if (SETEXT_ANY.test(line) && !BLANK.test(previous)) return true; // an underline, at any indentation, turns the paragraph above into a heading
-    if (/^ {2,}\S.*\|/.test(line)) return true; // an indented table row (a table inside a list item)
+    if (/^ {2,}.*\|/.test(line)) return true; // an indented table row (a table inside a list item)
+    if (inItem && line.includes("|")) return true; // a table row straight after a list item, with no blank line between: the table may belong to the item
+    if (BLANK.test(line)) inItem = false;
+    else if (LIST_MARKER.test(line)) inItem = true;
     if (/^ {2}/.test(line) && (BLANK.test(previous) || previousIsHeading)) return true; // indented code, or a loose list item's next paragraph: both depend on the item above
     previousIsHeading = ATX.test(line);
     previous = line;
@@ -258,8 +263,7 @@ export function statementInUnits(units, statement) {
     let offset = 0;
     for (const key of keys) {
       starts.push(offset);
-      ends.add(offset + key.length);
-      if (key.endsWith(".")) ends.add(offset + key.length - 1);
+      ends.add(key.endsWith(".") ? offset + key.length - 1 : offset + key.length); // a sentence ends before its closing full stop; a claim may omit that stop but may not add another
       offset += key.length + 1;
     }
     const joined = keys.join(" ");
