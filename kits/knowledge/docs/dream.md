@@ -240,7 +240,8 @@ id is the sitting's working-directory name. Nothing else decides scope.
   It does **not** remove: the erased text inside other dream proposals from the same session
   ([#1612](https://github.com/kontourai/flow-agents/issues/1612)); backups and snapshots of the
   store; context already given to a running session; anything erased through a store opened
-  without the fence.
+  without the fence (a store-level purge epoch that any handle bumps would close this:
+  [corpus#75](https://github.com/kontourai/corpus/issues/75)).
 
   **To turn it on,** pass a purge fence when you open the store:
   `corpusStore: { …, purgeFence: createPurgeFence({ dreamDir }) }`. `createPurgeFence` is exported
@@ -272,6 +273,11 @@ id is the sitting's working-directory name. Nothing else decides scope.
     settles the gate even if the purge itself fails. Sessions start without memory until then.
   - Two fenced purges cannot overlap: the second fails with `PURGE_GATE_BUSY`.
   - A dream run never blocks a purge: it takes no lock the purge needs.
+
+  Limits: the gate sits beside the briefs, so deleting `purge-gate.json` by hand also removes the
+  protection (an old unstamped brief is then served again). And a session that is already reading the
+  brief when a purge begins is not stopped; the host drains in-flight reads before purging
+  (Addendum M).
 
 ## Invocation contract (what a host scheduler calls)
 
