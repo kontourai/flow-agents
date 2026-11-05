@@ -68,6 +68,9 @@ const MARKUP = /[*_~`[\]\\<>]/;
 const ENTITY = /&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/;
 const isAlnum = (c) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
 const isSpace = (c) => c === undefined || /\s/.test(c);
+// CommonMark decides whether a delimiter run can open or close from the characters around it: Unicode whitespace, Unicode punctuation and
+// symbols (P and S), or anything else ("other": letters, digits, combining marks, joiners...). A run followed by an "other" character cannot close.
+const isOther = (c) => c !== undefined && !/\s/.test(c) && !/[\p{P}\p{S}]/u.test(c);
 const OPENS_AFTER = new Set([" ", "(", "[", "{", "\"", "'"]);
 
 /**
@@ -106,7 +109,7 @@ function renderOrNull(text) {
       const prev = text[i - 1];
       const next = text[i + run];
       // Text, as in CommonMark: a lone `_` inside a word, and a lone marker between spaces.
-      if (run === 1 && ((c === "_" && isAlnum(prev) && isAlnum(next)) || (isSpace(prev) && isSpace(next)))) { out += c; i++; continue; }
+      if (run === 1 && ((c === "_" && isOther(prev) && isOther(next)) || (isSpace(prev) && isSpace(next)))) { out += c; i++; continue; }
       const width = run === 1 || run === 2 ? run : 0;
       if (width === 0 || (prev !== undefined && !OPENS_AFTER.has(prev)) || !isAlnum(next)) return null;
       const close = text.indexOf(c, i + width);
@@ -114,7 +117,7 @@ function renderOrNull(text) {
       let closeRun = 1;
       while (text[close + closeRun] === c) closeRun++;
       const content = text.slice(i + width, close);
-      if (closeRun !== width || MARKUP.test(content) || isSpace(content[content.length - 1]) || isAlnum(text[close + width])) return null;
+      if (closeRun !== width || MARKUP.test(content) || isSpace(content[content.length - 1]) || isOther(text[close + width])) return null;
       out += content; i = close + width; continue;
     }
     return null; // `~`, `\`, `<`, `>`, `]`: strikethrough (an extension), an escape, HTML, a quote marker or a stray bracket

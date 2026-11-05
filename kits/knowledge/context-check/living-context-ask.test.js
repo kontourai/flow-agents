@@ -783,6 +783,12 @@ describe("review round 5", () => {
       assert.equal(await verdict("Use allow here.", `${excerpt}\n`), "not-addressed", excerpt);
     }
     assert.equal(await verdict("Use allow here.", "Use _allow_ here.\n"), "supported");
+    // A closing run followed by a character that is neither space nor punctuation (a combining mark, a joiner) cannot close, as in CommonMark.
+    for (const mark of ["\u0301", "\u200d", "\u0e31"]) {
+      assert.equal(await verdict(`A${mark}`, `_A_${mark}\n`), "not-addressed", JSON.stringify(mark));
+      assert.equal(await verdict(`A${mark}`, `*A*${mark}\n`), "not-addressed", JSON.stringify(mark));
+    }
+    for (const after of [".", ")", " B", "\u2014x", "\u00bb"]) assert.equal(await verdict(`A${after}`, `_A_${after}\n`), "supported", `closes before ${JSON.stringify(after)}`);
     assert.equal(await verdict("Use allow here.", "Use ~~allow~~ here.\n"), "not-addressed", "strikethrough is a GFM extension, not rendered");
     assert.equal(await verdict("Use snake_case_name here.", "Use snake_case_name here.\n"), "supported", "an intraword underscore is text");
     assert.equal(await verdict("Total is 2*3*4.", "Total is 2*3*4.\n"), "supported", "intraword asterisks are text on both sides");
