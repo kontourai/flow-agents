@@ -890,6 +890,20 @@ describe("review round 5", () => {
     assert.match(early.stdout, /0 readable at that time/);
   });
 
+  test("an answer lists the question words its sentence leaves out, in the result and in the CLI", async () => {
+    const m = await track(async ({ make }) => {
+      for (let i = 0; i < 10; i++) await make("2026-10-01T00:00:00.000Z", { title: `Planning note ${i}`, body: "We decide things together.\n" });
+      return { cache: await make("2026-10-02T00:00:00.000Z", { title: "Cache policy", body: "The cache uses LRU eviction.\n", tags: ["cache"] }) };
+    });
+    const result = await ask({ repoRoot: m.repo, revision: m.revision, question: "What did we decide about cache eviction?" });
+    const entry = result.results.find((item) => item.claim_id === m.ids.cache);
+    assert.equal(entry.outcome, "answered");
+    assert.deepEqual(entry.missing_terms, ["decide"]);
+    const cli = spawnSync(process.execPath, [path.join(__dirname, "ask-cli.js"), "--repo", m.repo, "--revision", m.revision, "--reader", "maintainer", "--now", NOW, "What did we decide about cache eviction?"], { encoding: "utf8" });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.match(cli.stdout, /"The cache uses LRU eviction\."\n\s+not in this sentence or the title: decide/);
+  });
+
   test("exclusions of further sources are reported by reason, without naming the claims", async () => {
     const m = await track(async ({ put }) => { put("docs/p.md", "Public pricing is flat.\n"); return {}; });
     const source = { ...sourceOf([manifestClaim("pub", "docs/p.md")], [recordOf("pub", "docs/p.md", "Public pricing", "Public pricing is flat.\n")]), excluded: [{ claim_id: "hidden-id", reason: "claim_too_long" }] };
