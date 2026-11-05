@@ -21,6 +21,12 @@ the build checks that artifact before compiling. A YAML dependency update must
 regenerate it alongside the lockfile. The optional Anthropic SDK remains behind
 the optional-dependency boundary.
 
+The Knowledge Kit also loads `neo4j-driver` 6.3 lazily as an optional dependency.
+Its connection adapter uses the public `driver`, `auth.basic`, session and
+connectivity APIs; selecting no graph or an unavailable graph retains the file
+provider fallback. Provider unit and conformance tests use an injected driver.
+They do not qualify a live Neo4j server or database migration.
+
 The deterministic reviewed-grounding reference declares Forage as a development
 dependency for its public snapshot store, reference builder and resolver. This
 keeps acquisition persistence and exact replay with their owning package while
