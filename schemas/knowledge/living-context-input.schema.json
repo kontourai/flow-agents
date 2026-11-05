@@ -59,6 +59,7 @@
     }
   },
   "anyOf": [
+    { "required": ["claim_ids"] },
     { "required": ["changed_surfaces"] },
     { "required": ["diff"] }
   ],
