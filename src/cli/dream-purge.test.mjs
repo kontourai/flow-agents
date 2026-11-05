@@ -339,6 +339,39 @@ test("a real I/O error syncing the gate's directory stops the purge; a platform 
   assert.equal(await createPurgeFence({ dreamDir: env.dreamDir })(async () => "ran"), "ran");
 });
 
+test("a permission error on the gate's directory stops the purge (it is not a platform limit)", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async (t) => {
+  const env = readerWorkspace(t);
+  fs.mkdirSync(env.dreamDir, { recursive: true });
+  fs.chmodSync(env.dreamDir, 0o300); // may create files in it, but not open it for reading
+  let ran = false;
+  try {
+    await assert.rejects(() => createPurgeFence({ dreamDir: env.dreamDir })(async () => { ran = true; }), (error) => error.code === "EACCES");
+  } finally {
+    fs.chmodSync(env.dreamDir, 0o700); // before the workspace is removed
+  }
+  assert.equal(ran, false, "the purge did not run without a durable gate");
+});
+
+test("if settling cannot be confirmed, the brief files are already gone and old briefs stay refused", async (t) => {
+  const env = readerWorkspace(t);
+  const nodeFs = require("node:fs");
+  const real = nodeFs.fsyncSync;
+  t.after(() => { nodeFs.fsyncSync = real; syncBuiltinESMExports(); });
+  fs.mkdirSync(path.dirname(env.global), { recursive: true });
+  fs.writeFileSync(env.global, JSON.stringify({ version: 1, entries: ["[stated · unreviewed] erased text"] }));
+  let directorySyncs = 0;
+  nodeFs.fsyncSync = (fd) => {
+    if (nodeFs.fstatSync(fd).isDirectory() && ++directorySyncs === 2) throw Object.assign(new Error("injected"), { code: "EIO" }); // the settle's sync
+    return real(fd);
+  };
+  syncBuiltinESMExports();
+  await assert.rejects(() => createPurgeFence({ dreamDir: env.dreamDir })(async () => "purged"), (error) => error.code === "PURGE_GATE_NOT_SETTLED" && error.purgeResult === "purged");
+  assert.equal(directorySyncs, 2);
+  assert.equal(fs.existsSync(env.global), false, "the brief was deleted before the settle");
+  fs.writeFileSync(env.global, JSON.stringify({ version: 1, entries: ["[stated · unreviewed] erased text"] }));
+  assert.equal(injectedContext(env.xdg), null, "a brief compiled before the purge is refused");
+});
+
 test("a gate whose generation is not a string is unreadable, not coerced", async (t) => {
   const env = readerWorkspace(t);
   fs.mkdirSync(env.dreamDir, { recursive: true });

@@ -231,12 +231,14 @@ id is the sitting's working-directory name. Nothing else decides scope.
   markers are removed from every entry, because #672's reader drops the whole file if any
   entry has one.
 - **After a purge.** If the store was opened with a purge fence (below), erasing a record also
-  stops it reaching new sessions through briefs: the purge deletes every brief file, and sessions
+  stops it reaching new sessions through briefs: the purge deletes the brief files, and sessions
   refuse any brief written before the purge, even one restored from a backup. The next dream run
   writes fresh briefs from what is left. This meets
   [store contract Addendum M](./store-contract.md) for briefs.
 
-  A fenced purge removes the record from the store and every file in `<dreamDir>/briefs/`.
+  A fenced purge removes the record from the store and tries to delete `global.json` and every
+  `project-<id>.json` in `<dreamDir>/briefs/` (other files there, such as editor backups, are left,
+  and a delete that fails is reported through `onScrub` but does not fail the purge).
   It does **not** remove: the erased text inside other proposals and records from the same sitting
   ([#1612](https://github.com/kontourai/flow-agents/issues/1612)); backups and snapshots of the
   store; context already given to a running session; anything erased through a store opened
@@ -256,12 +258,13 @@ id is the sitting's working-directory name. Nothing else decides scope.
   from `dream/index.js`, and both store adapters accept the option. Any host that erases must open
   its store this way. Every `purge` (and `purgeProposal`, where the package has it) then does this:
   1. Opens the gate (`purging`, new token) and makes it durable **before** the store is touched. If
-     the gate cannot be opened, the purge does not run.
+     the gate cannot be opened or synced to disk, the purge does not run.
   2. Runs the purge.
-  3. Settles the gate with another new token, whether the purge returned or threw, and deletes the
-     brief files. A file that cannot be deleted is reported through `onScrub` and does not fail the
-     purge, because the token already stops it being served. If the gate itself cannot be settled,
-     the purge throws `PURGE_GATE_NOT_SETTLED` and briefs stay refused until the next fenced purge.
+  3. Deletes the brief files, then settles the gate with another new token, whether the purge returned
+     or threw. A file that cannot be deleted is reported through `onScrub` and does not fail the
+     purge, because the token already stops it being served. If the gate itself cannot be confirmed
+     settled, the purge throws `PURGE_GATE_NOT_SETTLED`; briefs compiled before the purge stay refused
+     either way, but the new gate may already allow fresh briefs.
 
   Guarantees:
   - A brief compiled before the purge is never served, even if its file is put back (a restored

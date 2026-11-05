@@ -296,7 +296,7 @@ not be injected. The producer keeps `purge-gate.json` in the brief directory's p
 `{"version":1,"generation":"<32 hex>","state":"settled"|"purging"}`, and adds
 `"purgeGeneration":"<the generation it was compiled under>"` to each brief. The reader
 injects a brief only when there is no gate file and the brief has no `purgeGeneration`
-(nothing was ever purged), or the gate is `settled` and `purgeGeneration` equals its
+(no fenced purge has run), or the gate is `settled` and `purgeGeneration` equals its
 `generation`. Otherwise the brief contributes nothing. In particular, the reader refuses a brief when the gate is
 `purging`, unreadable, malformed, not a regular file or over 1024 bytes; when a gate exists and the
 brief's stamp is missing or different; and when the brief has a stamp but no gate exists.

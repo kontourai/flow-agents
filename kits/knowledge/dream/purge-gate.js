@@ -41,8 +41,9 @@ export const PURGE_GATE_VERSION = 1;
 export const PURGE_GATE_FILE = "purge-gate.json";
 const MAX_GATE_BYTES = 1024;
 const TOKEN = /^[0-9a-f]{32}$/;
-// What a platform answers when a directory cannot be opened or synced (Windows, some network filesystems).
-const DIRECTORY_SYNC_UNSUPPORTED = new Set(["EINVAL", "ENOTSUP", "EPERM", "EISDIR", "EACCES", "ENOSYS"]);
+// What a platform answers when a directory cannot be synced at all. Windows cannot open a directory for reading, so
+// it also answers with permission and "is a directory" errors; on other platforms those are real failures.
+const DIRECTORY_SYNC_UNSUPPORTED = new Set(["EINVAL", "ENOTSUP", "ENOSYS", ...(process.platform === "win32" ? ["EPERM", "EISDIR", "EACCES"] : [])]);
 const BRIEF_FILE = /^(?:global|project-[a-z0-9_-]{1,64})\.json$/;
 
 export const purgeGatePath = (dreamDir) => path.join(dreamDir, PURGE_GATE_FILE);
@@ -152,6 +153,14 @@ export function createPurgeFence({ dreamDir, onScrub } = {}) {
       } catch (error) {
         failure = { error };
       }
+      // The brief files go first, so deleting them never depends on the gate settling. A dream run that still
+      // writes one afterwards read the gate before it opened, and deletes it again when it sees the gate moved.
+      const scrubbed = scrubBriefs(dreamDir);
+      try {
+        onScrub?.(scrubbed);
+      } catch {
+        // an observer's failure is not the purge's
+      }
       // Settled whether the purge returned or threw: a throw does not say whether it committed, and the new token
       // refuses every brief compiled before it either way. Only a process death leaves the gate open.
       try {
@@ -161,13 +170,9 @@ export function createPurgeFence({ dreamDir, onScrub } = {}) {
           failure.error.gateSettleError = settleError;
           throw failure.error;
         }
-        throw dreamError("PURGE_GATE_NOT_SETTLED", "the purge committed but its brief gate could not be settled; briefs stay refused until a purge runs again", { cause: settleError, purgeResult: result });
-      }
-      const scrubbed = scrubBriefs(dreamDir);
-      try {
-        onScrub?.(scrubbed);
-      } catch {
-        // an observer's failure is not the purge's
+        // The new gate may already be visible even though it could not be made durable. Either way, every brief
+        // compiled before the purge stays refused.
+        throw dreamError("PURGE_GATE_NOT_SETTLED", "the purge committed but its brief gate could not be confirmed settled; briefs compiled before the purge stay refused", { cause: settleError, purgeResult: result });
       }
       if (failure) throw failure.error;
       return result;

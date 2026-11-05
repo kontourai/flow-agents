@@ -2027,7 +2027,7 @@ The host must rebuild or invalidate each content-bearing projection before it
 serves it again, including any compiled briefs and indexes. For compiled briefs
 the kit provides this: open the store with `purgeFence: createPurgeFence({ dreamDir })`,
 and every erasing call (`purge`, and `purgeProposal` where the package has it, but not
-read-only previews) deletes the brief files, while sessions refuse any brief written
+read-only previews) tries to delete the brief files, while sessions refuse any brief written
 before the purge (see [dream.md](./dream.md#the-briefs), "After a purge"). A purge on a
 store opened without the fence is not covered, and neither is any other projection.
 Host-built projections, backups, snapshots, and migration manifests are outside Corpus Store's purge
