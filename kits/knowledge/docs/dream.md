@@ -265,7 +265,8 @@ id is the sitting's working-directory name. Nothing else decides scope.
     only. Hosts that erase must open their store with the fence (Station's erasure should use it).
   - Other copies. Each proposal body carries its sitting's whole plan (see *Replay safety*), so a
     sibling proposal can still hold the text of a claim whose own record was erased. That is the
-    "survivors need producer review" case in Addendum M; it is not scrubbed here.
+    "survivors need producer review" case in Addendum M; it is not scrubbed here
+    ([#1612](https://github.com/kontourai/flow-agents/issues/1612)).
   - Corpus's own `previewPurge` revision. It is a digest of the whole store that moves on every write,
     so it cannot tell a purge from a proposal the dream just made; it confirms a purge, it does not mark one.
 
