@@ -1,12 +1,13 @@
 // The dream run against the REAL Corpus store (the published @kontourai/corpus-store, pinned in package.json), not the
 // in-test store the other suites use. Always on: the package is a dev dependency.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { KitDefaultStoreAdapter, standaloneFileMutationLock } from "@kontourai/corpus-store";
 import { runDream } from "../../kits/knowledge/dream/run.js";
-import { FakeCorpusStore, SCRIPT, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
+import { FakeCorpusStore, NOW_ISO, SCRIPT, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
 
 
 async function realStore(ws) {
@@ -223,4 +224,20 @@ test("the in-test store answers a request key as the real store does: same reque
   }
   assert.equal((await fake.listProposals()).length, 1);
   assert.equal((await real.listProposals()).length, 1);
+});
+
+
+test('real Corpus deduplicates a tool-event retry after a crash before cursor commit', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = await realStore(ws); const sourceId = 'fixture-observation'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture-session', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash before cursor'); } })), /crash before cursor/);
+  assert.equal(fs.existsSync(ws.cursorFile), false);
+  const first = await store.listProposals(); assert.equal(first.length, 1);
+  await runDream(host, runOptions(ws));
+  const second = await store.listProposals(); assert.equal(second.length, 1); assert.equal(second[0].id, first[0].id);
+  assert.equal((await runDream(host, runOptions(ws))).sittings.seen, 0);
 });

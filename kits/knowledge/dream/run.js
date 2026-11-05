@@ -35,6 +35,8 @@ import {
   routeMemoryChange,
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
+import { ingestObservationSources } from "../instincts/observation-source.js";
+import { toolEventResidue } from "../instincts/tool-event-residue.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, classifyCurrent, effectiveItems, isSealed, writeBriefs } from "./brief.js";
 import { memorySlotKey } from "@kontourai/flow-agents/memory-claims";
 import { memoryAccumulationQuery } from "../adapters/memory-claims/index.mjs";
@@ -148,6 +150,7 @@ function pruneReports(dir) {
  * @property {(name: string, root: string) => unknown} registerRoot
  * @property {string} root absolute, host-authorised memory root
  * @property {string} rootName
+ * @property {Array<{sourceId: string, data: string, importer: Function}>} [observationSources] host-authorized observation inputs; each sourceId is stable and opaque
  * @property {Function} [extract] model-backed `MemoryExtract` (see model.js); not needed for a dry run
  * @property {() => object[] | Promise<object[]>} [reviewDecisions] Survey review decisions, for brief labels and metrics
  * @property {(batch: {runId: string, decisions: object[], reviewItems: object[], metrics: object|null}) => unknown} publish
@@ -237,6 +240,11 @@ export async function runDream(host, options = {}) {
       blocked: countBy(ingest.report.blocked, "reason"),
       cursor_held: ingest.report.cursor_held,
     };
+    // A source cursor advances only after every event in that source batch is processed.
+    // The same cursor file commits runtime and observation progress last.
+    const runtimeResidues = [...ingest.residues];
+    const observations = host.observationSources === undefined ? null : ingestObservationSources(host.observationSources, cursor.observations ?? {}, cursor.sittings, toolEventResidue);
+    if (observations) ingest.residues.push(...observations.batches.flatMap((batch) => batch.residues));
     report.sittings.seen = ingest.residues.length;
     report.redaction_hits = redactionHits(ingest.residues);
 
@@ -460,11 +468,15 @@ export async function runDream(host, options = {}) {
     // (an incomplete sitting, one past the per-run cap, or one that failed).
     const sittings = { ...cursor.sittings };
     for (const residue of selected) if (processed.has(residue.sittingId)) sittings[residue.sittingId] = residue.contentHash;
-    const undone = ingest.residues.some((residue) => !processed.has(residue.sittingId));
+    const undone = runtimeResidues.some((residue) => !processed.has(residue.sittingId));
+    if (observations) for (const batch of observations.batches) {
+      if (batch.residues.every((residue) => processed.has(residue.sittingId))) observations.cursors[batch.key] = batch.cursor;
+    }
     const next = {
       schema_version: ingest.candidateCursor.schema_version,
       telemetry: undone ? cursor.telemetry : ingest.candidateCursor.telemetry,
       sittings,
+      ...(observations ? { observations: observations.cursors } : cursor.observations === undefined ? {} : { observations: cursor.observations }),
     };
     const changed = JSON.stringify(next) !== JSON.stringify(cursor);
     const nextBytes = `${JSON.stringify(next, null, 2)}\n`;

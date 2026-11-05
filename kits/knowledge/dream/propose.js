@@ -46,7 +46,11 @@ export async function proposeSitting({ residue, plan, decisions, visibilityKey, 
       if (known.proposal.proposer_id !== proposerId) {
         throw dreamError("DREAM_SEMANTIC_COLLISION", "a proposal by another proposer already holds this claim id", { claimId: entry.claim.id });
       }
-      reused.push({ claimId: entry.claim.id, proposalId: known.proposal.id, state: known.proposal.state });
+      if (residue.source === "tool-event") {
+        // Re-submit the original candidate so the stable Corpus request key
+        // deduplicates a crash after effects but before cursor commit.
+        fresh.push({ entry, position, previous: known.proposal });
+      } else reused.push({ claimId: entry.claim.id, proposalId: known.proposal.id, state: known.proposal.state });
       return;
     }
     fresh.push({ entry, position });
@@ -57,7 +61,7 @@ export async function proposeSitting({ residue, plan, decisions, visibilityKey, 
     category: MEMORY_CATEGORY,
     body: encodeEnvelope({ plan, index: position, decision: decisions[position], sitting }),
   });
-  const candidates = fresh.map(({ position }) => candidateFor(position));
+  const candidates = fresh.map(({ position, previous }) => previous ? { title: previous.candidate.title, category: previous.candidate.category, body: previous.candidate.body } : candidateFor(position));
 
   if (!write) return { created, reused, preview: candidates.map((candidate, i) => ({ ...candidate, claimId: fresh[i].entry.claim.id })) };
   if (candidates.length === 0) return { created, reused, preview: [] };
@@ -78,7 +82,12 @@ export async function proposeSitting({ residue, plan, decisions, visibilityKey, 
   if (result.proposals.length !== candidates.length) {
     throw dreamError("DREAM_PROPOSAL_COUNT", "the store returned a different number of proposals than were requested");
   }
-  result.proposals.forEach((proposalId, i) => created.push({ claimId: fresh[i].entry.claim.id, proposalId }));
+  result.proposals.forEach((proposalId, i) => {
+    if (fresh[i].previous) {
+      if (proposalId !== fresh[i].previous.id) throw dreamError("DREAM_REPLAY_MISMATCH", "replayed observation produced a different proposal");
+      reused.push({ claimId: fresh[i].entry.claim.id, proposalId, state: fresh[i].previous.state });
+    } else created.push({ claimId: fresh[i].entry.claim.id, proposalId });
+  });
   return { created, reused, preview: [] };
 }
 
