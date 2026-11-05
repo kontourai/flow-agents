@@ -27,7 +27,7 @@ function profileMemoryEnabled(event) {
 // keeps `<dreamDir>/purge-gate.json` = {version:1, generation, state:'settled'|'purging'} and stamps each brief with
 // the generation it was compiled under (`purgeGeneration`). Serve only when the gate is settled and the stamp equals
 // it. No gate file means no purge has fenced this directory, and then a brief must carry no stamp. An unreadable or
-// malformed gate refuses the brief: erasure fails closed.
+// malformed gate refuses every brief.
 const MAX_GATE_BYTES = 1024;
 function purgeGateAllows(dreamDir, brief) {
   let text;

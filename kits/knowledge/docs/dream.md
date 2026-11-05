@@ -1,6 +1,6 @@
 # The dream run
 
-The dream run distils accumulated Claude Code and Codex sessions into proposed memory
+The dream run distils accumulated agent sessions into proposed memory
 claims and re-renders the budgeted briefs that session start reads. It is the
 orchestration over four contracts that other lanes own. It adds no parser, no store, no
 claim shape and no review queue of its own.
@@ -230,45 +230,48 @@ id is the sitting's working-directory name. Nothing else decides scope.
 - **The reader's rules.** Control characters, bidi overrides and the injected-memory
   markers are removed from every entry, because #672's reader drops the whole file if any
   entry has one.
-- **After a purge.** A brief is a copy of store content, so erasing a record in the store does
-  not erase it from a brief already written. Store contract Addendum M requires the host to
-  invalidate such copies before they are served again; the **purge gate** does that for briefs.
-  `<dreamDir>/purge-gate.json` holds `{"version":1,"generation":"<token>","state":"settled"|"purging"}`.
-  Every brief records the token it was compiled under as `purgeGeneration`, and the session-start
-  reader serves a brief only while the gate is `settled` and the two tokens match. A store that has
-  never been purged has no gate file, and its briefs keep the plain `{"version":1,"entries":[…]}` shape.
+- **After a purge.** A brief is a copy of store content, so erasing a record does not erase it
+  from briefs already written. If the store was opened with a purge fence (below), a purge
+  deletes every brief file, and sessions refuse any brief written before the purge, even one
+  restored from a backup. The next dream run writes fresh briefs from what is left. This meets
+  store contract Addendum M for briefs.
 
-  To use it, open the store with a fence: `corpusStore: { …, purgeFence: createPurgeFence({ dreamDir }) }`
-  (exported from `dream/index.js`; both adapter entry points accept it). Every erasing call on that
-  store (`purge`, and `purgeProposal` where the package has it) then does this:
-  1. Opens the gate (`purging`, new token) and makes it durable **before** the store is touched. If the
-     gate cannot be opened, the purge does not run.
+  A fenced purge removes the record from the store and every file in `<dreamDir>/briefs/`.
+  It does **not** remove: the erased text inside other dream proposals from the same session
+  ([#1612](https://github.com/kontourai/flow-agents/issues/1612)); backups and snapshots of the
+  store; context already given to a running session; anything erased through a store opened
+  without the fence.
+
+  **To turn it on,** pass a purge fence when you open the store:
+  `corpusStore: { …, purgeFence: createPurgeFence({ dreamDir }) }`. `createPurgeFence` is exported
+  from `dream/index.js`, and both store adapters accept the option. Any host that erases must open
+  its store this way. Every `purge` (and `purgeProposal`, where the package has it) then does this:
+  1. Opens the gate (`purging`, new token) and makes it durable **before** the store is touched. If
+     the gate cannot be opened, the purge does not run.
   2. Runs the purge.
   3. Settles the gate with another new token, whether the purge returned or threw, and deletes the
      brief files. A file that cannot be deleted is reported through `onScrub` and does not fail the
      purge, because the token already stops it being served.
 
-  What that gives you:
-  - A brief compiled before the purge is never served, even if its file is put back (a restored backup,
-    a delete that failed): its token is old.
-  - A dream run that took its store snapshot before the purge and writes after it carries an old token
-    as well. The run also re-reads the gate after writing; if it changed, it deletes what it wrote and
-    reports `briefs_held: "purge-raced"`. The next run starts after the purge and rebuilds.
-  - If the purge process dies after step 1, the gate stays `purging` and no brief is served. A run that
-    finds the gate open writes nothing (`briefs_held: "purge-in-progress"`). Run the purge again: it
-    reopens and settles the gate. Losing memory until then is the price of never leaking erased content.
-  - Two fenced purges cannot overlap: the second fails with `PURGE_GATE_BUSY`.
-  - The dream run does not take a lock the purge needs, so a long run never blocks an erasure.
+  **How it works.** The *gate* is `<dreamDir>/purge-gate.json`:
+  `{"version":1,"generation":"<token>","state":"settled"|"purging"}`. `settled` means briefs may
+  be served; `purging` means a purge is under way. The token is replaced at the start and end of
+  every purge. Each brief records the token it was compiled under as `purgeGeneration`, and the
+  session-start reader serves a brief only while the gate is `settled` and the two tokens match.
+  A store never purged through a fence has no gate file, and its briefs keep the plain
+  `{"version":1,"entries":[…]}` shape.
 
-  What it does not cover:
-  - A purge made on a store opened **without** the fence. The briefs are then replaced on the next run
-    only. Hosts that erase must open their store with the fence (Station's erasure should use it).
-  - Other copies. Each proposal body carries its sitting's whole plan (see *Replay safety*), so a
-    sibling proposal can still hold the text of a claim whose own record was erased. That is the
-    "survivors need producer review" case in Addendum M; it is not scrubbed here
-    ([#1612](https://github.com/kontourai/flow-agents/issues/1612)).
-  - Corpus's own `previewPurge` revision. It is a digest of the whole store that moves on every write,
-    so it cannot tell a purge from a proposal the dream just made; it confirms a purge, it does not mark one.
+  Guarantees:
+  - A brief compiled before the purge is never served, even if its file is put back (a restored
+    backup, a delete that failed): its token is old.
+  - A dream run that took its store snapshot before the purge and writes after it carries an old
+    token as well. The run also re-reads the gate after writing; if it changed, it deletes what it
+    wrote and reports `briefs_held: "purge-raced"`. The next run starts after the purge and rebuilds.
+  - If the process dies mid-purge, the gate stays `purging`: no brief is served and no dream run
+    writes one (`briefs_held: "purge-in-progress"`). To recover, make any fenced purge call. It
+    settles the gate even if the purge itself fails. Sessions start without memory until then.
+  - Two fenced purges cannot overlap: the second fails with `PURGE_GATE_BUSY`.
+  - A dream run never blocks a purge: it takes no lock the purge needs.
 
 ## Invocation contract (what a host scheduler calls)
 
@@ -354,8 +357,8 @@ run it triggers distils earlier sittings, and the next run picks that one up.
 
 Set `"enabled": false`, or unset `FLOW_AGENTS_DREAM_TRIGGER`. To drop what a run
 proposed, reject its proposals in Corpus; they never became records. To stop the briefs
-being read, delete `<dreamDir>/briefs/`. Keep `purge-gate.json` when you do: it is what makes the
-reader refuse a brief compiled before a purge. To re-ingest from the start, delete the cursor
+being read, delete `<dreamDir>/briefs/`. Keep `purge-gate.json`: without it the reader cannot tell a
+brief written before a purge from one written after. To re-ingest from the start, delete the cursor
 file; sittings already proposed are reused, not re-proposed.
 
 ## Not verified here

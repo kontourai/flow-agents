@@ -17,7 +17,7 @@
  *   - a dream run that read the store before the purge committed, and writes its
  *     brief after, carries the old token too;
  *   - a purge that dies midway leaves `purging`, which refuses every brief until
- *     the purge is run again. Failing closed costs memory, never leaks erasure.
+ *     the purge is run again. Failing closed loses memory until then; it never serves erased text.
  *
  * The fence runs: open the gate (write `purging` with a new token, durably,
  * BEFORE the store is touched), run the purge, then in a `finally` settle it with
@@ -41,6 +41,8 @@ export const PURGE_GATE_VERSION = 1;
 export const PURGE_GATE_FILE = "purge-gate.json";
 const MAX_GATE_BYTES = 1024;
 const TOKEN = /^[0-9a-f]{32}$/;
+// What a platform answers when a directory cannot be opened or synced (Windows, some network filesystems).
+const DIRECTORY_SYNC_UNSUPPORTED = new Set(["EINVAL", "ENOTSUP", "EPERM", "EISDIR", "EACCES", "ENOSYS"]);
 const BRIEF_FILE = /^(?:global|project-[a-z0-9_-]{1,64})\.json$/;
 
 export const purgeGatePath = (dreamDir) => path.join(dreamDir, PURGE_GATE_FILE);
@@ -66,7 +68,7 @@ export function readPurgeGate(dreamDir) {
   }
   try {
     const gate = JSON.parse(text);
-    if (gate?.version === PURGE_GATE_VERSION && TOKEN.test(gate.generation) && (gate.state === "settled" || gate.state === "purging")) {
+    if (gate?.version === PURGE_GATE_VERSION && typeof gate.generation === "string" && TOKEN.test(gate.generation) && (gate.state === "settled" || gate.state === "purging")) {
       return { generation: gate.generation, state: gate.state };
     }
   } catch {
@@ -75,14 +77,16 @@ export function readPurgeGate(dreamDir) {
   return { generation: null, state: "unreadable" };
 }
 
-/** Whether two readings of the gate are the same, and the gate is open for writing a brief. */
+/** True when a dream run may write briefs: the gate is settled. */
 export const gateAllowsBrief = (gate) => gate.state === "settled";
+/** True when two readings of the gate are identical. */
 export const sameGate = (a, b) => a.generation === b.generation && a.state === b.state;
 
 function writeGate(dreamDir, state) {
   const generation = newToken();
   writePrivateAtomic(purgeGatePath(dreamDir), `${JSON.stringify({ version: PURGE_GATE_VERSION, generation, state })}\n`);
-  // The rename is only durable once the directory entry is. Best effort where a platform cannot fsync a directory.
+  // The rename is only durable once the directory entry is. A platform that cannot open or sync a directory is
+  // skipped; a real I/O error is not, because the gate must be durable before the store is touched.
   try {
     const fd = fs.openSync(dreamDir, fs.constants.O_RDONLY);
     try {
@@ -90,8 +94,8 @@ function writeGate(dreamDir, state) {
     } finally {
       fs.closeSync(fd);
     }
-  } catch {
-    // not supported here
+  } catch (error) {
+    if (!DIRECTORY_SYNC_UNSUPPORTED.has(error?.code)) throw error;
   }
   return generation;
 }
@@ -120,8 +124,8 @@ export function scrubBriefs(dreamDir) {
 
 /**
  * A fence to hand a store as its `purgeFence`: `fence(run)` runs the purge `run`
- * inside the gate and resolves to its result. If the gate cannot be opened the
- * purge does not run, so an unfenced purge is impossible through this store.
+ * inside the gate and resolves to its result. If the gate cannot be opened,
+ * `run` is not called.
  *
  * @param {{ dreamDir: string, onScrub?: (report: { removed: string[], failed: {name:string,code:string}[] }) => void }} options
  *   `onScrub` hears what was deleted and what could not be; a failed delete never fails the purge,

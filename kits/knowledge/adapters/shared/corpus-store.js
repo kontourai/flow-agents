@@ -23,7 +23,7 @@ export function openCorpusStore(selection, options, exportName) {
 /**
  * Run every erasing verb the store has inside the host's fence, so a projection the host built from the store
  * (a compiled brief, an index) is invalidated by the same call that erases. The fence is
- * `async (run) => result`: it opens before `run` touches the store and must not let a purge go unfenced. The
+ * `async (run) => result`. It must do its invalidation setup before calling `run`, and must not call `run` if that setup fails. The
  * kit's brief fence is `createPurgeFence` in `dream/purge-gate.js`. Read-only previews are not fenced.
  */
 function fencePurges(store, fence) {

@@ -290,16 +290,16 @@ The marker, label, entries and closing marker are bounded to 8192 UTF-8 bytes
 An absent, invalid or empty brief contributes nothing. #671 will implement the
 producer; `evals/fixtures/context-contributors/global.json` is the v1 fixture.
 
-**Purge gate (additive to v1).** After a privileged purge a brief compiled earlier must
+**Purge gate (additive to v1).** After a purge (a permanent erase of store records) a brief compiled earlier must
 not be injected. The producer keeps `purge-gate.json` in the brief directory's parent
-(`$XDG_DATA_HOME/knowledge-store/knowledge/dream/purge-gate.json`), shaped
+(by default `$XDG_DATA_HOME/knowledge-store/knowledge/dream/purge-gate.json`), shaped
 `{"version":1,"generation":"<32 hex>","state":"settled"|"purging"}`, and adds
 `"purgeGeneration":"<the generation it was compiled under>"` to each brief. The reader
 injects a brief only when there is no gate file and the brief has no `purgeGeneration`
 (nothing was ever purged), or the gate is `settled` and `purgeGeneration` equals its
-`generation`. A gate that is `purging`, unreadable, over 1024 bytes, not a regular file or
-malformed, a brief with a different or missing stamp beside a gate, and a stamp with no gate
-all contribute nothing. The gate is read after the brief, so a purge that opens between the
+`generation`. Otherwise the brief contributes nothing. That covers a gate that is `purging`, unreadable, malformed, not a regular
+file or over 1024 bytes; a missing or different stamp when a gate exists; and a stamp when no gate exists.
+The gate is read after the brief, so a purge that opens between the
 two reads is seen. A purge that begins while a session is being handed context is outside
 this guarantee: the host drains in-flight reads before it purges (store contract, Addendum M).
 

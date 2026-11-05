@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -291,6 +291,59 @@ test("the reader's gate rules: only a settled gate with a matching stamp, or no 
     if (served) assert.ok(context?.includes(entry), label);
     else assert.equal(context, null, label);
   }
+});
+
+test("a purge that lands while the run is fetching records: the snapshot is stale, so the brief is held back and not served", async (t) => {
+  // After the run took its snapshot and read the gate, but before it has finished building the items.
+  const seed = await seeded(t);
+  let purged = false;
+  const interleaving = new Proxy(seed.store, {
+    get(target, prop) {
+      if (prop === "get") {
+        return async (id) => {
+          const record = await target.get(id); // the record as it was before the purge
+          if (id === seed.sentinelRecord && !purged) { purged = true; await purgeSentinelRecord(seed); }
+          return record;
+        };
+      }
+      const value = target[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const host = hostFor(seed.ws, noApplyStore(interleaving), await sentinelExtract(seed.sentinel));
+  fs.rmSync(seed.ws.cursorFile, { force: true });
+  const report = await runDream(host, seed.options());
+  assert.ok(purged, "the purge ran during the run");
+  assert.equal(report.briefs_held, "purge-raced");
+  assert.equal(fs.existsSync(seed.global), false);
+  assert.equal(injectedContext(seed.xdg), null);
+});
+
+test("a real I/O error syncing the gate's directory stops the purge; a platform that cannot sync one does not", async (t) => {
+  const env = readerWorkspace(t);
+  const nodeFs = require("node:fs");
+  const real = nodeFs.fsyncSync;
+  const failDirectorySync = (code) => {
+    nodeFs.fsyncSync = (fd) => {
+      if (nodeFs.fstatSync(fd).isDirectory()) throw Object.assign(new Error("injected"), { code });
+      return real(fd);
+    };
+    syncBuiltinESMExports();
+  };
+  t.after(() => { nodeFs.fsyncSync = real; syncBuiltinESMExports(); });
+  let ran = false;
+  failDirectorySync("EIO");
+  await assert.rejects(() => createPurgeFence({ dreamDir: env.dreamDir })(async () => { ran = true; }), (error) => error.code === "EIO");
+  assert.equal(ran, false, "the purge did not run without a durable gate");
+  failDirectorySync("EINVAL");
+  assert.equal(await createPurgeFence({ dreamDir: env.dreamDir })(async () => "ran"), "ran");
+});
+
+test("a gate whose generation is not a string is unreadable, not coerced", async (t) => {
+  const env = readerWorkspace(t);
+  fs.mkdirSync(env.dreamDir, { recursive: true });
+  fs.writeFileSync(env.gate, JSON.stringify({ version: 1, generation: ["a".repeat(32)], state: "settled" }));
+  assert.equal(readPurgeGate(env.dreamDir).state, "unreadable");
 });
 
 test("a brief file that cannot be deleted is reported, does not fail the purge, and is still not served", async (t) => {
