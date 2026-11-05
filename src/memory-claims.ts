@@ -263,6 +263,8 @@ export interface ExtractionProposalLike {
   provenance: { excerpt: string; locator: string };
   extractor?: string;
   pathIndices?: number[];
+  /** The normalization facts this reader inspects; older extractors may omit them. */
+  valueNormalization?: { kind: string; from: unknown };
 }
 export interface ExtractionResultLike { proposals: ExtractionProposalLike[]; error?: string; warnings?: string[] }
 
@@ -335,10 +337,19 @@ function assemble(fields: Record<string, ExtractionProposalLike>, context: Assem
   if (!located) throw new MemoryClaimError("invalid", "value is not grounded in a known turn of the source");
   const validTime: NonNullable<MemoryClaim["validTime"]> = {};
   for (const [name, key] of [["validFrom", "from"], ["validUntil", "until"]] as const) {
+    if (fields[name] === undefined) continue;
     const raw = text(name);
-    if (raw === undefined) continue;
+    if (raw === undefined) throw new MemoryClaimError("invalid", `${name} is not a non-empty ISO 8601 instant`);
     const instant = memoryInstant(raw);
     if (instant === undefined) throw new MemoryClaimError("invalid", `${name} is not an ISO 8601 instant`);
+    // Traverse can normalize written dates. The Kit's strict validity contract
+    // applies to the original literal too, not just the normalized candidate.
+    const normalization = fields[name]?.valueNormalization;
+    if (normalization !== undefined) {
+      if (normalization?.kind !== "date-to-iso") throw new MemoryClaimError("invalid", `${name} has unknown normalization facts`);
+      const original = typeof normalization.from === "string" ? memoryInstant(normalization.from) : undefined;
+      if (original === undefined || original !== instant) throw new MemoryClaimError("invalid", `${name} was not the same ISO 8601 instant before normalization`);
+    }
     validTime[key] = new Date(instant).toISOString(); // `...T00:00Z` and `...T00:00+00:00` are one instant, so one claim
   }
   const hasTime = validTime.from !== undefined || validTime.until !== undefined;

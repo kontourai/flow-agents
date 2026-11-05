@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { createInMemorySnapshotStore } from "@kontourai/forage";
+import { buildSnapshotSourceRef, resolveSnapshotSourceRef } from "@kontourai/forage/fetch";
 import { createExtractionTaskSpec, createInMemoryPreparedArtifactStore, extract, resolvePreparedArtifact, serializePortableExtractionResult, toPortablePreparedArtifactState } from "@kontourai/traverse";
-import { buildSemanticReviewWork, createObserveExtractDiff } from "@kontourai/lookout";
+import { buildSemanticReviewWork, createObserveExtractDiff, extractedSnapshotRef } from "@kontourai/lookout";
 import { importExtractionEnvelope } from "@kontourai/survey";
 import { buildReviewDecision } from "@kontourai/survey/review-workbench";
 import { evaluateReviewedGroundingPolicy, projectReviewedExtractionEvidence, restoreReviewedExtractionEvidence } from "@kontourai/surface";
@@ -18,32 +21,49 @@ export async function runReviewedGroundingReference(options = {}) {
   const providerAudit = { calls: 0, tokens: 0, latenciesMs: [] };
   const provider = deterministicProvider(providerAudit);
   const artifactStore = createInMemoryPreparedArtifactStore();
+  const snapshots = createInMemorySnapshotStore();
+  const initialSnapshot = fixtureSnapshot(contents.get("snapshot:record-17:v1"), "2026-07-20T00:00:00.000Z");
+  const changedSnapshot = fixtureSnapshot(contents.get("snapshot:record-17:v2"), "2026-07-20T00:02:00.000Z");
+  const driftedSnapshot = fixtureSnapshot("Record 17\nStatus: Paused\nDetails: revised\n", "2026-07-20T00:04:00.000Z");
+  const refs = { initial: buildSnapshotSourceRef(initialSnapshot), changed: buildSnapshotSourceRef(changedSnapshot), drifted: buildSnapshotSourceRef(driftedSnapshot) };
+  const captures = new Map([[refs.initial, initialSnapshot], [refs.changed, changedSnapshot]]);
   const resultsBySnapshot = new Map();
+  const lastExtracted = new Map();
   const recorded = [];
-  const checks = [changed(null, "snapshot:record-17:v1", "2026-07-20T00:00:00.000Z"), unchanged("snapshot:record-17:v1", "2026-07-20T00:01:00.000Z"),
-    changed("snapshot:record-17:v1", "snapshot:record-17:v2", "2026-07-20T00:02:00.000Z")];
+  const checks = [changed(null, refs.initial, "2026-07-20T00:00:00.000Z"), unchanged(refs.initial, "2026-07-20T00:01:00.000Z"),
+    changed(refs.initial, refs.changed, "2026-07-20T00:02:00.000Z")];
   const composition = createObserveExtractDiff({
+    snapshots,
     acquisition: { async check() {
       const check = checks.shift();
       if (!check) throw new Error("Reference acquisition sequence is exhausted.");
+      if (check.kind === "changed") await snapshots.put(captures.get(check.currentSnapshotRef));
       return check;
     } },
     extraction: { async extract({ snapshotRef }) {
-      const content = contents.get(snapshotRef);
-      if (content === undefined) throw new Error(`Unknown reference snapshot: ${snapshotRef}`);
+      const resolved = await resolveSnapshotSourceRef(snapshots, snapshotRef);
+      if (!resolved.ok) throw new Error(`Reference snapshot resolution failed: ${resolved.error.kind}`);
+      const content = resolved.snapshot.body;
+      if (typeof content !== "string") throw new Error("Reference snapshot is not textual.");
       const result = await extract({ content, contentType: "text", sourceRef: source.url,
         preparedArtifact: { store: artifactStore, sourceSnapshotRef: snapshotRef }, targetSchema: source.targetSchema, taskSpec, provider });
-      result.runId = snapshotRef.endsWith("v1")
+      result.runId = snapshotRef === refs.initial
         ? "traverse-extraction-run:00000000-0000-4000-8000-000000000001"
         : "traverse-extraction-run:00000000-0000-4000-8000-000000000002";
-      result.extractedAt = snapshotRef.endsWith("v1") ? "2026-07-20T00:00:00.000Z" : "2026-07-20T00:02:00.000Z";
+      result.extractedAt = snapshotRef === refs.initial ? "2026-07-20T00:00:00.000Z" : "2026-07-20T00:02:00.000Z";
       resultsBySnapshot.set(snapshotRef, result); return result;
     } },
-    recorder: { async record(observation) {
-      const priorObservationId = recorded.at(-1)?.observationId ?? null;
-      const observationId = `observation:${recorded.length + 1}`;
-      recorded.push({ ...observation, observationId, priorObservationId }); return { observationId, priorObservationId };
-    } },
+    recorder: {
+      async lastExtractedSnapshotRef(observedSource) { return lastExtracted.get(sourceKey(observedSource)) ?? null; },
+      async record(observation) {
+        const priorObservationId = recorded.at(-1)?.observationId ?? null;
+        const observationId = `observation:${recorded.length + 1}`;
+        recorded.push({ ...observation, observationId, priorObservationId });
+        const handled = extractedSnapshotRef(observation);
+        if (handled !== null) lastExtracted.set(sourceKey(observation.source), handled);
+        return { observationId, priorObservationId };
+      },
+    },
   });
   const initial = expectObservation(await composition.observe(source));
   const callsAfterInitial = providerAudit.calls;
@@ -57,8 +77,8 @@ export async function runReviewedGroundingReference(options = {}) {
     schema: source.targetSchema, claimTarget: () => claimTarget() });
   if (!semanticReview.ok) throw new Error(`Semantic review construction failed: ${semanticReview.error.kind}`);
 
-  const extraction = resultsBySnapshot.get("snapshot:record-17:v2");
-  const envelope = serializePortableExtractionResult(extraction, { sourceRef: source.url, sourceSnapshotRef: "snapshot:record-17:v2" });
+  const extraction = resultsBySnapshot.get(refs.changed);
+  const envelope = serializePortableExtractionResult(extraction, { sourceRef: source.url, sourceSnapshotRef: refs.changed });
   const imported = importExtractionEnvelope(envelope, { importName: "public-record-17-v2", producerNamespace: "reference-workflow",
     sourceKind: "api-record", claimTarget: () => claimTarget() });
   const reviewItem = imported.reviewItems[0];
@@ -75,14 +95,15 @@ export async function runReviewedGroundingReference(options = {}) {
   const claimId = "claim.public-record-17.status";
   const claims = [{ id: claimId, value: reviewed.importRecord.spec.envelope.result.proposals[reviewed.proposalIndex].candidateValue }];
   const beforeReview = evaluateReviewedGroundingPolicy({ policy, evidence: [], claims });
-  const currentSource = { evidenceId: projected.evidence.id, status: "current", expectedSnapshotRef: "snapshot:record-17:v2",
-    observedSnapshotRef: "snapshot:record-17:v2", observedAt: "2026-07-20T00:03:00.000Z", extractedValueChanged: true };
+  const currentSource = { evidenceId: projected.evidence.id, status: "current", expectedSnapshotRef: refs.changed,
+    observedSnapshotRef: refs.changed, observedAt: "2026-07-20T00:03:00.000Z", extractedValueChanged: true };
   const afterReview = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [currentSource], claims });
   // A claim publishing a value other than the reviewed one (the superseded v1 value) is refused.
   const valueMismatch = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [currentSource],
     claims: [{ id: claimId, value: "Ready" }] });
+  await snapshots.put(driftedSnapshot);
   const drifted = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], claims, sourceStates: [{ ...currentSource,
-    status: "drifted", observedSnapshotRef: "snapshot:record-17:v3", extractedValueChanged: false }] });
+    status: "drifted", observedSnapshotRef: refs.drifted, observedAt: driftedSnapshot.fetchedAt, extractedValueChanged: false }] });
   const tamperedResolution = await resolvePreparedArtifact(extraction.preparedArtifact, { get: () => "Record 17\nStatus: Altered\n" });
   const tamperedEnvelope = JSON.parse(envelope);
   tamperedEnvelope.result.preparedArtifactState = toPortablePreparedArtifactState(tamperedResolution, extraction.preparedArtifact);
@@ -104,7 +125,7 @@ export async function runReviewedGroundingReference(options = {}) {
 async function pinnedRevisions() {
   const manifest = JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf8"));
   const dependencies = { ...(manifest.devDependencies ?? {}), ...(manifest.dependencies ?? {}) };
-  return { traverse: dependencies["@kontourai/traverse"], survey: dependencies["@kontourai/survey"],
+  return { forage: dependencies["@kontourai/forage"], traverse: dependencies["@kontourai/traverse"], survey: dependencies["@kontourai/survey"],
     lookout: dependencies["@kontourai/lookout"], surface: dependencies["@kontourai/surface"] };
 }
 
@@ -118,6 +139,9 @@ function deterministicProvider(audit) { return { name: "deterministic-reference"
 function changed(priorSnapshotRef, currentSnapshotRef, checkedAt) { return { kind: "changed", sourceId: source.id, sourceUrl: source.url, checkedAt,
   warnings: [], priorSnapshotRef, currentSnapshotRef, changeBasis: priorSnapshotRef ? "hash" : "initial" }; }
 function unchanged(snapshotRef, checkedAt) { return { kind: "unchanged-304", sourceId: source.id, sourceUrl: source.url, checkedAt, warnings: [], snapshotRef }; }
+function fixtureSnapshot(body, fetchedAt) { return { sourceId: source.id, url: source.url, status: 200, fetchedAt,
+  body, bytes: new TextEncoder().encode(body), declaredCharset: "utf-8", bodyHash: createHash("sha256").update(body).digest("hex") }; }
+function sourceKey(observedSource) { return JSON.stringify([observedSource.id, observedSource.url, observedSource.kind]); }
 function expectObservation(result) { if (!result.ok) throw new Error(`${result.error.kind}: ${result.error.message}`); return result.value; }
 function claimTarget() { return { subjectType: "public-record", subjectId: "17", facet: "record.status", claimType: "record.field", fieldOrBehavior: "status", impactLevel: "medium" }; }
 function groundingPolicy() { return { id: "policy.publish-public-record", action: "publish-public-record", requiredClaimIds: ["claim.public-record-17.status"],

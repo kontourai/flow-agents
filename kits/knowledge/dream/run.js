@@ -45,6 +45,7 @@ import { canonicalJson } from "@kontourai/relay";
 
 import { MAX_CLAIM_BYTES, boundFact, fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
 import { acquireDreamLock } from "./lock.js";
+import { readPurgeGate } from "./purge-gate.js";
 import { proposeSitting } from "./propose.js";
 import { assertAbsolute, dreamError, projectFromCwd, sha256, writePrivateAtomic } from "./util.js";
 
@@ -284,6 +285,7 @@ export async function runDream(host, options = {}) {
     redaction_hits: 0,
     briefs: [],
     obsolete_briefs_removed: [],
+    briefs_held: null,
     brief_excluded: null,
     metrics: null,
     cursor: { committed: false },
@@ -504,6 +506,8 @@ export async function runDream(host, options = {}) {
     // Briefs derive from the store every run, because review changes them without any new telemetry. The briefs are
     // written below; what they hold back as contested is decided here, once, and both the brief and the review queue
     // use that verdict: a contested claim belongs in the review queue, not the brief.
+    // Read the purge gate before the snapshot used by the brief and routing.
+    const purgeGate = { before: readPurgeGate(dreamDir), current: () => readPurgeGate(dreamDir) };
     const proposalSnapshot = await store.listProposals();
     const latest = indexProposals(proposalSnapshot, proposerId);
     // Routing in the backfill below must look at the same snapshot the brief judged, or a claim another writer adds
@@ -552,9 +556,11 @@ export async function runDream(host, options = {}) {
       reviewDecisions,
       policy,
       dryRun,
+      purgeGate,
     });
     report.briefs = [...written];
     report.obsolete_briefs_removed = written.removed;
+    report.briefs_held = written.held ?? null;
     report.brief_excluded = { ...excluded, ...written.excluded };
 
     // The cursor: sittings this run finished, and a telemetry offset that never passes work left undone

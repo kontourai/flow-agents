@@ -23,6 +23,25 @@ function profileMemoryEnabled(event) {
     && isHookEnabled('profile-memory', { profiles: ['standard', 'strict'] })
     && isHookEnabled(`profile-memory-${runtime}`, { profiles: ['standard', 'strict'] });
 }
+// A purge (Addendum M of the store contract) must stop a brief compiled before it from being served. The producer
+// keeps `<dreamDir>/purge-gate.json` = {version:1, generation, state:'settled'|'purging'} and stamps each brief with
+// the generation it was compiled under (`purgeGeneration`). Serve only when the gate is settled and the stamp equals
+// it. No gate file means no purge has fenced this directory, and then a brief must carry no stamp. An unreadable or
+// malformed gate refuses every brief.
+const MAX_GATE_BYTES = 1024;
+function purgeGateAllows(dreamDir, brief) {
+  let text;
+  try {
+    const file = path.join(dreamDir, 'purge-gate.json');
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size > MAX_GATE_BYTES) return false;
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) { return Boolean(error) && error.code === 'ENOENT' && brief.purgeGeneration === undefined; }
+  try {
+    const gate = JSON.parse(text);
+    return Boolean(gate) && gate.version === 1 && gate.state === 'settled' && typeof gate.generation === 'string' && /^[0-9a-f]{32}$/.test(gate.generation) && brief.purgeGeneration === gate.generation;
+  } catch { return false; }
+}
 function profileMemoryContributor(event, _payload, budget, suppliedMarker) {
   if (!profileMemoryEnabled(event)) return null;
   try {
@@ -50,6 +69,8 @@ function profileMemoryContributor(event, _payload, budget, suppliedMarker) {
     } finally { fs.closeSync(fd); }
     const brief = JSON.parse(bytes);
     if (!brief || brief.version !== 1 || !Array.isArray(brief.entries) || !brief.entries.every(entry => typeof entry === 'string' && entry.trim() && !UNSAFE.test(entry) && !entry.includes(INJECTED_MEMORY_OPEN) && !entry.includes(INJECTED_MEMORY_CLOSE))) return null;
+    // Read after the brief, so a purge that opens between the two reads is seen as open.
+    if (!purgeGateAllows(path.dirname(path.dirname(file)), brief)) return null;
     const cap = Math.min(MAX_CONTEXT_BYTES, Number.isSafeInteger(budget) ? budget : 0);
     let body = '';
     for (const entry of brief.entries) {

@@ -33,6 +33,9 @@
  * project brief drops other projects' claims. Ties break on newer observation,
  * then claim id, so the order is deterministic.
  *
+ * Purge: when the store has been purged through a fence, every brief also records the gate token it was compiled
+ * under (`purgeGeneration`) and the reader refuses it once a later purge has replaced that token (see purge-gate.js).
+ *
  * Budget: a brief's size is the UTF-8 byte length of its entries joined by a
  * blank line, the way #672 joins them. Bytes are a hard upper bound on tokens.
  *
@@ -48,6 +51,7 @@ import { foldMemoryText, memoryInstant, memorySlotKey } from "@kontourai/flow-ag
 import { canonicalJson } from "@kontourai/relay";
 
 import { presentMemoryClaims } from "../adapters/memory-claims/index.mjs";
+import { gateAllowsBrief, sameGate } from "./purge-gate.js";
 import { truncateUtf8, writePrivateAtomic } from "./util.js";
 
 export const BRIEF_VERSION = 1;
@@ -248,7 +252,7 @@ export function rankItems(items, { project = null, now, includeUnreviewed = fals
  * @param {BriefItem[]} items already ranked
  * @param {{ budget: number, maxEntryBytes?: number, reviewDecisions?: object[] }} options
  */
-export function compileBrief(items, { budget, maxEntryBytes = DEFAULT_MAX_ENTRY_BYTES, reviewDecisions = [] }) {
+export function compileBrief(items, { budget, maxEntryBytes = DEFAULT_MAX_ENTRY_BYTES, reviewDecisions = [], purgeGeneration = null }) {
   if (!Number.isSafeInteger(budget) || budget <= 0) throw new Error("brief budget must be a positive integer");
   const { presented, withheld } = presentMemoryClaims(items.map((item) => item.claim), { reviewDecisions });
   const presentedById = new Map(presented.map((entry) => [entry.id, entry]));
@@ -273,7 +277,10 @@ export function compileBrief(items, { budget, maxEntryBytes = DEFAULT_MAX_ENTRY_
     entries.push(text);
     claimIds.push(item.claim.id);
   }
-  const content = `${JSON.stringify({ version: BRIEF_VERSION, entries })}\n`;
+  // The generation is the purge gate's token as read BEFORE the store snapshot this brief was built from (see
+  // purge-gate.js). The reader serves a brief only while it matches. A store never purged has no gate, and its
+  // briefs keep the plain v1 shape.
+  const content = `${JSON.stringify(purgeGeneration === null ? { version: BRIEF_VERSION, entries } : { version: BRIEF_VERSION, entries, purgeGeneration })}\n`;
   return {
     entries,
     claimIds,
@@ -292,7 +299,7 @@ const PROJECT_FILE = /^project-([a-z0-9_-]{1,64})\.json$/;
  * eligible claim. A project brief for a project with none is removed, so stale
  * memory never outlives the claim behind it.
  */
-export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOBAL_BUDGET_BYTES, projectBudget = DEFAULT_PROJECT_BUDGET_BYTES, maxEntryBytes, includeUnreviewed = false, reviewDecisions = [], dryRun = false, policy }) {
+export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOBAL_BUDGET_BYTES, projectBudget = DEFAULT_PROJECT_BUDGET_BYTES, maxEntryBytes, includeUnreviewed = false, reviewDecisions = [], dryRun = false, policy, purgeGate }) {
   const { views, byView } = effectiveItems(items, reviewDecisions);
   const raw = classifyCurrent(views, policy);
   const classified = { current: raw.current.map((view) => byView.get(view)), contested: raw.contested.map((view) => byView.get(view)), superseded: raw.superseded.map((view) => byView.get(view)), notCurrent: raw.notCurrent.map((view) => byView.get(view)) };
@@ -306,11 +313,16 @@ export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOB
   const removed = [];
   const compiled = specs.map((spec) => ({
     ...spec,
-    brief: compileBrief(rankItems(all, { project: spec.project, now, includeUnreviewed, current: classified.current }), { budget: spec.budget, maxEntryBytes, reviewDecisions }),
+    brief: compileBrief(rankItems(all, { project: spec.project, now, includeUnreviewed, current: classified.current }), { budget: spec.budget, maxEntryBytes, reviewDecisions, purgeGeneration: purgeGate ? purgeGate.before.generation : null }),
   }));
   const excluded = { contested: classified.contested.length, superseded: classified.superseded.length, not_current: classified.notCurrent.length, considered: all.length };
   if (dryRun) {
     return Object.assign(compiled.map(({ name, brief }) => ({ name, ...summary(brief), written: false })), { removed, excluded });
+  }
+  // A purge that is open (or a gate nobody can read) means the snapshot these briefs were built from may hold content
+  // that is being erased. Write nothing; the next run, after the purge settles, rebuilds.
+  if (purgeGate && !gateAllowsBrief(purgeGate.before)) {
+    return Object.assign([], { removed, excluded, held: purgeGate.before.state === "purging" ? "purge-in-progress" : "purge-gate-unreadable" });
   }
   try {
     fs.mkdirSync(briefsDir, { recursive: true, mode: 0o700 });
@@ -329,7 +341,13 @@ export function writeBriefs({ briefsDir, items, now, globalBudget = DEFAULT_GLOB
     error.removed = [...removed];
     throw error;
   }
-  return Object.assign(outputs, { removed, excluded });
+  // A purge that opened since the gate was read may have committed before this snapshot was taken or after. The
+  // reader already refuses these files (their token is stale); delete them so erased content is not left on disk.
+  if (purgeGate && !sameGate(purgeGate.before, purgeGate.current())) {
+    for (const { name } of compiled) fs.rmSync(path.join(briefsDir, name), { force: true });
+    return Object.assign(outputs.map((output) => ({ ...output, written: false })), { removed, excluded, held: "purge-raced" });
+  }
+  return Object.assign(outputs, { removed, excluded, held: null });
 }
 
 function summary(brief) {

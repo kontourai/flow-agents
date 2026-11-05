@@ -14,6 +14,18 @@ It records the source package version, not publication or runtime qualification.
 Changes to exports, dependencies, or build behavior still require review of the
 corresponding architecture sections below.
 
+Dependency identities and SDK compatibility come from `package.json` and the
+resolved pnpm lockfile. The Knowledge Kit ships a self-contained YAML adapter
+generated from the exact `yaml` development pin by `npm run knowledge:yaml:generate`;
+the build checks that artifact before compiling. A YAML dependency update must
+regenerate it alongside the lockfile. The optional Anthropic SDK remains behind
+the optional-dependency boundary.
+
+The deterministic reviewed-grounding reference declares Forage as a development
+dependency for its public snapshot store, reference builder and resolver. This
+keeps acquisition persistence and exact replay with their owning package while
+Lookout consumes the recorder's last handled snapshot reference.
+
 ## Orientation
 
 Flow Agents is the agent-facing operating layer. It turns a user's intent into workflow skills, local artifacts, sidecars, checks, and handoffs that a human or another agent can inspect later.
