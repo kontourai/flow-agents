@@ -591,6 +591,10 @@ test('compiled claims require independently reviewed sources supporting the exce
   const selfApproved = JSON.parse(proposalBefore); selfApproved.reviewer_id = selfApproved.proposer_id; fs.writeFileSync(file, JSON.stringify(selfApproved));
   assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
   fs.writeFileSync(file, proposalBefore);
+  const observationId = plan.observationRaw[0].id; const observationBefore = store.records.get(observationId);
+  store.records.set(observationId, { ...observationBefore, body: 'tampered observation' });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1, 'each source must match its approved proposal');
+  store.records.set(observationId, observationBefore);
   store.records.set(plan.legacyRaw.id, { ...recordBefore, category: 'memory.other' });
   assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1, 'the source category must match its approved proposal');
   store.records.set(plan.legacyRaw.id, { ...recordBefore, body: 'different source text' });
