@@ -45,6 +45,9 @@ importers:
       '@kontourai/corpus-store':
         specifier: 0.1.0-next.0
         version: 0.1.0-next.0
+      '@kontourai/forage':
+        specifier: 1.0.2
+        version: 1.0.2(playwright@1.61.0)
       '@kontourai/lookout':
         specifier: 0.8.9
         version: 0.8.9(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)

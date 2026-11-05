@@ -364,6 +364,7 @@
   },
   "devDependencies": {
     "@kontourai/corpus-store": "0.1.0-next.0",
+    "@kontourai/forage": "1.0.2",
     "@kontourai/lookout": "0.8.9",
     "@kontourai/traverse": "5.0.3",
     "@kontourai/veritas": "1.12.1",
