@@ -20,7 +20,7 @@
  * caller abstains with a reason instead of being handed the least-bad record.
  *
  * Overlap across a whole record is weak evidence (a long report mentions most words), so a nominated record is only quoted
- * when the passage itself, with the record title, carries `minPassageCoverage` of the question's weight. A record that is
+ * when the passage itself, with the record title, carries `minPassageCoverage` of the question's words, by rarity weight and by count. A record that is
  * nominated but has no such passage is reported as nominated and is not answered from.
  *
  * @module living-context-select
@@ -100,12 +100,16 @@ export function bestPassage(body, questionTerms, maxChars = DEFAULT_PASSAGE_CHAR
   return "";
 }
 
-/** The share of the question's weight that a passage (read together with its record title) carries. */
+/**
+ * How much of the question a passage (read together with its record title) carries: the smaller of the share of the question's rarity
+ * weight and the share of its distinct words. Weight alone lets two rare words carry a long line that is about something else; the count
+ * keeps a passage that matches only a few of the question's words from passing.
+ */
 export function passageCoverage(passage, title, questionTerms, weights) {
   const present = termSet(`${title} ${passage}`);
-  let have = 0, all = 0;
-  for (const t of questionTerms) { all += weights.get(t); if (present.has(t)) have += weights.get(t); }
-  return all === 0 ? 0 : have / all;
+  let have = 0, all = 0, haveCount = 0;
+  for (const t of questionTerms) { all += weights.get(t); if (present.has(t)) { have += weights.get(t); haveCount++; } }
+  return all === 0 || questionTerms.length === 0 ? 0 : Math.min(have / all, haveCount / questionTerms.length);
 }
 
 /**

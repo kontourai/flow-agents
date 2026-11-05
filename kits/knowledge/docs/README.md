@@ -524,7 +524,7 @@ Skipped records are listed under `excluded`: repeated ids (every copy), files ov
 
 #### How it picks records
 
-Rare words count more than common ones. A word in every record decides nothing. A title match beats a tag or category match, which beats a body match. A record is picked only when it covers 60% of the question (`--min-coverage`). A question word found in no record counts against every record, so an off-topic question picks nothing. A raw note and a compiled note are ranked the same way. A host can replace the picker (`select`).
+Rare words count more than common ones. A word in every record decides nothing. A title match beats a tag or category match, which beats a body match. A record is picked only when it covers 60% of the question (`--min-coverage`). A question word found in no record counts against every record, so an off-topic question picks nothing. A raw note and a compiled note are ranked the same way. A sentence is quoted only if it, together with the record title, carries at least half of the question's words (`--min-passage-coverage`), counted both by rarity weight and by number of words; two rare words in a long line are not enough. A host can replace the picker (`select`).
 
 It only considers records this reader may see and that existed at `--now`. A hidden or later record is never scored, quoted or listed as a near miss.
 
