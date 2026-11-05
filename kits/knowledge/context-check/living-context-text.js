@@ -18,8 +18,7 @@
  * the closer is not followed by a letter or digit, so that a CommonMark renderer reads it the same way. Everything else that
  * could be markup (a nested pair, a run of three markers, an unpaired marker, an escape, an entity reference, a double-backtick
  * span, an image, HTML, an intraword `*`, GFM strikethrough, which CommonMark does not have) makes the WHOLE paragraph be taken
- * exactly as written and read one physical line at a time: it then matches only a claim that is a verbatim line (or a sentence of a single
- * line) of its source, and otherwise the verifier abstains.
+ * exactly as written and read one physical line at a time: it then matches only a claim that is a verbatim line of its source, and otherwise the verifier abstains.
  * Block structure is read the same cautious way (`documentUnits`): only paragraphs, list items and headings are prose; indented
  * and fenced code (also inside a quote), tables, HTML blocks, thematic breaks, setext underlines and link definitions are not. Nothing is ever rescanned, so removing one marker cannot turn another into formatting. A lone `_` inside
  * a word (`snake_case`) and a lone `*` between spaces are text, as in CommonMark. The scan is one pass over the paragraph.
@@ -195,17 +194,17 @@ export function documentUnits(text) {
     if (heading) body = body.replace(/[ \t]+#+[ \t]*$/, "");
     body = body.replace(/\s+/g, " ").trim();
     if (heading || listStart || current === undefined) {
-      current = { kind: heading ? "heading" : listStart ? "item" : "paragraph", parts: [body] };
+      current = { kind: heading ? "heading" : listStart ? "item" : "paragraph", parts: [body], lines: [line] };
       units.push(current);
       if (heading) current = undefined;
-    } else current.parts.push(body);
+    } else { current.parts.push(body); current.lines.push(line); }
   }
-  return units.map(({ kind, parts }) => {
-    const joined = parts.join(" ");
-    const rendered = renderOrNull(joined);
-    // A paragraph the renderer declined is taken as written, line by line: joining physical lines is only safe once their markup has been read.
-    const sentences = rendered === null && parts.length > 1 ? parts.map((part) => part.trim()).filter(Boolean) : splitSentences(rendered ?? joined).map((sentence) => sentence.trim()).filter(Boolean);
-    return { kind, sentences, ...(rendered === null && parts.length > 1 ? { standalone: true } : {}) }; // standalone: each line stands alone, none joins another
+  return units.map(({ kind, parts, lines: physical }) => {
+    const rendered = renderOrNull(parts.join(" "));
+    // A unit the renderer declined adds nothing to the version 2 floor: each physical line stands alone, exactly as written (a heading or list
+    // marker is not taken off, a sentence is not cut out of it, no line joins another). Only a unit whose markup was read is joined and cut.
+    if (rendered === null) return { kind, sentences: physical.map((line) => withoutMarker(line).replace(/\s+/g, " ").trim()).filter(Boolean), standalone: true };
+    return { kind, sentences: splitSentences(rendered).map((sentence) => sentence.trim()).filter(Boolean) };
   });
 }
 

@@ -69,24 +69,27 @@ export function bestPassage(body, questionTerms, maxChars = DEFAULT_PASSAGE_CHAR
   const scored = [];
   for (const unit of units) {
     if (unit.kind === "heading") continue;
-    const text = unit.sentences.join(" ");
-    // A list of links is an index, not a statement: its words are slugs of other records.
-    if ((text.match(WIKILINK) ?? []).join("").length > text.length / 2) continue;
-    const score = matches(text);
-    if (score > 0) scored.push({ unit, score });
+    // A unit whose lines stand alone offers each line as a passage; any other offers the whole unit, or the sentences around its best one.
+    for (const sentences of unit.standalone ? unit.sentences.map((sentence) => [sentence]) : [unit.sentences]) {
+      const text = sentences.join(" ");
+      // A list of links is an index, not a statement: its words are slugs of other records.
+      if ((text.match(WIKILINK) ?? []).join("").length > text.length / 2) continue;
+      const score = matches(text);
+      if (score > 0) scored.push({ sentences, score });
+    }
   }
   scored.sort((a, b) => b.score - a.score); // stable: the earlier unit wins a tie
   // A passage is only offered if the verifier will find it again in this document (a nested list or a code literal that starts with a
   // marker character may not be); the next best unit is tried instead of quoting something that cannot be checked.
-  for (const { unit } of scored.slice(0, 5)) {
-    const whole = unit.sentences.join(" ");
+  for (const { sentences } of scored.slice(0, 8)) {
+    const whole = sentences.join(" ");
     let passage = whole;
     if (whole.length > maxChars) {
       let start = 0;
       let top = -1;
-      unit.sentences.forEach((sentence, index) => { const score = matches(sentence); if (score > top) { top = score; start = index; } });
+      sentences.forEach((sentence, index) => { const score = matches(sentence); if (score > top) { top = score; start = index; } });
       passage = "";
-      for (const sentence of unit.sentences.slice(start)) {
+      for (const sentence of sentences.slice(start)) {
         const next = passage ? `${passage} ${sentence}` : sentence;
         if (next.length > maxChars) break;
         passage = next;

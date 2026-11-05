@@ -1034,6 +1034,15 @@ describe("the block layer: a flat document is read as prose, anything contextual
     // A paragraph whose markup the reader declined is read line by line, never joined: its lines are not yet read as the page shows them.
     assert.equal(await verdict("[x] **Y**", "[x]\n**Y**\n"), "not-addressed");
     assert.equal(await verdict("[x]", "[x]\n**Y**\n"), "supported", "...but each line is still a line");
+    // A declined unit adds nothing to the version 2 floor, single line or not: no marker taken off, no sentence cut out of it.
+    assert.equal(await verdict("[x] **Y**", "# [x] **Y**\n"), "not-addressed");
+    assert.equal(await verdict("# [x] **Y**", "# [x] **Y**\n"), "supported", "...the line as written is still a line");
+    assert.equal(await verdict("Signing **keys** stay.", "Keys rotate. Signing **keys** stay. A [b] c.\n"), "not-addressed");
+    assert.equal(await verdict("Keys rotate. Signing **keys** stay. A [b] c.", "Keys rotate. Signing **keys** stay. A [b] c.\n"), "supported");
+    assert.equal((await verifier.verify({ candidateId: "c", value: "***. ", evidence: [{ id: "e", excerpt: "***\n", locator: "l" }] })).result, "abstain", "trailing space does not hide a malformed claim");
+    assert.equal((await verifier.verify({ candidateId: "c", value: "*.\t\n", evidence: [{ id: "e", excerpt: "> Q\n*\n", locator: "l" }] })).result, "abstain");
+    // A passage can come from one line of a unit whose lines stand alone.
+    assert.equal(bestPassage("Alpha < Beta\nand gamma delta.\n", ["gamma", "delta"]), "and gamma delta.");
     assert.equal(await verdict("snake_case word and bold here.", "snake_case word\nand **bold** here.\n"), "supported", "an intraword underscore is not a reason to decline");
     // A claim may leave off a sentence's closing full stop but may not add another one, in a flat document and in the fallback alike.
     assert.equal(await verdict("P..", "> Q\nP.\n"), "not-addressed");
