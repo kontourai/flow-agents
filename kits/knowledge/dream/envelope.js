@@ -36,8 +36,7 @@ import { canonicalJson } from "@kontourai/relay";
 import { assertMemoryClaim, recomputeMemoryRouting } from "../adapters/memory-claims/index.mjs";
 import { dreamError, truncateUtf8 } from "./util.js";
 
-export const ENVELOPE_VERSION = "1.3";
-const LEGACY_ENVELOPE_VERSION = "1.2";
+export const ENVELOPE_VERSION = "1.2";
 export const MEMORY_CATEGORY = "memory.claim";
 /** The most claims one sitting may propose. Beyond it the run keeps the first by claim id and reports the rest. */
 export const MAX_CLAIMS_PER_SITTING = 32;
@@ -70,10 +69,9 @@ export const visibilityKey = (visibility) => {
 export function encodeEnvelope({ plan, index, decision, sitting }) {
   const entry = plan[index];
   const body = canonicalJson({
-    dream: entry.instinctConfidence === undefined ? LEGACY_ENVELOPE_VERSION : ENVELOPE_VERSION,
+    dream: ENVELOPE_VERSION,
     claim: entry.claim,
     agreement: entry.agreement,
-    ...(entry.instinctConfidence === undefined ? {} : { instinctConfidence: entry.instinctConfidence }),
     decision,
     project: entry.project,
     sitting: { id: sitting.id, contentHash: sitting.contentHash, visibilityKey: sitting.visibilityKey, index, planDigest: planDigest(plan) },
@@ -148,8 +146,6 @@ export function verifyEntry(entry) {
     return false;
   }
   if (!validAgreement(entry.agreement)) return false;
-  // Temporary confidence carrier until Corpus supports confidence frontmatter: kontourai/corpus#68.
-  if (entry.instinctConfidence !== undefined && (typeof entry.instinctConfidence !== "number" || !Number.isFinite(entry.instinctConfidence) || entry.instinctConfidence < 0 || entry.instinctConfidence > 1)) return false;
   return entry.project === null || typeof entry.project === "string";
 }
 
@@ -163,14 +159,13 @@ export function decodeEnvelope(body) {
   try {
     if (typeof body !== "string" || Buffer.byteLength(body) > MAX_ENVELOPE_BYTES) return null;
     const value = JSON.parse(body);
-    if (!value || ![LEGACY_ENVELOPE_VERSION, ENVELOPE_VERSION].includes(value.dream)) return null;
-    if ((value.dream === LEGACY_ENVELOPE_VERSION) !== (value.instinctConfidence === undefined)) return null;
+    if (!value || value.dream !== ENVELOPE_VERSION) return null;
     const { plan, sitting } = value;
     if (!Array.isArray(plan) || plan.length === 0 || plan.length > MAX_CLAIMS_PER_SITTING) return null;
     if (!sitting || typeof sitting.id !== "string" || typeof sitting.contentHash !== "string" || typeof sitting.visibilityKey !== "string" || typeof sitting.planDigest !== "string" || !isCount(sitting.index)) return null;
     if (sitting.planDigest !== planDigest(plan)) return null;
     const own = plan[sitting.index];
-    if (!own || canonicalJson(own) !== canonicalJson({ claim: value.claim, agreement: value.agreement, project: value.project, ...(value.instinctConfidence === undefined ? {} : { instinctConfidence: value.instinctConfidence }) })) return null;
+    if (!own || canonicalJson(own) !== canonicalJson({ claim: value.claim, agreement: value.agreement, project: value.project })) return null;
     if (!verifyEntry(own) || !verifyDecision(value.decision, value.claim)) return null;
     // A claim over the bound could not have been written by this module, and would make a decision too large to store.
     if (plan.some((entry) => Buffer.byteLength(canonicalJson(entry.claim)) > MAX_CLAIM_BYTES)) return null;
@@ -210,7 +205,7 @@ export function indexProposals(proposals, proposerId) {
         try {
           // The size bound applies here too: an over-size body is never parsed, not even to name its format.
           const written = Buffer.byteLength(proposal.candidate.body) <= MAX_ENVELOPE_BYTES ? JSON.parse(proposal.candidate.body)?.dream : undefined;
-          if (written && ![LEGACY_ENVELOPE_VERSION, ENVELOPE_VERSION].includes(written)) format = ` (written in envelope format ${String(written).slice(0, 16)}; this run reads ${LEGACY_ENVELOPE_VERSION} and ${ENVELOPE_VERSION})`;
+          if (written && written !== ENVELOPE_VERSION) format = ` (written in envelope format ${String(written).slice(0, 16)}; this run reads ${ENVELOPE_VERSION})`;
         } catch {
           // not JSON at all
         }

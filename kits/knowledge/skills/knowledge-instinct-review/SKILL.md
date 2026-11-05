@@ -1,5 +1,5 @@
 ---
-name: "instinct-review"
+name: "knowledge-instinct-review"
 description: "Review proposed instinct records and their source observations."
 ---
 

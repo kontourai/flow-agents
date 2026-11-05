@@ -1193,7 +1193,7 @@ test('tool observations replay by stable request key after a crash before cursor
   const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture-session', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
   const candidateCursor = { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) };
   const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: candidateCursor });
-  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
   await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash before cursor'); } })), /crash before cursor/);
   assert.equal(fs.existsSync(ws.cursorFile), false);
   assert.equal((await store.listProposals()).length, 2);
@@ -1207,10 +1207,11 @@ test('tool observations replay by stable request key after a crash before cursor
   await runDream(host, runOptions(ws));
   assert.equal(store.calls.proposeCreate, before + 2, 'replay re-sends both stable request keys');
   assert.equal((await store.listProposals()).length, 2, 'replay creates no duplicate proposal');
-  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].lines, 1);
+  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].cursor.lines, 1);
   const after = store.calls.proposeCreate;
   const replay = await runDream(host, runOptions(ws));
   assert.equal(replay.sittings.seen, 0, 'saved cursor emits no new dream inputs');
+  assert.equal(replay.ingest.observations.events_emitted, 0);
   assert.equal(store.calls.proposeCreate, after, 'saved cursor emits no new proposals');
 });
 
@@ -1219,13 +1220,15 @@ test('observation cursor waits for all events when the run cap defers work', asy
   const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-cap';
   const events = [1, 2].map((ordinal) => ({ id: createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex'), sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture-session', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." }));
   const importer = (_data, options) => ({ events: options.cursor ? [] : events, malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 2, digest: 'b'.repeat(64) } });
-  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
   await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
   assert.equal((await store.listProposals()).length, 2);
   assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`], undefined);
   await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
   assert.equal((await store.listProposals()).length, 4);
-  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].lines, 2);
+  const completedCursor = JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8'));
+  assert.equal(completedCursor.observations[`source:${sourceId}`].cursor.lines, 2);
+  assert.equal(Object.keys(completedCursor.sittings).filter((id) => id.startsWith('tool-event:')).length, 0, 'source cursor replaces per-event replay markers');
   await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
   assert.equal((await store.listProposals()).length, 4);
 });
@@ -1234,7 +1237,7 @@ test('malformed observations fail before proposals or cursor commit', async (t) 
   const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
   const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-invalid';
   const importer = () => ({ events: [], malformed: 1, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
-  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
   await assert.rejects(runDream(host, runOptions(ws)), /incomplete or invalid/);
   assert.equal((await store.listProposals()).length, 0); assert.equal(fs.existsSync(ws.cursorFile), false);
 });
@@ -1245,7 +1248,7 @@ test('an observation without a session can be proposed without inventing one', a
   const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
   const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: '', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
   const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
-  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
   await runDream(host, runOptions(ws));
   const proposal = (await store.listProposals()).find((item) => item.candidate.category === 'memory.claim'); assert.ok(proposal);
   assert.equal(proposal.candidate.provenance.session_id, undefined);
@@ -1258,7 +1261,7 @@ test('a rejected observation with a pending dependent claim stops before cursor 
   const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
   const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
   const importer = () => ({ events: [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
-  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
   await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash'); } })), /crash/);
   const raw = (await store.listProposals()).find((item) => item.candidate.category === 'memory.observation');
   await store.rejectCreate(raw.id, 'reviewer', 'not suitable');
@@ -1272,7 +1275,7 @@ test('a tool-derived claim needs an independently applied source before briefing
   const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
   const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
   const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
-  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer }] });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
   await runDream(host, runOptions(ws)); const proposals = await store.listProposals();
   const raw = proposals.find((item) => item.candidate.category === 'memory.observation');
   const claim = proposals.find((item) => item.candidate.category === 'memory.claim');
@@ -1302,7 +1305,55 @@ test('the observation cursor is snapshotted before asynchronous dream effects', 
   const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
   const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
   const next = { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) };
-  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, data: 'fixture', importer: () => ({ events: [event], malformed: 0, partial: 0, cursor: next }) }] });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer: () => ({ events: [event], malformed: 0, partial: 0, cursor: next }) }] });
   await runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'distill') next.lines = 99; } }));
-  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].lines, 1);
+  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].cursor.lines, 1);
+});
+
+test('observation sources require an explicit scope and retain project provenance', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-project'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture-project-id', projectName: 'Fixture Project', event: 'tool_complete', tool: '', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const source = { sourceId, data: 'fixture', importer }; const host = hostFor(ws, store, extract, { observationSources: [source] });
+  await assert.rejects(runDream(host, runOptions(ws)), /explicit project or global binding/);
+  assert.equal((await store.listProposals()).length, 0); assert.equal(fs.existsSync(ws.cursorFile), false);
+  source.project = 'fixture-project'; await runDream(host, runOptions(ws));
+  const proposals = await store.listProposals(); const claim = proposals.find((item) => item.candidate.category === 'memory.claim');
+  const raw = proposals.find((item) => item.candidate.category === 'memory.observation');
+  assert.equal(JSON.parse(claim.candidate.body).project, 'fixture-project');
+  const provenance = JSON.parse(raw.candidate.body).provenance;
+  assert.equal(provenance.project, 'fixture-project'); assert.equal(provenance.tool, null);
+  assert.equal(provenance.projectId, createHash('sha256').update('fixture-project-id').digest('hex'));
+  assert.equal(provenance.projectName, 'Fixture Project');
+  source.project = 'other-project';
+  await assert.rejects(runDream(host, runOptions(ws)), /scope changed/);
+});
+
+test('a changed observation at the same source line fails without advancing the cursor', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-changed'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = () => ({ events: [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
+  await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash'); } })), /crash/);
+  event.output = 'changed observation';
+  await assert.rejects(runDream(host, runOptions(ws)), (error) => error.code === 'REQUEST_KEY_CONFLICT');
+  assert.equal(fs.existsSync(ws.cursorFile), false); assert.equal((await store.listProposals()).length, 2);
+});
+
+test('a source changing its observed project identity fails before another write', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-project-change';
+  const importer = (_data, options) => {
+    const ordinal = options.cursor ? 2 : 1;
+    const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+    return { events: [{ id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: ordinal === 1 ? 'first' : 'second', projectName: 'Fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." }], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: ordinal, digest: 'a'.repeat(64) } };
+  };
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: 'fixture', data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws)); const before = fs.readFileSync(ws.cursorFile, 'utf8'); const count = (await store.listProposals()).length;
+  await assert.rejects(runDream(host, runOptions(ws)), /project identity changed/);
+  assert.equal(fs.readFileSync(ws.cursorFile, 'utf8'), before); assert.equal((await store.listProposals()).length, count);
 });

@@ -54,11 +54,12 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   const provenance = isTool ? { source_id: transcriptRef, event_id: residue.provenance.eventId, ordinal: residue.provenance.ordinal, timestamp: residue.provenance.timestamp, session_id: sessionId, tool: residue.provenance.tool, sitting_id: sittingId, content_hash: residue.contentHash } : { session_id: sessionId, transcript_ref: transcriptRef, sitting_id: sittingId, content_hash: residue.contentHash };
   /** @type {import('@kontourai/corpus-store').CreateInput[]} */
   const prepared = candidates.map((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some((key) => !['title', 'body', 'category'].includes(key))) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some((key) => !['title', 'body', 'category', ...(isTool ? ['id'] : [])].includes(key)) || (item.id !== undefined && (!isTool || item.id !== `observation-${residue.provenance.eventId}`))) {
       throw new Error('store target candidate has unsupported fields');
     }
     return {
       type: 'raw',
+      ...(item.id === undefined ? {} : { id: item.id }),
       title: required(item?.title, 'candidate title'),
       body: required(item?.body, 'candidate body'),
       category: required(item?.category, 'candidate category'),

@@ -100,6 +100,27 @@ async function briefItems(store, index, proposerId, proposals) {
       list.push({ proposal, note }); observationSources.set(note.sitting_id, list);
     } catch { /* An unreadable source cannot authorize a brief. */ }
   }
+  const proposalsById = new Map(proposals.map((proposal) => [proposal.id, proposal]));
+  async function approvedCompiledSources(proposal, envelope) {
+    const ids = proposal.candidate?.provenance?.source_ids;
+    const links = proposal.candidate?.links;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 1001 || new Set(ids).size !== ids.length || !ids.includes(envelope.claim.source.ref) || !Array.isArray(links)) return false;
+    const linked = new Set(links.filter((link) => link.kind === "source").map((link) => link.target_id));
+    for (const id of ids) {
+      if (typeof id !== "string" || !linked.has(id) || !store.get) return false;
+      const record = await store.get(id);
+      if (!record || record.type !== "raw" || ["retired", "purged"].includes(record.status)) return false;
+      const origin = (record.mutation_log ?? []).find((entry) => entry.op === "apply-create" && typeof entry.evidence?.proposal_id === "string");
+      const source = origin && proposalsById.get(origin.evidence.proposal_id);
+      if (!source || source.state !== "applied" || source.record_id !== id || !source.reviewer_id || source.reviewer_id === source.proposer_id || source.candidate?.body !== record.body || source.candidate?.type !== "raw") return false;
+      if (id === envelope.claim.source.ref) {
+        const range = /^chars:(\d+)-(\d+)$/.exec(envelope.claim.source.locator);
+        const start = range ? Number(range[1]) : NaN; const end = range ? Number(range[2]) : NaN;
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end <= start || end > record.body.length || record.body.slice(start, end) !== envelope.claim.source.excerpt) return false;
+      }
+    }
+    return true;
+  }
   async function observationState(envelope) {
     const found = observationSources.get(envelope.sitting.id) ?? [];
     if (found.length !== 1) return "invalid";
@@ -123,6 +144,10 @@ async function briefItems(store, index, proposerId, proposals) {
       excluded.rejected += 1;
       continue;
     }
+    if (proposal.candidate?.type === "compiled" && !(await approvedCompiledSources(proposal, envelope))) {
+      excluded.observation_unreviewed += 1;
+      continue;
+    }
     let observationSourceApproved;
     if (envelope.sitting.id.startsWith("tool-event:")) {
       const state = await observationState(envelope);
@@ -133,6 +158,8 @@ async function briefItems(store, index, proposerId, proposals) {
     // A sealed claim never reaches a brief, but it still contests a rival: whether two claims disagree does not
     // depend on who may read them.
     if (isSealed(envelope.claim)) excluded.sealed += 1;
+    let acceptedConfidence = proposal.candidate?.confidence;
+    if (acceptedConfidence !== undefined && (typeof acceptedConfidence !== "number" || !Number.isFinite(acceptedConfidence) || acceptedConfidence < 0 || acceptedConfidence > 1)) { excluded.unverified += 1; continue; }
     if (proposal.state === "applied") {
       // Defence in depth: Corpus refuses SELF_APPROVAL, and a record the distiller approved still does not count.
       if (!proposal.reviewer_id || proposal.reviewer_id === proposal.proposer_id || proposal.reviewer_id === proposerId) {
@@ -142,6 +169,9 @@ async function briefItems(store, index, proposerId, proposals) {
       const record = store.get && proposal.record_id ? await store.get(proposal.record_id) : null;
       const bound = Boolean(record)
         && record.body === proposal.candidate.body
+        && (proposal.candidate.type === undefined || record.type === proposal.candidate.type)
+        && record.category === proposal.candidate.category
+        && record.confidence === proposal.candidate.confidence
         && (record.mutation_log ?? []).some((entry) => entry.op === "apply-create" && entry.evidence?.proposal_id === proposal.id);
       if (!bound) {
         excluded.unverified += 1;
@@ -152,7 +182,7 @@ async function briefItems(store, index, proposerId, proposals) {
         continue;
       }
     }
-    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, ...(observationSourceApproved === undefined ? {} : { observationSourceApproved }), ...(envelope.instinctConfidence === undefined ? {} : { instinctConfidence: envelope.instinctConfidence }), state: proposal.state, routing: envelope.decision });
+    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, ...(observationSourceApproved === undefined ? {} : { observationSourceApproved }), ...(acceptedConfidence === undefined ? {} : { confidence: acceptedConfidence }), state: proposal.state, routing: envelope.decision });
   }
   return { items, excluded };
 }
@@ -188,7 +218,7 @@ function pruneReports(dir) {
  * @property {(name: string, root: string) => unknown} registerRoot
  * @property {string} root absolute, host-authorised memory root
  * @property {string} rootName
- * @property {Array<{sourceId: string, data: string, importer: Function}>} [observationSources] host-authorized observation inputs; each sourceId is stable and opaque
+ * @property {Array<{sourceId: string, project: string|null, data: string, importer: Function}>} [observationSources] host-authorized inputs with a stable opaque ID and explicit project or global scope
  * @property {Function} [extract] model-backed `MemoryExtract` (see model.js); not needed for a dry run
  * @property {() => object[] | Promise<object[]>} [reviewDecisions] Survey review decisions, for brief labels and metrics
  * @property {(batch: {runId: string, decisions: object[], reviewItems: object[], metrics: object|null}) => unknown} publish
@@ -284,7 +314,10 @@ export async function runDream(host, options = {}) {
     // The same cursor file commits runtime and observation progress last.
     const runtimeResidues = [...ingest.residues];
     const observations = host.observationSources === undefined ? null : ingestObservationSources(host.observationSources, cursor.observations ?? {}, cursor.sittings, toolEventResidue);
-    if (observations) ingest.residues.push(...observations.batches.flatMap((batch) => batch.residues));
+    if (observations) {
+      ingest.residues.push(...observations.batches.flatMap((batch) => batch.residues));
+      report.ingest.observations = { sources: observations.batches.length, events_returned: observations.batches.reduce((n, batch) => n + batch.eventIds.length, 0), events_emitted: observations.batches.reduce((n, batch) => n + batch.residues.length, 0), partial_sources: observations.batches.filter((batch) => batch.partial > 0).length };
+    }
     report.sittings.seen = ingest.residues.length;
     report.redaction_hits = redactionHits(ingest.residues);
 
@@ -404,7 +437,7 @@ export async function runDream(host, options = {}) {
         }
         report.claims.rejected += distilled.rejected.length;
 
-        const project = projectFromCwd(residue.provenance?.cwd ?? null);
+        const project = residue.source === "tool-event" ? residue.provenance.project : projectFromCwd(residue.provenance?.cwd ?? null);
         const ordered = [...distilled.claims].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
         // Tool output is untrusted external data, not an independently asserted
         // human statement. Keep its agreement unmeasured so the common router
@@ -431,7 +464,7 @@ export async function runDream(host, options = {}) {
       if (residue.source === "tool-event") {
         // Raw observations are staged as Corpus proposals, not applied. Their key
         // is anchored to the same source event on every retry.
-        const raw = await proposeMemory({ residue, candidates: [{ title: "Observed tool event", category: "memory.observation", body: JSON.stringify({ provenance: residue.provenance, turn: residue.turns[0] }) }], proposerId, store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName, requestScope: "observation-raw-v1", positions: [0] });
+        const raw = await proposeMemory({ residue, candidates: [{ id: `observation-${residue.provenance.eventId}`, title: "Observed tool event", category: "memory.observation", body: JSON.stringify({ provenance: residue.provenance, turn: residue.turns[0] }) }], proposerId, store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName, requestScope: "observation-raw-v1", positions: [0] });
         const proposalId = raw.proposals[0];
         const proposal = (await store.listProposals()).find((item) => item.id === proposalId);
         if (!proposal) throw dreamError("DREAM_OBSERVATION_UNCONFIRMED", "the observation proposal cannot be confirmed");
@@ -530,7 +563,11 @@ export async function runDream(host, options = {}) {
     for (const residue of selected) if (processed.has(residue.sittingId)) sittings[residue.sittingId] = residue.contentHash;
     const undone = runtimeResidues.some((residue) => !processed.has(residue.sittingId));
     if (observations) for (const batch of observations.batches) {
-      if (batch.residues.every((residue) => processed.has(residue.sittingId))) observations.cursors[batch.key] = batch.cursor;
+      if (batch.residues.every((residue) => processed.has(residue.sittingId))) {
+        observations.cursors[batch.key] = batch.cursor;
+        // The committed source cursor now owns replay identity for this prefix.
+        for (const id of batch.eventIds) delete sittings[id];
+      }
     }
     const next = {
       schema_version: ingest.candidateCursor.schema_version,

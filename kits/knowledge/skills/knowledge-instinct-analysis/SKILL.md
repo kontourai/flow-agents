@@ -1,5 +1,5 @@
 ---
-name: "instinct-analysis"
+name: "knowledge-instinct-analysis"
 description: "Plan confidence changes for reviewed instinct records."
 ---
 

@@ -28,6 +28,6 @@ test('propagates importer errors without advancing or replacing the cursor', () 
 
 test('the combined event limit fails before a second source is accepted', () => {
   const importer = (_data, { sourceId }) => ({ events: Array.from({ length: 50001 }, (_, i) => ({ sourceId, ordinal: i + 1 })), malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 50001, digest: 'a'.repeat(64) } });
-  const sources = ['one', 'two'].map((sourceId) => ({ sourceId, data: '', importer }));
-  assert.throws(() => ingestObservationSources(sources, {}, {}, (event) => ({ sittingId: `${event.sourceId}:${event.ordinal}`, contentHash: 'fixture' })), /event limit/);
+  const sources = ['one', 'two'].map((sourceId) => ({ sourceId, project: null, data: '', importer }));
+  assert.throws(() => ingestObservationSources(sources, {}, {}, (event) => ({ sittingId: `${event.sourceId}:${event.ordinal}`, contentHash: 'fixture', provenance: { projectId: null } })), /event limit/);
 });

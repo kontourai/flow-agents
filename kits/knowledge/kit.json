@@ -336,18 +336,18 @@
   ],
   "skills": [
     {
-      "id": "knowledge.observe",
-      "path": "skills/observe/SKILL.md",
+      "id": "knowledge.knowledge-observation-ingest",
+      "path": "skills/knowledge-observation-ingest/SKILL.md",
       "description": "Provide observation sources to the dream run without changing capture behavior."
     },
     {
-      "id": "knowledge.instinct-analysis",
-      "path": "skills/instinct-analysis/SKILL.md",
+      "id": "knowledge.knowledge-instinct-analysis",
+      "path": "skills/knowledge-instinct-analysis/SKILL.md",
       "description": "Plan confidence updates for independently reviewed instinct records."
     },
     {
-      "id": "knowledge.instinct-review",
-      "path": "skills/instinct-review/SKILL.md",
+      "id": "knowledge.knowledge-instinct-review",
+      "path": "skills/knowledge-instinct-review/SKILL.md",
       "description": "Review instinct claims and their source observations."
     },
     {

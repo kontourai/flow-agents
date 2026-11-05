@@ -1,5 +1,5 @@
 ---
-name: "observe"
+name: "knowledge-observation-ingest"
 description: "Keep an observation available for the Knowledge dream run."
 ---
 

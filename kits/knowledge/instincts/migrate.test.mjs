@@ -15,12 +15,24 @@ test('dry-run plans only source-backed instincts and writes nothing', (t) => {
   const entry = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: '2026-01-01T00:00:00Z', confidence: 0.7, source_ids: [eventId] };
   fs.writeFileSync(path.join(instincts, 'instinct.json'), JSON.stringify([entry, { ...entry, id: 'missing', source_ids: ['unknown'] }]));
   const before = fs.readFileSync(file, 'utf8');
-  const importer = (_data, options) => ({ events: [{ id: eventId, sourceId: options.sourceId, ordinal: 1, timestamp: '2026-01-01T00:00:00Z', session: 'fixture', tool: 'shell', event: 'tool_complete', output: 'run focused tests' }], malformed: 0, partial: 0, cursor: { version: 1, sourceId: options.sourceId, lines: 1, digest: 'a'.repeat(64) } });
-  const report = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', importer });
+  const importer = (_data, options) => ({ events: [{ id: eventId, sourceId: options.sourceId, ordinal: 1, timestamp: '2026-01-01T00:00:00Z', session: 'fixture', projectId: 'fixture', projectName: 'fixture', tool: 'shell', event: 'tool_complete', output: 'run focused tests' }], malformed: 0, partial: 0, cursor: { version: 1, sourceId: options.sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const report = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', sourceProjects: [{ file: 'observations.jsonl', project: null }], importer });
   assert.equal(fs.readFileSync(file, 'utf8'), before); assert.equal(report.writes, 0);
-  assert.equal(report.observations.events, 1); assert.equal(report.instincts.planned, 1); assert.equal(report.instincts.missingSources, 1);
+  assert.equal(report.observations.events, 1); assert.equal(report.observations.minimumRunsAtDefaultCap, 1); assert.equal(report.instincts.planned, 1); assert.equal(report.instincts.missingSources, 1);
   assert.deepEqual(report.instincts.confidence, [{ confidence: 0.7, count: 1 }]); assert.equal(report.diff.compiled_candidates, 1);
   assert.equal(report.brief.status, 'not-verified'); assert.ok(!JSON.stringify(report).includes('run focused tests'));
+  const unbound = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', importer });
+  assert.equal(unbound.instincts.planned, 0); assert.equal(unbound.instincts.unbound, 1);
+  const mismatched = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', sourceProjects: [{ file: 'observations.jsonl', project: 'other' }], importer });
+  assert.equal(mismatched.instincts.planned, 0); assert.equal(mismatched.instincts.scopeMismatch, 1);
+  fs.writeFileSync(path.join(instincts, 'instinct.json'), JSON.stringify({ ...entry, source_ids: ['legacy-reference'] }));
+  const mapping = [{ legacyId: 'legacy-reference', file: 'observations.jsonl', ordinal: 1 }];
+  const mapped = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', sourceMap: mapping, sourceProjects: [{ file: 'observations.jsonl', project: null }], importer });
+  assert.equal(mapped.instincts.planned, 1); assert.equal(mapped.instincts.sourceMapping, 'operator-supplied-unverified');
+  const wrong = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', sourceMap: [{ ...mapping[0], ordinal: 2 }], sourceProjects: [{ file: 'observations.jsonl', project: null }], importer });
+  assert.equal(wrong.instincts.planned, 0); assert.equal(wrong.instincts.missingSources, 1);
+  assert.throws(() => previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', sourceMap: [mapping[0], mapping[0]], importer }), /duplicate source mapping/);
+  assert.throws(() => previewMigration({ legacyRoot: legacy, instinctsRoot: legacy, sourceNamespace: 'fixture', importer }), /select the instinct directory/);
 });
 test('missing instinct root is not reported as an empty inventory', (t) => {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'migration-preview-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -28,7 +40,7 @@ test('missing instinct root is not reported as an empty inventory', (t) => {
   assert.equal(report.instincts.inventory, 'not-supplied'); assert.equal(report.writes, 0);
 });
 
-test('planned source and compiled shapes pass through real Corpus review with a confidence shim', async (t) => {
+test('planned source and compiled shapes retain confidence through real Corpus review', async (t) => {
   const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import('@kontourai/corpus-store');
   const { planLegacyInstinct } = await import('./migrate.js');
   const { toolEventResidue } = await import('./tool-event-residue.js');
@@ -36,8 +48,8 @@ test('planned source and compiled shapes pass through real Corpus review with a 
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'migration-corpus-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = new KitDefaultStoreAdapter({ storeRoot: path.join(root, 'store'), coordinationDirectory: path.join(root, 'coord'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
   const sourceId = 'fixture'; const ordinal = 1; const id = hash(JSON.stringify([sourceId, ordinal]));
-  const source = toolEventResidue({ id, sourceId, ordinal, timestamp: '2026-01-01T00:00:00Z', session: 'fixture', tool: 'shell', event: 'tool_complete', output: 'run focused tests' });
-  const value = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: '2026-01-01T00:00:00Z', confidence: 0.7, source_ids: [id] };
+  const source = toolEventResidue({ id, sourceId, ordinal, timestamp: '2026-01-01T00:00:00Z', session: 'fixture', projectId: 'fixture', projectName: 'fixture', tool: 'shell', event: 'tool_complete', output: 'run focused tests' });
+  const value = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: '2026-01-02T00:00:00Z', confidence_at: '2026-01-02T00:00:00Z', confidence: 0.7, source_ids: [id] };
   const plan = planLegacyInstinct(value, [source], 'fixture');
   for (const raw of [plan.legacyRaw, ...plan.observationRaw]) {
     const proposal = await store.proposeCreate(raw, 'migrator', { agent: 'migrator', proposal: 'source' }, { requestKey: `fixture:${raw.id}` });
@@ -48,13 +60,13 @@ test('planned source and compiled shapes pass through real Corpus review with a 
   assert.equal(await store.proposeCreate(plan.candidate, 'migrator', evidence, { requestKey: plan.requestKey }), proposal);
   await assert.rejects(store.applyCreate(proposal, 'migrator'), (error) => error.code === 'SELF_APPROVAL');
   const recordId = await store.applyCreate(proposal, 'reviewer'); const record = await store.get(recordId);
-  assert.equal(record.type, 'compiled'); assert.equal(decodeEnvelope(record.body).instinctConfidence, 0.7);
+  assert.equal(record.type, 'compiled'); assert.equal(record.confidence, 0.7); assert.ok(decodeEnvelope(record.body));
+  assert.match(fs.readFileSync(path.join(root, 'store', 'records', `${recordId}.md`), 'utf8'), /confidence: 0\.7/);
   assert.deepEqual(new Set(record.provenance.source_ids), new Set([plan.legacyRaw.id, ...plan.observationRaw.map((item) => item.id)]));
-  assert.equal(record.confidence, undefined, 'Corpus next.2 needs the envelope shim');
   const { KnowledgeFlowRunner } = await import('../adapters/flow-runner/index.js');
   const runner = new KnowledgeFlowRunner({ store, workspace: root, agent: 'fixture' });
-  const result = await runner.consolidate({ topic: 'memory.claim', category: 'memory.claim' }, { sourceRecordIds: [recordId], proposedBody: 'fixture snapshot', rationale: 'fixture', instincts: [{ recordId, sourceIds: [plan.observationRaw[0].id], baselineSources: 1, baselineAt: '2026-01-01T00:00:00Z', now: '2026-01-08T00:00:00Z', current: [], visibility: null }] });
-  assert.equal(result.instinctPlans[0].entry.instinctConfidence, 0.68);
+  const result = await runner.consolidate({ topic: 'memory.claim', category: 'memory.claim' }, { sourceRecordIds: [recordId], proposedBody: 'fixture snapshot', rationale: 'fixture', instincts: [{ recordId, sourceIds: [plan.observationRaw[0].id], baselineSources: 1, baselineAt: '2026-01-02T00:00:00Z', now: '2026-01-09T00:00:00Z', current: [], visibility: null }] });
+  assert.equal(result.instinctPlans[0].confidence, 0.68);
   assert.equal(result.instinctPlans[0].status, 'requires-review');
   assert.equal((await store.get(recordId)).body, record.body, 'consolidation does not self-apply the confidence change');
 });

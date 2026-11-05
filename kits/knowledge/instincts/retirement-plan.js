@@ -11,7 +11,7 @@ export const retirementPlan = Object.freeze({
     'Run the migration against an owner-selected copy first. Inspect counts, omissions, confidence and proposed brief entries.',
     'After owner approval, migrate into the authorized memory root. Verify record retrieval, provenance and brief quality before retiring anything.',
     'After independent verification and owner approval, save the old job configuration, disable that job using its scheduler, and preserve the old store as a read-only archive. Do not delete it.',
-    'Before rollback, stop the new dream path to avoid two writers. Review every version 1.3 proposal: an applied proposal may prevent rollback, and its recovery path is not verified.',
+    'Before rollback, stop the new dream path to avoid two writers. If earlier draft testing wrote version 1.3 proposals, review each: an applied proposal may prevent rollback, and its recovery path is not verified.',
     'Once a recovery path is confirmed, restore access to the archive and the saved job configuration. How to withdraw migrated proposals remains unverified.',
   ],
   missing: ['live migration command', 'real-store dry run', 'retrieval and brief verification', 'owner approval'],
