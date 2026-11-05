@@ -38,6 +38,7 @@ if npm run knowledge:yaml:check && node --test \
   kits/knowledge/providers/health/health-pass.test.js \
   kits/knowledge/instincts/confidence.test.js \
   kits/knowledge/instincts/consolidate.test.mjs \
+  kits/knowledge/instincts/consolidate-guards.test.mjs \
   kits/knowledge/instincts/observation-source.test.mjs \
   kits/knowledge/instincts/tool-event-residue.test.mjs \
   kits/knowledge/instincts/migrate.test.mjs \

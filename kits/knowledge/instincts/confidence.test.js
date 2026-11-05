@@ -16,3 +16,7 @@ test('confidence is bounded and retirement is proposed only below threshold', ()
 test('invalid state and future evidence are refused', () => {
   for (const change of [{ baseline: NaN }, { baselineSources: -1 }, { sourceIds: [''] }, { now: 'bad' }, { now: '2025-12-31T00:00:00Z' }]) assert.throws(() => instinctConfidence({ ...base, ...change }), TypeError);
 });
+
+test('an unchanged baseline keeps its recorded precision', () => {
+  for (const baseline of [0.1234567, 0.333333333]) assert.equal(instinctConfidence({ ...base, baseline }).confidence, baseline);
+});

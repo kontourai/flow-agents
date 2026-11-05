@@ -31,3 +31,13 @@ test('the combined event limit fails before a second source is accepted', () => 
   const sources = ['one', 'two'].map((sourceId) => ({ sourceId, project: null, data: '', importer }));
   assert.throws(() => ingestObservationSources(sources, {}, {}, (event) => ({ sittingId: `${event.sourceId}:${event.ordinal}`, contentHash: 'fixture', provenance: { projectId: null } })), /event limit/);
 });
+
+test('observation ingestion asks the importer to refuse malformed lines', () => {
+  const sourceId = 'fixture';
+  const importer = (_data, options) => {
+    assert.equal(options.maxMalformed, 0);
+    return { events: [], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 0, digest: 'a'.repeat(64) } };
+  };
+  const result = ingestObservationSources([{ sourceId, project: null, data: '', importer }], {}, {}, () => { throw new Error('no events'); });
+  assert.equal(result.batches.length, 1);
+});

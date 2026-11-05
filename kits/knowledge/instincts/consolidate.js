@@ -13,7 +13,8 @@ export function planInstinctConsolidation({ claim, confidence, current = [], vis
     entry: { claim, agreement: null, project },
     confidence: result.confidence,
     decision,
-    reviewItem,
+    claimReviewItem: reviewItem,
+    confidenceReview: 'not-bound',
     retirement: result.proposeRetirement ? { proposed: true, reason: 'confidence-below-0.2' } : null,
   };
 }

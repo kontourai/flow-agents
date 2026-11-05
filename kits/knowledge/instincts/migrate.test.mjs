@@ -21,6 +21,7 @@ test('dry-run plans only source-backed instincts and writes nothing', (t) => {
   assert.equal(report.observations.events, 1); assert.equal(report.observations.minimumRunsAtDefaultCap, 1); assert.equal(report.instincts.planned, 1); assert.equal(report.instincts.missingSources, 1);
   assert.deepEqual(report.instincts.confidence, [{ confidence: 0.7, count: 1 }]); assert.equal(report.diff.compiled_candidates, 1);
   assert.equal(report.brief.status, 'not-verified'); assert.ok(!JSON.stringify(report).includes('run focused tests'));
+  assert.throws(() => previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', sourceProjects: [{ file: 'unknown.jsonl', project: null }], importer }), /unknown observation file/);
   const unbound = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', importer });
   assert.equal(unbound.instincts.planned, 0); assert.equal(unbound.instincts.unbound, 1);
   const mismatched = previewMigration({ legacyRoot: legacy, instinctsRoot: instincts, sourceNamespace: 'fixture', sourceProjects: [{ file: 'observations.jsonl', project: 'other' }], importer });
@@ -44,13 +45,14 @@ test('planned source and compiled shapes retain confidence through real Corpus r
   const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import('@kontourai/corpus-store');
   const { planLegacyInstinct } = await import('./migrate.js');
   const { toolEventResidue } = await import('./tool-event-residue.js');
-  const { decodeEnvelope } = await import('../dream/envelope.js');
+  const { decodeEnvelope, visibilityKey } = await import('../dream/envelope.js');
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'migration-corpus-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = new KitDefaultStoreAdapter({ storeRoot: path.join(root, 'store'), coordinationDirectory: path.join(root, 'coord'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
   const sourceId = 'fixture'; const ordinal = 1; const id = hash(JSON.stringify([sourceId, ordinal]));
   const source = toolEventResidue({ id, sourceId, ordinal, timestamp: '2026-01-01T00:00:00Z', session: 'fixture', projectId: 'fixture', projectName: 'fixture', tool: 'shell', event: 'tool_complete', output: 'run focused tests' });
-  const value = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: '2026-01-02T00:00:00Z', confidence_at: '2026-01-02T00:00:00Z', confidence: 0.7, source_ids: [id] };
+  const value = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: '2026-01-02T00:00:00Z', confidence_at: '2026-01-02T00:00:00Z', confidence: 0.1234567, source_ids: [id] };
   const plan = planLegacyInstinct(value, [source], 'fixture');
+  assert.equal(decodeEnvelope(plan.candidate.body).sitting.visibilityKey, visibilityKey(undefined));
   for (const raw of [plan.legacyRaw, ...plan.observationRaw]) {
     const proposal = await store.proposeCreate(raw, 'migrator', { agent: 'migrator', proposal: 'source' }, { requestKey: `fixture:${raw.id}` });
     await store.applyCreate(proposal, 'reviewer');
@@ -60,13 +62,13 @@ test('planned source and compiled shapes retain confidence through real Corpus r
   assert.equal(await store.proposeCreate(plan.candidate, 'migrator', evidence, { requestKey: plan.requestKey }), proposal);
   await assert.rejects(store.applyCreate(proposal, 'migrator'), (error) => error.code === 'SELF_APPROVAL');
   const recordId = await store.applyCreate(proposal, 'reviewer'); const record = await store.get(recordId);
-  assert.equal(record.type, 'compiled'); assert.equal(record.confidence, 0.7); assert.ok(decodeEnvelope(record.body));
-  assert.match(fs.readFileSync(path.join(root, 'store', 'records', `${recordId}.md`), 'utf8'), /confidence: 0\.7/);
+  assert.equal(record.type, 'compiled'); assert.equal(record.confidence, 0.1234567); assert.ok(decodeEnvelope(record.body));
+  assert.match(fs.readFileSync(path.join(root, 'store', 'records', `${recordId}.md`), 'utf8'), /confidence: 0\.1234567/);
   assert.deepEqual(new Set(record.provenance.source_ids), new Set([plan.legacyRaw.id, ...plan.observationRaw.map((item) => item.id)]));
   const { KnowledgeFlowRunner } = await import('../adapters/flow-runner/index.js');
   const runner = new KnowledgeFlowRunner({ store, workspace: root, agent: 'fixture' });
   const result = await runner.consolidate({ topic: 'memory.claim', category: 'memory.claim' }, { sourceRecordIds: [recordId], proposedBody: 'fixture snapshot', rationale: 'fixture', instincts: [{ recordId, sourceIds: [plan.observationRaw[0].id], baselineSources: 1, baselineAt: '2026-01-02T00:00:00Z', now: '2026-01-09T00:00:00Z', current: [], visibility: null }] });
-  assert.equal(result.instinctPlans[0].confidence, 0.68);
+  assert.equal(result.instinctPlans[0].confidence, 0.103457);
   assert.equal(result.instinctPlans[0].status, 'requires-review');
   assert.equal((await store.get(recordId)).body, record.body, 'consolidation does not self-apply the confidence change');
 });

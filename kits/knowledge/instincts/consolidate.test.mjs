@@ -8,7 +8,7 @@ test('consolidation plans decayed confidence and routes the same claim without a
   const result = planInstinctConsolidation({ claim, confidence: { baseline: 0.21, baselineSources: 1, sourceIds: ['one'], lastObservedAt: '2026-01-01T00:00:00Z', now: '2026-01-08T00:00:00Z' } });
   assert.equal(result.confidence, 0.19); assert.equal(result.decision.changeId, claim.id);
   assert.deepEqual(result.retirement, { proposed: true, reason: 'confidence-below-0.2' });
-  assert.equal(result.entry.claim.posture, 'proposed'); assert.equal(result.reviewItem.metadata.labels['memory.reviewer'], 'human-required');
+  assert.equal(result.entry.claim.posture, 'proposed'); assert.equal(result.claimReviewItem.metadata.labels['memory.reviewer'], 'human-required'); assert.equal(result.confidenceReview, 'not-bound');
 });
 
 test('the consolidate flow plans confidence from reviewed linked observations without mutating the instinct', async (t) => {

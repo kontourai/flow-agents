@@ -558,3 +558,54 @@ test('stored instinct confidence reaches the ranked brief after independent revi
   assert.ok(entries[0].includes(claims[1].value), 'higher confidence must rank first');
   assert.ok(entries[1].includes(claims[0].value));
 });
+
+test('an applied record with changed type or category cannot authorize a brief', async (t) => {
+  const { ws, store, host } = await ran(); t.after(ws.cleanup);
+  const [proposal] = await store.listProposals(); const recordId = await store.applyCreate(proposal.id, 'a-human-reviewer');
+  const original = store.records.get(recordId);
+  for (const change of [{ type: 'compiled' }, { category: 'memory.other' }]) {
+    store.records.set(recordId, { ...original, ...change });
+    const report = await runDream(host, runOptions(ws));
+    assert.equal(report.brief_excluded.unverified, 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+  }
+});
+
+test('compiled claims require independently reviewed sources supporting the excerpt', async (t) => {
+  const { createHash } = await import('node:crypto');
+  const { planLegacyInstinct } = await import('../../kits/knowledge/instincts/migrate.js');
+  const { toolEventResidue } = await import('../../kits/knowledge/instincts/tool-event-residue.js');
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, ''); const store = new FakeCorpusStore(ws.memoryRoot);
+  const sourceId = 'fixture-source'; const ordinal = 1; const eventId = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const source = toolEventResidue({ id: eventId, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'Fixture', event: 'tool_complete', tool: 'shell', output: 'run focused tests' }, null);
+  const value = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: NOW_ISO, confidence_at: NOW_ISO, confidence: 0.8, source_ids: [eventId] };
+  const plan = planLegacyInstinct(value, [source], 'fixture', { visibility: { kind: 'restricted', audiences: ['user:owner'] } });
+  const rawProposals = [];
+  for (const raw of [plan.legacyRaw, ...plan.observationRaw]) {
+    const id = await store.proposeCreate(raw, 'migrator', { agent: 'migrator', proposal: 'source' }); rawProposals.push(id); await store.applyCreate(id, 'reviewer');
+  }
+  const compiled = await store.proposeCreate(plan.candidate, 'migrator', { agent: 'migrator', proposal: 'instinct' }); await store.applyCreate(compiled, 'reviewer');
+  const host = hostFor(ws, store, await scriptedExtract()); await runDream(host, runOptions(ws));
+  assert.equal(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries.length, 1);
+  const file = path.join(store.dir, `${rawProposals[0]}.json`); const proposalBefore = fs.readFileSync(file, 'utf8'); const recordBefore = store.records.get(plan.legacyRaw.id);
+  const selfApproved = JSON.parse(proposalBefore); selfApproved.reviewer_id = selfApproved.proposer_id; fs.writeFileSync(file, JSON.stringify(selfApproved));
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
+  fs.writeFileSync(file, proposalBefore);
+  const changed = JSON.parse(proposalBefore); changed.candidate.body = 'different source text'; fs.writeFileSync(file, JSON.stringify(changed));
+  store.records.set(plan.legacyRaw.id, { ...recordBefore, body: changed.candidate.body });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+});
+
+test('an out-of-range stored confidence cannot enter a brief', async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import('../../kits/knowledge/dream/envelope.js');
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, ''); const store = new FakeCorpusStore(ws.memoryRoot);
+  const candidate = claim({ property: 'fixture', value: 'fixture' });
+  const entry = { claim: candidate, agreement: null, project: null };
+  const decision = routeMemoryChange({ type: 'claim', claim: candidate, current: [], agreement: null, sourceVisibility: { kind: 'public' } });
+  const body = encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: 'fixture:confidence', contentHash: 'fixture', visibilityKey: visibilityKey(candidate.visibility) } });
+  const id = await store.proposeCreate({ type: 'raw', title: 'fixture', category: 'memory.claim', confidence: 2, body }, 'producer', { agent: 'producer', proposal: 'fixture' });
+  await store.applyCreate(id, 'reviewer');
+  const report = await runDream(hostFor(ws, store, await scriptedExtract()), runOptions(ws));
+  assert.equal(report.brief_excluded.unverified, 1); assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+});

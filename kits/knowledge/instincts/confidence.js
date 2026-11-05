@@ -15,6 +15,8 @@ export function instinctConfidence({ baseline, baselineSources, sourceIds, lastO
   if (!Number.isFinite(observed) || !Number.isFinite(current) || observed > current) throw new TypeError('observation and current times must be valid and ordered');
   const sources = new Set(sourceIds).size;
   const weeks = Math.floor((current - observed) / (7 * 24 * 60 * 60 * 1000));
-  const confidence = Math.max(0, Math.min(1, Number((baseline + Math.max(0, sources - baselineSources) * 0.05 - weeks * 0.02).toFixed(6))));
+  const added = Math.max(0, sources - baselineSources);
+  // Import preserves the exact recorded value until evidence or time changes it.
+  const confidence = added === 0 && weeks === 0 ? baseline : Math.max(0, Math.min(1, Number((baseline + added * 0.05 - weeks * 0.02).toFixed(6))));
   return { confidence, proposeRetirement: confidence < 0.2 };
 }

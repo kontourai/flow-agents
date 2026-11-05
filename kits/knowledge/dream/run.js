@@ -87,7 +87,8 @@ function narrowStore(store) {
  */
 async function briefItems(store, index, proposerId, proposals) {
   const items = [];
-  const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0, observation_unreviewed: 0 };
+  const hasObservationInputs = proposals.some((item) => item?.candidate?.category === "memory.observation" || (item?.candidate?.category === "memory.claim" && item?.candidate?.type === "compiled"));
+  const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0, ...(hasObservationInputs ? { observation_unreviewed: 0 } : {}) };
   const observationSources = new Map();
   for (const proposal of proposals) {
     if (proposal?.proposer_id !== proposerId || proposal?.candidate?.category !== "memory.observation") continue;
@@ -277,8 +278,7 @@ export async function runDream(host, options = {}) {
     sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
     claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, facts_truncated: 0, rerouted: 0, contested_routed: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
-    observation_proposals: [],
-    observation_rejected: 0,
+    ...(host.observationSources === undefined ? {} : { observation_proposals: [], observation_rejected: 0 }),
     review_items: 0,
     unreadable_proposals: 0,
     redaction_hits: 0,
@@ -313,10 +313,10 @@ export async function runDream(host, options = {}) {
     // A source cursor advances only after every event in that source batch is processed.
     // The same cursor file commits runtime and observation progress last.
     const runtimeResidues = [...ingest.residues];
-    const observations = host.observationSources === undefined ? null : ingestObservationSources(host.observationSources, cursor.observations ?? {}, cursor.sittings, toolEventResidue);
+    const observations = host.observationSources === undefined ? null : ingestObservationSources(host.observationSources, cursor.observations ?? {}, cursor.sittings, toolEventResidue, { isolateFailures: true });
     if (observations) {
       ingest.residues.push(...observations.batches.flatMap((batch) => batch.residues));
-      report.ingest.observations = { sources: observations.batches.length, events_returned: observations.batches.reduce((n, batch) => n + batch.eventIds.length, 0), events_emitted: observations.batches.reduce((n, batch) => n + batch.residues.length, 0), partial_sources: observations.batches.filter((batch) => batch.partial > 0).length };
+      report.ingest.observations = { sources: observations.batches.length, events_returned: observations.batches.reduce((n, batch) => n + batch.eventIds.length, 0), events_emitted: observations.batches.reduce((n, batch) => n + batch.residues.length, 0), partial_sources: observations.batches.filter((batch) => batch.partial > 0).length, blocked: observations.blocked.map(({ sourceId, reason }) => ({ source_ref: `sha256:${sha256(sourceId)}`, reason })) };
     }
     report.sittings.seen = ingest.residues.length;
     report.redaction_hits = redactionHits(ingest.residues);
@@ -585,7 +585,7 @@ export async function runDream(host, options = {}) {
       return report;
     }
 
-    report.status = changed || report.sittings.distilled + report.sittings.resumed + report.sittings.reused > 0 ? "success" : "noop";
+    report.status = observations?.blocked.length ? "blocked" : changed || report.sittings.distilled + report.sittings.resumed + report.sittings.reused > 0 ? "success" : "noop";
     report.finished_at = now();
     await stage("report");
     writeReport(); // everything fallible is behind us: the report names the cursor it is about to commit
