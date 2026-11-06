@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.14.0](https://github.com/kontourai/flow-agents/compare/v9.13.0...v9.14.0) (2026-11-06)
+
+
+### Features
+
+* **memory:** expose host interfaces and compact install bundles ([6d9d08d](https://github.com/kontourai/flow-agents/commit/6d9d08d1ffdc2afc9e11c0dfa849bd1b4284a3ba))
+
 ## [9.13.0](https://github.com/kontourai/flow-agents/compare/v9.12.0...v9.13.0) (2026-11-06)
 
 
