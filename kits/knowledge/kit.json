@@ -244,7 +244,7 @@
     {
       "id": "knowledge.instinct-migration-preview",
       "path": "instincts/migrate.js",
-      "description": "Read-only migration preview using an explicitly supplied observation importer and source roots; writes no records."
+      "description": "Read-only migration preview using authorized source roots; writes no records."
     },
     {
       "id": "knowledge.instinct-retirement-plan",
