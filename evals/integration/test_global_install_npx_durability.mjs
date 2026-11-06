@@ -35,14 +35,16 @@ function tree(dir) {
 try {
   // Read the bundle under its normal build lock: npm pack itself does not take
   // that lock, and other static tests legitimately rebuild dist/.
-  const { acquireBundleBuildLock, releaseBundleBuildLock } = await import('../../build/src/tools/build-universal-bundles.js');
+  const { acquireBundleBuildLock, releaseBundleBuildLock, startBundleBuildLockRefresher } = await import('../../build/src/tools/build-universal-bundles.js');
+  const { packUnderBundleBuildLock } = await import('../../build/src/tools/bundle-pack-cli.js');
   const lock = acquireBundleBuildLock();
+  const stop = startBundleBuildLockRefresher(lock);
   try {
     // --ignore-scripts skips prepack, so write the pack from the built dist/ the way prepack does.
-    ok(run(process.execPath,[path.join(root,'build/src/tools/bundle-pack-cli.js'),'pack'],{cwd:root}));
+    assert.equal(packUnderBundleBuildLock(lock), 0);
     ok(run('npm',['pack','--ignore-scripts','--json','--pack-destination',pack],{cwd:root}));
   }
-  finally { releaseBundleBuildLock(lock); }
+  finally { stop(); releaseBundleBuildLock(lock); }
   const tarball=path.join(pack,fs.readdirSync(pack).find(n=>n.endsWith('.tgz')));
   fs.writeFileSync(path.join(pack,'SHA256SUMS'),`${digest(tarball)}  ${path.basename(tarball)}\n`);
   ok(run('tar',['-xzf',tarball,'-C',temp]));

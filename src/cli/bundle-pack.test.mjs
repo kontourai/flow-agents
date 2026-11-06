@@ -145,6 +145,32 @@ test("the builder refuses symlinks and an empty dist", () => {
   } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 });
 
+test("only the current owner's exact lock metadata is excluded from a snapshot", () => {
+  const scratch = tmp();
+  try {
+    const dist = fixtureDist(path.join(scratch, "dist"));
+    const expected = buildBundlePack(dist, PKG).header.digest;
+    const lock = path.join(dist, ".build-lock");
+    fs.mkdirSync(lock);
+    fs.writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+    assert.throws(() => buildBundlePack(dist, PKG), /known bundle roots/);
+    const packed = buildBundlePack(dist, PKG, lock);
+    assert.equal(packed.header.digest, expected);
+    assert.ok(packed.header.entries.every(entry => !entry.path.startsWith(".build-lock/")));
+    fs.writeFileSync(path.join(lock, "extra"), "not metadata");
+    assert.throws(() => buildBundlePack(dist, PKG, lock), /not owned/);
+    fs.unlinkSync(path.join(lock, "extra"));
+    fs.writeFileSync(path.join(lock, "pid"), "0\n");
+    assert.throws(() => buildBundlePack(dist, PKG, lock), /not owned/);
+    fs.rmSync(lock, { recursive: true });
+    fs.symlinkSync(path.join(dist, "codex"), lock);
+    assert.throws(() => buildBundlePack(dist, PKG, lock), /not owned/);
+    fs.unlinkSync(lock);
+    fs.mkdirSync(path.join(dist, ".unexpected"));
+    assert.throws(() => buildBundlePack(dist, PKG), /known bundle roots/);
+  } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+});
+
 test("extract refuses to overwrite an existing file", () => {
   const { scratch, packFile } = packFixture();
   try {

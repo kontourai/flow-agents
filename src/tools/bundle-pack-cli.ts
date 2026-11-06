@@ -15,14 +15,18 @@ import { fileURLToPath } from "node:url";
 import { BUNDLE_PACK_ROOTS, BundlePackError, buildBundlePack, extractBundlePack, readBundlePackHeader } from "../lib/bundle-pack.js";
 import { bundlePackPath } from "../lib/bundle-store.js";
 import { loadJson, root } from "./common.js";
+import { acquireBundleBuildLock, releaseBundleBuildLock, startBundleBuildLockRefresher } from "./build-universal-bundles.js";
 
-function pack(): number {
+/** Pack while the caller holds the canonical build lock. */
+export function packUnderBundleBuildLock(lock: string): number {
+  const canonicalLock = path.join(root, "dist", ".build-lock");
+  if (lock !== canonicalLock || !fs.lstatSync(lock).isDirectory() || fs.readFileSync(path.join(lock, "pid"), "utf8").trim() !== String(process.pid)) throw new BundlePackError("bundle build lock is not owned by this process");
   const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
   for (const harness of BUNDLE_PACK_ROOTS) {
     if (!fs.existsSync(path.join(dist, harness, "install.sh"))) throw new BundlePackError(`dist/${harness} is not built; run npm run build:bundles first`);
   }
   const manifest = loadJson<{ name: string; version: string }>(path.join(root, "package.json"));
-  const { bytes, header, rawBytes, distinctRawBytes } = buildBundlePack(dist, { name: manifest.name, version: manifest.version });
+  const { bytes, header, rawBytes, distinctRawBytes } = buildBundlePack(dist, { name: manifest.name, version: manifest.version }, lock);
   const out = bundlePackPath(root);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(`${out}.tmp`, bytes);
@@ -30,6 +34,13 @@ function pack(): number {
   console.log(`Packed ${header.entries.length} files (${rawBytes} bytes across harness trees, ${distinctRawBytes} distinct) into ${path.relative(root, out)}: ${bytes.length} bytes`);
   console.log(`digest ${header.digest}`);
   return 0;
+}
+
+function pack(): number {
+  const lock = acquireBundleBuildLock();
+  const stop = startBundleBuildLockRefresher(lock);
+  try { return packUnderBundleBuildLock(lock); }
+  finally { stop(); releaseBundleBuildLock(lock); }
 }
 
 function info(file?: string): number {

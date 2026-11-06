@@ -68,13 +68,22 @@ export function assertPackPath(entryPath: string): void {
   if (!known) throw new BundlePackError(`bundle pack path is outside the known bundle roots: ${JSON.stringify(entryPath)}`);
 }
 
-function listFiles(distDir: string): string[] {
+function listFiles(distDir: string, ownedLock?: string): string[] {
   const found: string[] = [];
   const visit = (directory: string, prefix: string): void => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       const absolute = path.join(directory, entry.name);
+      if (!prefix && entry.name === ".build-lock" && ownedLock === absolute) {
+        if (!entry.isDirectory() || fs.readdirSync(absolute).join() !== "pid" ||
+            !fs.lstatSync(path.join(absolute, "pid")).isFile() ||
+            fs.readFileSync(path.join(absolute, "pid"), "utf8").trim() !== String(process.pid)) {
+          throw new BundlePackError("bundle build lock is not owned by this process");
+        }
+        continue;
+      }
       if (entry.isSymbolicLink()) throw new BundlePackError(`bundle contains a symlink, which a pack does not carry: dist/${relative}`);
+      if (!prefix && !(BUNDLE_PACK_ROOTS as readonly string[]).includes(entry.name) && !(BUNDLE_PACK_ROOT_FILES as readonly string[]).includes(entry.name)) throw new BundlePackError(`bundle pack path is outside the known bundle roots: ${JSON.stringify(relative)}`);
       if (entry.isDirectory()) visit(absolute, relative);
       else if (entry.isFile()) found.push(relative);
       else throw new BundlePackError(`bundle contains a non-regular entry: dist/${relative}`);
@@ -85,8 +94,8 @@ function listFiles(distDir: string): string[] {
 }
 
 /** Pack every file of `distDir` (the built bundles). Returns the bytes and a summary; the caller decides where to write them. */
-export function buildBundlePack(distDir: string, pkg: { name: string; version: string }): { bytes: Buffer; header: BundlePackHeader; rawBytes: number; distinctRawBytes: number } {
-  const files = listFiles(distDir);
+export function buildBundlePack(distDir: string, pkg: { name: string; version: string }, ownedLock?: string): { bytes: Buffer; header: BundlePackHeader; rawBytes: number; distinctRawBytes: number } {
+  const files = listFiles(distDir, ownedLock);
   const blobIndex = new Map<string, number>();
   const blobs: BundlePackBlob[] = [];
   const contents: Buffer[] = [];

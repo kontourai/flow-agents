@@ -8,7 +8,7 @@ NODE_BIN="$(node -p 'process.execPath')"
 export PATH="$(dirname "$NODE_BIN"):$PATH"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMPDIR_EVAL="$(mktemp -d /tmp/published-codex-install.XXXXXX)"
+TMPDIR_EVAL="$(mktemp -d "${TMPDIR:-/tmp}/published-codex-install.XXXXXX")"
 cleanup() { rm -rf "$TMPDIR_EVAL"; }
 trap cleanup EXIT
 

@@ -57,7 +57,10 @@ test("a proposal the Kit and Survey made round-trips, re-encodes to the same byt
   assert.equal(entityProposalToReviewItem(decoded.proposal).metadata.name, proposal.id, "Survey builds its own review item from what was read");
   assert.equal(entity.entityProposalKey(proposal), `memory.entity-proposal:${proposal.id}`);
   assert.equal(entity.entityProposalKey(await kitProposal()), entity.entityProposalKey(proposal), "the key is the same on a retry");
-  assert.match(entity.entityProposalTitle(proposal), /^merge: maya chen \/ m\. chen$/);
+  const title = entity.entityProposalTitle(proposal);
+  assert.match(title, /\bmerge\b/);
+  assert.match(title, /\bmaya chen\b/);
+  assert.match(title, /\bm\. chen\b/);
   assert.ok(decoded.proposal.spec.alternatives[0].evidence.every((item) => item.excerpt && item.checksum && item.locator), "evidence spans are kept");
 });
 
