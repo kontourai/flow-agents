@@ -228,8 +228,9 @@ export function extractBundlePack(packFile: string, targetDir: string, names: re
     const data = body.subarray(offsets[entry.blob] as number, (offsets[entry.blob] as number) + blob.size);
     const destination = path.resolve(root, ...entry.path.split("/"));
     if (destination !== root && !destination.startsWith(root + path.sep)) throw new BundlePackError(`bundle pack path escapes its target: ${entry.path}`);
-    fs.writeFileSync(destination, data, { mode: entry.mode, flag: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0) });
-    fs.chmodSync(destination, entry.mode);
+    const fd = fs.openSync(destination, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), entry.mode);
+    try { fs.writeFileSync(fd, data); fs.fchmodSync(fd, entry.mode); }
+    finally { fs.closeSync(fd); }
     written.push(entry.path);
   }
   return written;
