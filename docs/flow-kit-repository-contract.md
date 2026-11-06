@@ -92,6 +92,8 @@ codex-local
 
 Unknown adapter ids fail with JSON diagnostics that include the available adapters. Git fetching belongs to install, not activation; activation still does not perform npm module extraction or execute kit setup code.
 
+For Claude Code skill projection, Kit activation reads the built bundle from `dist/` in a checkout or from the published package's bundle pack.
+
 The `codex-local` adapter supports assets declared in `flows`, `skills`, and `docs`. It activates the built-in Builder Kit Flow Definitions, including `builder.shape` and `builder.build`, plus supported assets from locally installed kit copies under:
 
 ```text

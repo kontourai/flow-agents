@@ -1319,6 +1319,7 @@ ownership and path agreement; it does not verify composed-flow admission, produc
 runtime readiness. Incompatible or
 missing installed components produce a nonzero exit and an exact, version-pinned `init` command
 that preserves the recorded runtime and active Kits.
+For a published package, doctor reads the expected runtime assets from the package's bundle pack.
 
 Without a current run, doctor reports the kit-declared default selected by the same rule as
 `workflow start` without `--flow`. If that selection refuses (for example, no default, competing

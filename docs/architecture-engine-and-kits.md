@@ -41,6 +41,8 @@ Today `kits/catalog.json` registers three built-in examples, while product kits 
 
 Those examples are deliberately different. Builder is not the engine. Builder and Knowledge are bundled solutions; Release Evidence is a minimal built-in proof; Veritas Governance is independently owned and distributed through the same public Git-install path available to every external kit.
 
+Knowledge also declares a memory recall adapter for hosts that already hold memory claims. The adapter applies the brief's currency rules and selects from the claims' own source excerpts.
+
 ## Manifest and catalog model
 
 `kits/catalog.json` is the registry of built-in kits. It records the kit id, name, path, and human-facing description.
