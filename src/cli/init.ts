@@ -1007,6 +1007,9 @@ export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebui
     fs.existsSync(installSh) && installerSupportsPreserveExcludes(fs.readFileSync(installSh, "utf8"));
   let rebuilt = false;
   if (!current()) {
+    if (!fs.existsSync(path.join(root, "src", "tools", "build-universal-bundles.ts"))) {
+      throw new Error(`the ${runtime} bundle is missing or invalid; reinstall the package`);
+    }
     // Serialize the rebuild across processes and RE-CHECK under the lock: concurrent init
     // processes finding dist/ stale at once used to race resetDir (ENOTEMPTY), and a waiter
     // that rebuilt anyway would delete the tree the winner's install had started reading.

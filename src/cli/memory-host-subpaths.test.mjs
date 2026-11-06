@@ -4,10 +4,13 @@
 // (2) prove the declarations name exactly what the modules export, and (3) run them over what a real dream run wrote.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
 import { KitDefaultStoreAdapter, standaloneFileMutationLock } from "@kontourai/corpus-store";
+import { buildReviewDecisionsFromSession, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
 import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
+import { buildMemoryReviewItem, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import * as envelope from "@kontourai/flow-agents/memory-envelope";
 import * as marker from "@kontourai/flow-agents/memory-marker";
 import * as brief from "@kontourai/flow-agents/memory-brief";
@@ -21,6 +24,12 @@ import { hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from ".
 
 const here = import.meta.dirname;
 const declared = (file) => [...fs.readFileSync(path.join(here, "..", "..", file), "utf8").matchAll(/^export (?:const|function) (\w+)/gm)].map((match) => match[1]).sort();
+
+test("the envelope accepts the canonical routing decision type", () => {
+  const root = path.resolve(here, "../..");
+  const run = spawnSync(process.execPath, [path.join(root, "node_modules/typescript/bin/tsc"), "--ignoreConfig", "--noEmit", "--skipLibCheck", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", path.join(root, "evals/fixtures/memory-envelope-host-types.mts")], { cwd: root, encoding: "utf8" });
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+});
 
 test("each subpath is the canonical kit module, not a copy, and its declarations name exactly its exports", () => {
   for (const [published, kit, declarations] of [
@@ -109,6 +118,23 @@ test("a host asks a question of the claims it holds: answered from the claim's o
   const hidden = recall.recallMemoryClaims({ items: [sealed], question: "What is the rounding mode?", now: "2026-11-02T12:00:00.000Z" });
   assert.equal(hidden.excluded.sealed, 1);
   assert.deepEqual(hidden.results, []);
+});
+
+test("recall never quotes a displayed value that is absent from the source excerpt", async (t) => {
+  const { proposals } = await dreamed(t);
+  const template = itemOf(proposals[0]);
+  const claim = memoryClaim({ ...template.claim, subject: { id: "project", label: "project", type: "service" }, property: "launch code", value: "unknown", source: { ...template.claim.source, excerpt: "The garden has three oak trees." } });
+  const routed = routeMemoryChange({ type: "claim", claim, agreement: { passes: 2, agreeing: 1 } });
+  const reviewItem = buildMemoryReviewItem(routed);
+  const session = { ...initialReviewQueueSessionState([reviewItem]), actorId: "person:reviewer", reviewerKind: "human", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [reviewItem.metadata.name]: "accept-proposed" }, editedValuesByItemName: { [reviewItem.metadata.name]: "The launch code is violet." } };
+  const reviewDecisions = buildReviewDecisionsFromSession(session);
+  const result = recall.recallMemoryClaims({ items: [{ ...template, claim }], reviewDecisions, question: "What is the launch code?", now: "2026-11-02T12:00:00.000Z" });
+  assert.equal(result.results.length, 1, "the corrected value participates in search");
+  assert.equal(result.results[0].review.label, "corrected");
+  assert.equal(result.results[0].value, "The launch code is violet.");
+  assert.equal(result.outcome, "abstained");
+  assert.equal(result.results[0].reason, "no_passage_on_question");
+  assert.equal(result.results[0].passage, undefined);
 });
 
 test("recall judges currency by the brief's rules: a rival contests, a successor replaces, an ended interval is not in effect", async (t) => {

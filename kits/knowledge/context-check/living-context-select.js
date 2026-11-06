@@ -144,7 +144,7 @@ export function selectClaimsForQuestion({ question, documents, limit = DEFAULT_L
   const round = (n) => Math.round(n * 1000) / 1000;
   const selected = scored.filter((entry) => entry.coverage >= minCoverage).slice(0, limit)
     .map((entry) => {
-      const candidate = bestPassage(entry.doc.body, entry.matched);
+      const candidate = bestPassage(entry.doc.passageBody ?? entry.doc.body, entry.matched);
       const onQuestion = passageCoverage(candidate, entry.doc.title, questionTerms, weights);
       // A record whose passage is off the question is nominated, never quoted.
       return { id: entry.doc.id, score: round(entry.score), coverage: round(entry.coverage), matched: entry.matched, passage: onQuestion >= minPassageCoverage ? candidate : "", passage_coverage: round(onQuestion), missing: onQuestion >= minPassageCoverage ? missingTerms(candidate, entry.doc.title, questionTerms) : [] };

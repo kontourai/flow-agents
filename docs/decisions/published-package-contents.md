@@ -19,17 +19,17 @@ evidence:
 
 # Published package contents and host memory entries
 
-The published package was 179 MB unpacked, about 95% of it six per-harness `dist/` trees that share most of their bytes and
+Version 9.12.0 was 179 MB unpacked, about 95% of it six per-harness `dist/` trees that share most of their bytes and
 that a host importing the package never reads. This record covers how the install bundles now travel and which memory
 modules a host may import.
 
 ## Decision
 
 - **The bundles travel as one pack.** `prepack` writes `bundles/flow-agents-bundles.pack`: each distinct file once, a
-  manifest of path, mode and SHA-256, and one Brotli stream. `dist/`, `src/` and `evals/` are not published. The source
+  manifest of path, mode and SHA-256, and one Brotli stream. Root `dist/`, `src/` and `evals/` are not published; bundle copies remain in the pack. The source
   checkout still builds `dist/` with `npm run build:bundles`, and a built `dist/` always wins over the pack.
-- **Consumers expand, they never build.** `init`, `kit`, `workflow doctor`, `uninstall` and the Codex installer ask
-  `src/lib/bundle-store.ts` for a harness. A published package yields it from the pack, into a private temporary directory
+- **Consumers expand, they never build.** `init`, `kit`, `workflow doctor` and `uninstall` use
+  `src/lib/bundle-store.ts`; the Codex installer expands the same pack directly. A published package yields the harness into a private temporary directory
   removed when the command ends. Every blob is checked before the first file is written; a damaged pack is refused with the
   missing-bundle diagnostic, and nothing is compiled or downloaded. The installed package directory is never written to.
 - **Rejected: generating the bundles at install time.** The documented rule is that a consumer's global install never
@@ -44,8 +44,8 @@ modules a host may import.
   Authority and identity checks stay with the host that calls it.
 - **Entity proposals have a wire shape here; detection is a later change.** `memory-entity-envelope` defines category
   `memory.entity-proposal` and the body `{ version, proposal }`, where `proposal` is Survey's `EntityProposal` verbatim
-  and is accepted only when `createEntityProposal(proposal.spec)` gives back the same bytes. It is a sibling module, not
-  part of `memory-envelope`, so a host that reads only claims does not load Survey. The create key derives from the
+  and is accepted only when `createEntityProposal(proposal.spec)` gives the same canonical JSON. It is a sibling module, not
+  part of `memory-envelope`. The create key derives from the
   proposal id. Alternatives, evidence per alternative and excerpt size are bounded and refused at max + 1. The module
   detects nothing and applies nothing: no identity mapping is applied from an accepted outcome (no published function does
   that), and review stays human-only. The `dream` step that proposes candidates is tracked in flow-agents#1618 and ships

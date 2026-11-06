@@ -9,7 +9,7 @@
  * `createEntityProposal` returned it. There is no Kit copy of Survey's fields, so a host builds its review item with Survey's
  * `entityProposalToReviewItem` from what it read, and records the outcome with Survey's `entityOutcomeFromDecision`.
  *
- * Integrity is Survey's own: a proposal is accepted only when rebuilding it from its `spec` gives back the same bytes, so a body
+ * Integrity is Survey's own: a proposal is accepted only when rebuilding it from its `spec` gives the same canonical JSON, so a body
  * edited after it was written, or one that is not in Survey's normal form, is refused. That is the same guarantee the claim id
  * gives a claim. No second hash scheme is added.
  *
@@ -34,9 +34,7 @@ export const MAX_ENTITY_EVIDENCE = 16;
 /** The most bytes one evidence excerpt may weigh. */
 export const MAX_ENTITY_EXCERPT_BYTES = 4 * 1024;
 /**
- * What a stored entity envelope may weigh before it is refused unread. The most an honest proposal can reach is
- * 8 alternatives x 16 pieces of evidence x (a 4 KiB excerpt and about 1 KiB of other fields), roughly 0.65 MiB, so 1 MiB cannot be
- * reached by honest input and is far below Corpus's own limit.
+ * The whole-envelope byte limit is enforced independently of the alternative, evidence and excerpt limits.
  */
 export const MAX_ENTITY_ENVELOPE_BYTES = 1024 * 1024;
 

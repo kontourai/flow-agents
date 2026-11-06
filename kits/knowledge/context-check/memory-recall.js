@@ -86,7 +86,7 @@ export function recallMemoryClaims({ items, question, now, reviewDecisions = [],
   const documents = visible.map((item) => {
     const { claim } = item;
     const entry = shown.get(claim.id);
-    return { id: claim.id, title: `${entry.subject}: ${claim.property}`, tags: [claim.property], category: claim.subject.type, body: `${text(entry.value)}\n\n${claim.source.excerpt}\n`, updated_at: claim.source.observedAt };
+    return { id: claim.id, title: `${entry.subject}: ${claim.property}`, tags: [claim.property], category: claim.subject.type, body: `${text(entry.value)}\n\n${claim.source.excerpt}\n`, passageBody: claim.source.excerpt, updated_at: claim.source.observedAt };
   });
   const selection = selectClaimsForQuestion({ question, documents, limit, minCoverage, minPassageCoverage });
   const base = {

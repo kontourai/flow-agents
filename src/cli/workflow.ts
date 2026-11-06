@@ -4156,7 +4156,9 @@ function validateCanonicalSessionDir(candidate: string): string {
 
 function verifyInstalledAssets(projectRoot: string, packageRoot: string, runtime: string): { ok: boolean; problems: string[]; hook_config: string | null } {
   const problems: string[] = [];
-  const bundleRoot = resolveBundle(runtime, packageRoot)?.dir ?? path.join(packageRoot, "dist", runtime);
+  let bundleRoot: string;
+  try { bundleRoot = resolveBundle(runtime, packageRoot)?.dir ?? path.join(packageRoot, "dist", runtime); }
+  catch (error) { return { ok: false, problems: [`package bundle is invalid (${(error as Error).message}); reinstall the package`], hook_config: null }; }
   for (const relativeRoot of ["build/src", "scripts/hooks"]) {
     const expectedRoot = path.join(bundleRoot, relativeRoot);
     if (!fs.existsSync(expectedRoot)) {

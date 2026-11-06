@@ -65,6 +65,12 @@ function main(argv: string[]): number {
     if (command === "extract" && rest[0]) {
       const target = path.resolve(rest[0]);
       if (fs.existsSync(target) && fs.readdirSync(target).length > 0) throw new BundlePackError(`${target} is not empty; extract into a new directory`);
+      if (rest.length > 1) {
+        const entries = readBundlePackHeader(bundlePackPath(root)).entries;
+        for (const name of rest.slice(1)) {
+          if (![...BUNDLE_PACK_ROOTS, "catalog.json", "README.md"].includes(name as typeof BUNDLE_PACK_ROOTS[number]) || !entries.some((entry) => entry.path === name || entry.path.startsWith(`${name}/`))) throw new BundlePackError(`bundle pack has no selection named ${JSON.stringify(name)}`);
+        }
+      }
       const written = extractBundlePack(bundlePackPath(root), target, rest.length > 1 ? rest.slice(1) : "*");
       console.log(`Expanded ${written.length} files into ${target}`);
       return 0;

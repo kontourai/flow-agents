@@ -58,7 +58,7 @@ export function bundlePackPath(packageRoot: string = defaultRoot): string {
   return path.join(packageRoot, BUNDLE_PACK_RELATIVE_PATH);
 }
 
-/** Whether `dir` is inside a directory this process expanded from the pack (so it needs no build lock and can be neither stale nor rebuilt). */
+/** Whether `dir` is inside a private expansion that a checkout builder cannot reset. */
 export function isExpandedBundle(dir: string): boolean {
   const resolved = path.resolve(dir);
   return [...sessions.values()].some((session) => resolved === session.dir || resolved.startsWith(session.dir + path.sep));

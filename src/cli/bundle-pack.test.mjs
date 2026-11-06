@@ -180,6 +180,17 @@ test("extract refuses to overwrite an existing file", () => {
   } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 });
 
+test("extract refuses an existing symlink directory before writing outside the target", () => {
+  const { scratch, packFile } = packFixture();
+  try {
+    const out = path.join(scratch, "out"), outside = path.join(scratch, "outside");
+    fs.mkdirSync(out); fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(out, "codex"), "dir");
+    assert.throws(() => extractBundlePack(packFile, out, ["codex"]), /not a real directory/);
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+});
+
 // -- the resolver -----------------------------------------------------------------------------------------------------------
 
 function packageWithPack() {

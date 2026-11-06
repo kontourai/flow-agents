@@ -173,8 +173,8 @@ function selected(entryPath: string, names: readonly string[]): boolean {
 
 /**
  * Expand parts of a pack into `targetDir`: each harness named in `names` (and the root files `catalog.json` / `README.md` when
- * named, or `"*"` for everything). Every file is checked against its recorded SHA-256 before it is written, the target is
- * created fresh and never merged into, and nothing outside it is touched. Returns the paths written.
+ * named, or `"*"` for everything). Every file is checked against its recorded SHA-256 before it is written. The caller
+ * must keep the target private from concurrent modification; existing files are never overwritten. Returns paths written.
  */
 export function extractBundlePack(packFile: string, targetDir: string, names: readonly string[] | "*" = "*"): string[] {
   const file = fs.readFileSync(packFile);
@@ -204,13 +204,31 @@ export function extractBundlePack(packFile: string, targetDir: string, names: re
   const wanted = names === "*" ? header.entries : header.entries.filter((entry) => selected(entry.path, names));
   const written: string[] = [];
   const root = path.resolve(targetDir);
+  if (wanted.length === 0) return written;
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const ensureDirectory = (dir: string): void => {
+    const stat = fs.lstatSync(dir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new BundlePackError(`bundle extraction directory is not a real directory: ${dir}`);
+    if (process.platform !== "win32" && ((stat.mode & 0o022) !== 0 || (typeof process.getuid === "function" && stat.uid !== process.getuid()))) throw new BundlePackError(`bundle extraction directory is not privately writable: ${dir}`);
+  };
+  ensureDirectory(root);
+  // Validate the entire destination tree before writing. Only directories owned by the caller and
+  // not writable by other users are allowed; callers must also exclude concurrent same-user mutation.
+  for (const entry of wanted) {
+    let dir = root;
+    for (const segment of entry.path.split("/").slice(0, -1)) {
+      dir = path.join(dir, segment);
+      try { fs.mkdirSync(dir, { mode: 0o700 }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+      ensureDirectory(dir);
+    }
+    if (fs.existsSync(path.join(root, ...entry.path.split("/")))) throw new BundlePackError(`EEXIST: bundle extraction destination already exists: ${entry.path}`);
+  }
   for (const entry of wanted) {
     const blob = header.blobs[entry.blob] as BundlePackBlob;
     const data = body.subarray(offsets[entry.blob] as number, (offsets[entry.blob] as number) + blob.size);
     const destination = path.resolve(root, ...entry.path.split("/"));
     if (destination !== root && !destination.startsWith(root + path.sep)) throw new BundlePackError(`bundle pack path escapes its target: ${entry.path}`);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.writeFileSync(destination, data, { mode: entry.mode, flag: "wx" });
+    fs.writeFileSync(destination, data, { mode: entry.mode, flag: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0) });
     fs.chmodSync(destination, entry.mode);
     written.push(entry.path);
   }

@@ -1,4 +1,5 @@
 import type { MemoryClaim } from "@kontourai/flow-agents/memory-claims";
+import type { MemoryRoutingDecision } from "@kontourai/flow-agents/memory-routing";
 
 /** Declarations for `@kontourai/flow-agents/memory-envelope` (the canonical codec in `envelope.js`; nothing here is a second implementation). */
 
@@ -17,7 +18,7 @@ export interface MemoryPlanEntry { claim: MemoryClaim; agreement: MemoryAgreemen
 export interface MemorySitting { id: string; contentHash: string; visibilityKey: string }
 
 /** A routing decision as `routeMemoryChange` makes it (opaque here; `recomputeMemoryRouting` checks it). */
-export type MemoryRoutingDecisionRecord = Record<string, unknown> & { changeId: string };
+export type MemoryRoutingDecisionRecord = MemoryRoutingDecision;
 
 /** What a dream proposal body decodes to. */
 export interface MemoryEnvelope {

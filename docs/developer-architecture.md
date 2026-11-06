@@ -253,13 +253,13 @@ are checked against the runtime exports by `src/cli/memory-host-subpaths.test.mj
 | Subpath | Exports | Use |
 | --- | --- | --- |
 | `@kontourai/flow-agents/memory-envelope` | `encodeEnvelope`, `decodeEnvelope`, `indexProposals` and the envelope limits | Read and write the dream run's published envelope; a malformed or unknown-version envelope is refused, not repaired. |
-| `@kontourai/flow-agents/memory-entity-envelope` | `encodeEntityEnvelope`, `decodeEntityEnvelope`, `indexEntityProposals`, `entityProposalKey`, `entityProposalTitle`, the category `memory.entity-proposal` and its bounds | Carry a merge, split or alias proposal in a memory root beside the claims. The body is `{ version, proposal }` with Survey's `EntityProposal` verbatim, accepted only when Survey rebuilds it from its own `spec` to the same bytes. It detects and applies nothing, and every bound refuses at max + 1. |
+| `@kontourai/flow-agents/memory-entity-envelope` | `encodeEntityEnvelope`, `decodeEntityEnvelope`, `indexEntityProposals`, `entityProposalKey`, `entityProposalTitle`, the category `memory.entity-proposal` and its bounds | Carry a merge, split or alias proposal in a memory root beside the claims. The body is `{ version, proposal }` with Survey's `EntityProposal`, accepted only when Survey rebuilds it from its `spec` to the same canonical JSON. It detects and applies nothing, and every bound refuses at max + 1. |
 | `@kontourai/flow-agents/memory-marker` | `INJECTED_MEMORY_OPEN`, `INJECTED_MEMORY_CLOSE` | The markers that wrap injected memory, so a transcript reader can skip it instead of ingesting it as new memory. |
-| `@kontourai/flow-agents/memory-brief` | `compileBrief`, `rankItems`, `classifyCurrent`, `effectiveItems`, `isSealed`, `writeBriefs` and the budget defaults | Compile a bounded brief from claims; what is current or sealed is decided as of the stated instants. |
-| `@kontourai/flow-agents/memory-recall` | `recallMemoryClaims` | Answer a question from the claims a reader may see, or abstain with `no_current_claim_states_it`. |
+| `@kontourai/flow-agents/memory-brief` | `compileBrief`, `rankItems`, `classifyCurrent`, `effectiveItems`, `isSealed`, `writeBriefs` and the budget defaults | Rank eligible claims with `rankItems`, then pass them to `compileBrief`; its byte budget covers joined display entries, not the serialized JSON. `writeBriefs` combines these steps. |
+| `@kontourai/flow-agents/memory-recall` | `recallMemoryClaims` | Select lexical matches and passages from claim excerpts, with labels, missing terms and abstention reasons. An `answered` result does not establish semantic answer correctness. |
 
-These entries do not authenticate anyone. The host supplies the reader identity and decides who may
-call them; they only apply the claim visibility already recorded on each claim.
+The host must pass only claims the reader is authorized to see and supply trusted review and routing records. These helpers do not authenticate callers or enforce restricted-audience membership. Ranking and recall exclude sealed claims; `compileBrief` expects already-ranked inputs. `rankItems` uses `now` for ranking, while `classifyCurrent` has no as-of input.
+Recall's current, contested and superseded labels use the brief's local rules. They are not Surface's protected accumulation projection; the authority input needed for that projection is tracked in flow-agents#1586.
 
 ## Delegation authority and bounded rounds
 
@@ -478,8 +478,8 @@ so the published package does not ship `dist/`. `prepack` runs
 into `bundles/flow-agents-bundles.pack`: a header listing each path, mode and SHA-256,
 then one Brotli stream. The package also leaves out `src/` and `evals/`.
 
-`init`, `kit`, `workflow doctor`, `uninstall` and `scripts/install-codex-home.sh` ask
-`src/lib/bundle-store.ts` for a harness. It returns the package's own `dist/<harness>`
+`init`, `kit`, `workflow doctor` and `uninstall` ask
+`src/lib/bundle-store.ts` for a harness. The Codex installer expands the same pack directly. The resolver returns the package's own `dist/<harness>`
 when one is built (a checkout), and otherwise expands that harness from the pack into
 a private temporary directory that is removed when the command ends. Every blob is
 checked against its SHA-256 before the first file is written, so a damaged pack is

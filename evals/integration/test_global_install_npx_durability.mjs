@@ -66,6 +66,13 @@ try {
   // With neither dist/ nor a usable pack there is no bundle; the install refuses before writing anything, and never compiles.
   const packFile=path.join(source,'bundles/flow-agents-bundles.pack');fs.renameSync(packFile,packFile+'-saved');
   const missingDest=path.join(home,'missing-bundle');const missing=cli(source,missingDest);assert.notEqual(missing.status,0);assert.match(missing.stderr,/required prebuilt Claude Code bundle/);assert(!fs.existsSync(missingDest));fs.renameSync(packFile+'-saved',packFile);
+  fs.renameSync(packFile,packFile+'-saved');
+  const missingWorkspace=path.join(home,'missing-workspace');
+  const missingWorkspaceResult=run(process.execPath,[path.join(source,'build/src/cli.js'),'init','--runtime','opencode','--dest',missingWorkspace,'--yes']);
+  assert.notEqual(missingWorkspaceResult.status,0);assert.match(missingWorkspaceResult.stderr,/reinstall the package/);assert(!fs.existsSync(path.join(source,'dist')));
+  fs.renameSync(packFile+'-saved',packFile);
+  const typo=run(process.execPath,[path.join(source,'build/src/tools/bundle-pack-cli.js'),'extract',path.join(temp,'typo-extract'),'codxe']);
+  assert.notEqual(typo.status,0);assert.match(typo.stderr,/no selection/);assert(!fs.existsSync(path.join(temp,'typo-extract')));
   // A damaged pack is refused the same way (every file is checked against the pack's digests before it is written).
   const packBytes=fs.readFileSync(packFile);const flipped=Buffer.from(packBytes);flipped[flipped.length-64]^=0xff;fs.writeFileSync(packFile,flipped);
   const damagedDest=path.join(home,'damaged-pack');const damaged=cli(source,damagedDest);assert.notEqual(damaged.status,0);assert.match(damaged.stderr,/required prebuilt Claude Code bundle/);assert(!fs.existsSync(damagedDest));assert(!fs.existsSync(path.join(source,'dist')));fs.writeFileSync(packFile,packBytes);
