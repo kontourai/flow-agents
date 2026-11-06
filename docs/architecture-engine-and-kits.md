@@ -35,11 +35,19 @@ Today `kits/catalog.json` registers three built-in examples, while product kits 
 | Kit | Manifest | What it proves |
 | --- | --- | --- |
 | Builder Kit | `kits/builder/kit.json` | A full agent-facing delivery kit with shape/build/publish-learn flows, many skills, a dependency on Knowledge, and structured `workflow_triggers`. |
-| Knowledge Kit | `kits/knowledge/kit.json` | A durable knowledge-store kit with many Flow Definitions, one agent skill, docs, adapters, providers, evals, and its own `workflow_triggers`. |
+| Knowledge Kit | `kits/knowledge/kit.json` | A durable knowledge-store kit with Flow Definitions, agent skills, docs, adapters, providers, evals, and its own `workflow_triggers`. |
 | Release Evidence Kit | `kits/release-evidence/kit.json` | A minimal flows-only kit for agentless gate evaluation in CI. It has no skills and is not a Builder workflow. |
 | Veritas Governance Kit | `https://github.com/kontourai/veritas` | An external first-party kit installed from Git. It consumes the canonical Veritas readiness bundle without moving governance semantics into this engine. |
 
 Those examples are deliberately different. Builder is not the engine. Builder and Knowledge are bundled solutions; Release Evidence is a minimal built-in proof; Veritas Governance is independently owned and distributed through the same public Git-install path available to every external kit.
+
+The Knowledge Kit also owns the instinct and observation inputs to its
+dream producer. Hosts provide tool-event logs with explicit source and project
+bindings; Ferry supplies parsing and replay cursors. The Kit stages pending
+Corpus proposals and saves a source cursor after its event work succeeds. It
+plans confidence changes for independently reviewed instinct records and offers
+a migration dry run. Live retirement is operator-run; scheduling and caller
+authorization stay with the host. See the [dream guide](../kits/knowledge/docs/dream.md).
 
 ## Manifest and catalog model
 
