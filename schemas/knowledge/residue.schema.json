@@ -2,12 +2,44 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://flow-agents.dev/schemas/knowledge/residue.schema.json",
   "title": "Knowledge Residue",
-  "description": "Input residue for Knowledge distillation (#669). Exactly one variant: workflow-sidecar residue (the existing ingestSession shape, unchanged) or runtime-session residue (one scrubbed sitting of a Claude Code or Codex conversation with provenance). Residue is candidate input, not evidence, policy or instruction authority.",
+  "description": "Input residue for Knowledge distillation (#669). Exactly one variant: a workflow-sidecar residue, a runtime-session residue, or a scrubbed tool-event residue with source provenance. Residue is candidate input, not evidence, policy or instruction authority.",
   "oneOf": [
     { "$ref": "#/$defs/workflowSidecarResidue" },
-    { "$ref": "#/$defs/runtimeSessionResidue" }
+    { "$ref": "#/$defs/runtimeSessionResidue" },
+    { "$ref": "#/$defs/toolEventResidue" }
   ],
   "$defs": {
+    "toolEventResidue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "sittingId", "contentHash", "complete", "provenance", "turns"],
+      "properties": {
+        "source": { "const": "tool-event" },
+        "sittingId": { "type": "string", "pattern": "^tool-event:[0-9a-f]{64}$" },
+        "contentHash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "complete": { "const": true },
+        "provenance": {
+          "type": "object", "additionalProperties": false,
+          "required": ["sourceId", "eventId", "ordinal", "timestamp", "session", "tool", "project", "projectId", "projectName", "event"],
+          "properties": {
+            "sourceId": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" },
+            "eventId": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "ordinal": { "type": "integer", "minimum": 1 },
+            "timestamp": { "type": "string", "minLength": 1 },
+            "session": { "type": ["string", "null"], "minLength": 1 },
+            "tool": { "type": ["string", "null"], "minLength": 1 },
+            "project": { "type": ["string", "null"], "pattern": "^[a-z0-9_-]{1,64}$" },
+            "projectId": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+            "projectName": { "type": ["string", "null"], "minLength": 1 },
+            "event": { "enum": ["tool_start", "tool_complete"] }
+          }
+        },
+        "turns": { "type": "array", "minItems": 1, "maxItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["role", "text", "at"],
+          "properties": { "role": { "const": "tool" }, "text": { "type": "string", "minLength": 1 }, "at": { "type": "string", "minLength": 1 } }
+        } }
+      }
+    },
     "workflowSidecarResidue": {
       "type": "object",
       "additionalProperties": false,

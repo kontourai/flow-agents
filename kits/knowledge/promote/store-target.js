@@ -28,13 +28,14 @@ function required(value, label) {
  *   rootName: string, write?: boolean, requestScope?: string, positions?: number[]}} options
  */
 export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName, write = true, requestScope, positions }) {
-  if (!validate(residue, RESIDUE_SCHEMA).valid || residue?.source !== 'runtime-session' || residue.complete !== true) {
-    throw new Error('store target requires a schema-valid complete runtime-session residue');
+  if (!validate(residue, RESIDUE_SCHEMA).valid || !['runtime-session', 'tool-event'].includes(residue?.source) || residue.complete !== true) {
+    throw new Error('store target requires a schema-valid complete runtime-session or tool-event residue');
   }
-  const sessionId = required(residue.provenance?.sessionId, 'sessionId');
-  const transcriptRef = required(residue.provenance?.transcriptRef, 'transcriptRef');
+  const isTool = residue.source === 'tool-event';
+  const sessionId = isTool ? residue.provenance.session : required(residue.provenance?.sessionId, 'sessionId');
+  const transcriptRef = required(isTool ? residue.provenance?.sourceId : residue.provenance?.transcriptRef, 'transcriptRef');
   const sittingId = required(residue.sittingId, 'sittingId');
-  if (!sittingId.startsWith(`${residue.provenance.harness}:${sessionId}:`)) {
+  if (isTool ? sittingId !== `tool-event:${residue.provenance.eventId}` : !sittingId.startsWith(`${residue.provenance.harness}:${sessionId}:`)) {
     throw new Error('store target requires a sitting identity consistent with its provenance');
   }
   required(proposerId, 'proposerId');
@@ -50,18 +51,19 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   }
   if (!store || typeof store.proposeCreate !== 'function') throw new Error('store target requires a Corpus create-proposal store');
   if (typeof registerRoot !== 'function') throw new Error('store target requires host root registration');
-  const provenance = { session_id: sessionId, transcript_ref: transcriptRef, sitting_id: sittingId, content_hash: residue.contentHash };
+  const provenance = isTool ? { source_id: transcriptRef, event_id: residue.provenance.eventId, ordinal: residue.provenance.ordinal, timestamp: residue.provenance.timestamp, session_id: sessionId, tool: residue.provenance.tool, sitting_id: sittingId, content_hash: residue.contentHash } : { session_id: sessionId, transcript_ref: transcriptRef, sitting_id: sittingId, content_hash: residue.contentHash };
   /** @type {import('@kontourai/corpus-store').CreateInput[]} */
   const prepared = candidates.map((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some((key) => !['title', 'body', 'category'].includes(key))) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some((key) => !['title', 'body', 'category', ...(isTool ? ['id'] : [])].includes(key)) || (item.id !== undefined && (!isTool || item.id !== `observation-${residue.provenance.eventId}`))) {
       throw new Error('store target candidate has unsupported fields');
     }
     return {
       type: 'raw',
+      ...(item.id === undefined ? {} : { id: item.id }),
       title: required(item?.title, 'candidate title'),
       body: required(item?.body, 'candidate body'),
       category: required(item?.category, 'candidate category'),
-      provenance: { agent: proposerId, session_id: sessionId, note: JSON.stringify(provenance) },
+      provenance: { agent: proposerId, ...(sessionId === null ? {} : { session_id: sessionId }), note: JSON.stringify(provenance) },
     };
   });
   if (!write) return { root: rootName, posture: 'preview', proposals: [], candidates: prepared };

@@ -145,7 +145,8 @@ export class FakeCorpusStore {
     if (!proposal) throw Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" });
     if (proposal.state !== "pending") throw Object.assign(new Error("not pending"), { code: "MISSING_EVIDENCE" });
     if (proposal.proposer_id === reviewerId) throw Object.assign(new Error("SELF_APPROVAL"), { code: "SELF_APPROVAL" });
-    const recordId = `rec-${proposalId}`;
+    const recordId = proposal.candidate.id ?? `rec-${proposalId}`;
+    if (this.records.has(recordId)) throw Object.assign(new Error("record already exists"), { code: "MISSING_EVIDENCE" });
     this.records.set(recordId, { id: recordId, type: "raw", ...proposal.candidate, created_at: this.clock(), updated_at: this.clock(), mutation_log: [{ op: "apply-create", at: this.clock(), agent: reviewerId, evidence: { proposal_id: proposalId, proposer_id: proposal.proposer_id, proposal_evidence: proposal.evidence } }] });
     this.#write({ ...proposal, state: "applied", reviewer_id: reviewerId, decided_at: this.clock(), record_id: recordId });
     return recordId;

@@ -20,6 +20,26 @@ The Knowledge Kit is a Flow Kit for durable, gated knowledge storage. It package
 | `knowledge.consolidate` | Related-event trigger → decision snapshot → supersede prior snapshots (not delete) |
 | `knowledge.retire` | Gated status lifecycle: active → implemented → retired, with working-set exclusion |
 
+**Session memory and instinct previews** — the dream runner can propose
+memory from runtime-session residue and tool-event logs authorized by the host.
+Tool-event residue keeps one tool event with a stable event identity, source
+order and project binding. It is candidate input, not evidence or instruction
+authority.
+
+Ferry owns log parsing and cursor replay. The dream run stages raw observations
+and derived claims as pending Corpus create proposals, then advances a source
+cursor after all admitted events have been processed. A failure or deferred
+event holds that cursor for replay. Review policy separately controls which
+claims may enter a brief.
+
+The migration command produces a dry-run plan for source-backed instincts,
+retaining confidence in the compiled candidates. The Kit includes observation
+ingest, instinct analysis and instinct review skills. A live migration command is
+not implemented. Once one is available, the owner must follow the retirement
+checklist before disabling the separate instinct-analysis job and preserving its
+store as a read-only archive. See the [dream guide](../kits/knowledge/docs/dream.md)
+for the host contract and retirement checklist.
+
 **Store adapters** — two adapters ship:
 
 - **Default adapter** — flat markdown files with YAML frontmatter, `[[wikilink]]` inline links, and a JSON graph index. It uses Node.js built-ins and an included YAML parser, with no external runtime installation. The failsafe YAML schema preserves text scalars and resolves bounded, acyclic anchors in nested evidence; see the [store contract](../kits/knowledge/docs/store-contract.md#9-yaml-frontmatter-convention-default-adapter) for limits.

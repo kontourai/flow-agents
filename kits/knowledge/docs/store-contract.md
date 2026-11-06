@@ -2044,7 +2044,7 @@ that rests only on erased sources is rejected and its candidate scrubbed; one
 with remaining support is blocked from application and returned for review. A
 blocked proposal retains its candidate, which may itself reproduce erased
 content, so the host must review it. The Corpus-backed adapter mode adopts this
-behavior from the published `@kontourai/corpus-store@0.1.0-next.0`.
+behavior from the published `@kontourai/corpus-store@0.1.0-next.3`.
 
 When a purged record is projected into a Surface claim, the Knowledge Surface
 adapter maps its retained purge audit entry to `metadata.surfaceRetention` with

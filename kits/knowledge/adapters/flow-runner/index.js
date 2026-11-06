@@ -1661,6 +1661,10 @@ export class KnowledgeFlowRunner {
       );
     }
 
+    // Optional confidence changes are planned against reviewed sources before
+    // any proposal or snapshot write. They are never applied by this flow.
+    const instinctPlans = options.instincts === undefined ? undefined : await (await import("../../instincts/consolidate.js")).planClusterInstincts({ store: this._store, cluster, inputs: options.instincts });
+
     const relatedGateOut = this._telemetry.emitGateResult(
       "knowledge.consolidate",
       "related-event-gate",
@@ -1921,6 +1925,7 @@ export class KnowledgeFlowRunner {
       newSnapshotId,
       supersededIds,
       telemetryEvents: events,
+      ...(instinctPlans === undefined ? {} : { instinctPlans: decision === "apply" ? instinctPlans : [] }),
     };
   }
 

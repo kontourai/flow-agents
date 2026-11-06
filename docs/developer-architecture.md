@@ -223,8 +223,9 @@ The Knowledge kit can stage distilled session candidates through a host-supplied
 Corpus store adapter for an authorized memory root. The proposal includes session,
 transcript and sitting provenance; Corpus owns the pending proposal and its review
 transaction. Staging does not apply a record or establish its review state. The
-repository pins `@kontourai/corpus-store` as a development dependency to exercise
-the integration; the host supplies the adapter at runtime. See the
+repository pins `@kontourai/corpus-store@0.1.0-next.3` as a development dependency
+to exercise proposal review, replay, and confidence frontmatter; the host supplies
+the adapter at runtime. See the
 [proposal target documentation](../kits/knowledge/docs/README.md) for registration,
 retry and recovery boundaries.
 

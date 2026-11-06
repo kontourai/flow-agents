@@ -205,6 +205,11 @@
       "description": "Memory claim schema and routed-review policy for distilled memory (#1571). The claim schema (subject, property, value, valid time, speaker/source, epistemic posture) is a caller-owned Traverse target schema; distillMemoryClaims turns Traverse proposals into schema-valid claims. Uncontested claims are recorded as proposed; contradiction, consequential supersession, entity merge/split, low extraction agreement and visibility widening route to Survey review. Each decision embeds its input and policy and is recorded as Flow evidence so routing is recomputable; per-run metrics report proposed count, routed share, reviewer decisions and review time."
     },
     {
+      "id": "knowledge.instinct-consolidation",
+      "path": "instincts/consolidate.js",
+      "description": "Plans instinct confidence decay and routes the resulting claim for review without applying a record or retirement."
+    },
+    {
       "id": "knowledge.dream-runner",
       "path": "dream/index.js",
       "description": "Executable logic for the knowledge.dream flow (issue #671): runDream(host, options) reads the runtime-session cursor (#669), distils sittings into memory claims through a Relay model runtime resolved from a Datum role (#1571), routes them, stages them as Corpus create proposals (#670), compiles the budgeted profile briefs #672 reads, writes a per-run report and commits the cursor last. It only proposes: only a reviewer other than the proposer promotes a claim. Disabled until the operator enables it; dryRun is read-only."
@@ -235,6 +240,16 @@
       "id": "knowledge.memory-proposal-target",
       "path": "promote/store-target.js",
       "description": "Host-composed Corpus create-proposal bridge for distilled runtime-sitting memory; preserves session, transcript, and sitting provenance without applying records."
+    },
+    {
+      "id": "knowledge.instinct-migration-preview",
+      "path": "instincts/migrate.js",
+      "description": "Read-only migration preview using authorized source roots; writes no records."
+    },
+    {
+      "id": "knowledge.instinct-retirement-plan",
+      "path": "instincts/retirement-plan.js",
+      "description": "Prints the owner-gated retirement and rollback checklist without executing it."
     },
     {
       "id": "knowledge.dream-cli",
@@ -350,6 +365,21 @@
     }
   ],
   "skills": [
+    {
+      "id": "knowledge.knowledge-observation-ingest",
+      "path": "skills/knowledge-observation-ingest/SKILL.md",
+      "description": "Provide observation sources to the dream run without changing capture behavior."
+    },
+    {
+      "id": "knowledge.knowledge-instinct-analysis",
+      "path": "skills/knowledge-instinct-analysis/SKILL.md",
+      "description": "Plan confidence updates for independently reviewed instinct records."
+    },
+    {
+      "id": "knowledge.knowledge-instinct-review",
+      "path": "skills/knowledge-instinct-review/SKILL.md",
+      "description": "Review instinct claims and their source observations."
+    },
     {
       "id": "knowledge.knowledge-capture",
       "path": "skills/knowledge-capture/SKILL.md",

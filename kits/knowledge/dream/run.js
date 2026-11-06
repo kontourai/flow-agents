@@ -35,6 +35,9 @@ import {
   routeMemoryChange,
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
+import { proposeMemory } from "../promote/store-target.js";
+import { ingestObservationSources } from "../instincts/observation-source.js";
+import { toolEventResidue } from "../instincts/tool-event-residue.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, classifyCurrent, effectiveItems, isSealed, writeBriefs } from "./brief.js";
 import { memorySlotKey } from "@kontourai/flow-agents/memory-claims";
 import { memoryAccumulationQuery } from "../adapters/memory-claims/index.mjs";
@@ -83,17 +86,82 @@ function narrowStore(store) {
  * is the one Corpus made from it: the record's `apply-create` entry names this proposal and the record's body is the
  * proposal's. A settlement that points at some other record, or at none, is not trusted.
  */
-async function briefItems(store, index, proposerId) {
+async function briefItems(store, index, proposerId, proposals) {
   const items = [];
-  const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0 };
+  const hasObservationInputs = proposals.some((item) => item?.candidate?.category === "memory.observation" || (item?.candidate?.category === "memory.claim" && item?.candidate?.type === "compiled"));
+  const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0, ...(hasObservationInputs ? { observation_unreviewed: 0 } : {}) };
+  const observationSources = new Map();
+  for (const proposal of proposals) {
+    if (proposal?.proposer_id !== proposerId || proposal?.candidate?.category !== "memory.observation") continue;
+    try {
+      const noteText = proposal.candidate?.provenance?.note;
+      if (typeof noteText !== "string" || Buffer.byteLength(noteText) > 8192) continue;
+      const note = JSON.parse(noteText);
+      if (typeof note.sitting_id !== "string" || !note.sitting_id.startsWith("tool-event:")) continue;
+      const list = observationSources.get(note.sitting_id) ?? [];
+      list.push({ proposal, note }); observationSources.set(note.sitting_id, list);
+    } catch { /* An unreadable source cannot authorize a brief. */ }
+  }
+  const proposalsById = new Map(proposals.map((proposal) => [proposal.id, proposal]));
+  async function approvedCompiledSources(proposal, envelope) {
+    const ids = proposal.candidate?.provenance?.source_ids;
+    const links = proposal.candidate?.links;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 1001 || new Set(ids).size !== ids.length || !ids.includes(envelope.claim.source.ref) || !Array.isArray(links)) return false;
+    const linked = new Set(links.filter((link) => link.kind === "source").map((link) => link.target_id));
+    for (const id of ids) {
+      if (typeof id !== "string" || !linked.has(id) || !store.get) return false;
+      const record = await store.get(id);
+      if (!record || record.type !== "raw" || ["retired", "purged"].includes(record.status)) return false;
+      const origin = (record.mutation_log ?? []).find((entry) => entry.op === "apply-create" && typeof entry.evidence?.proposal_id === "string");
+      const source = origin && proposalsById.get(origin.evidence.proposal_id);
+      if (!source || source.state !== "applied" || source.record_id !== id || !source.reviewer_id || source.reviewer_id === source.proposer_id || source.candidate?.body !== record.body || source.candidate?.type !== "raw" || source.candidate?.category !== record.category) return false;
+      if (id === envelope.claim.source.ref) {
+        const range = /^chars:(\d+)-(\d+)$/.exec(envelope.claim.source.locator);
+        const start = range ? Number(range[1]) : NaN; const end = range ? Number(range[2]) : NaN;
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end <= start || end > record.body.length || record.body.slice(start, end) !== envelope.claim.source.excerpt) return false;
+      }
+    }
+    return true;
+  }
+  async function observationState(envelope) {
+    const found = observationSources.get(envelope.sitting.id) ?? [];
+    if (found.length !== 1) return "invalid";
+    const { proposal, note } = found[0];
+    if (note.content_hash !== envelope.sitting.contentHash) return "invalid";
+    try {
+      if (typeof proposal.candidate.body !== "string" || Buffer.byteLength(proposal.candidate.body) > 8 * 1024 * 1024) return "invalid";
+      const raw = JSON.parse(proposal.candidate.body);
+      if (raw.provenance?.eventId !== envelope.sitting.id.slice("tool-event:".length) || raw.turn?.role !== "tool") return "invalid";
+      const expected = `sha256:${sha256(JSON.stringify({ sittingId: envelope.sitting.id, provenance: raw.provenance, turns: [raw.turn] }))}`;
+      if (expected !== envelope.sitting.contentHash || envelope.claim.source.ref !== envelope.sitting.id) return "invalid";
+      if (proposal.state === "rejected") return "rejected";
+      if (proposal.state === "pending") return "pending";
+      if (proposal.state !== "applied" || !proposal.reviewer_id || proposal.reviewer_id === proposerId || proposal.reviewer_id === proposal.proposer_id) return "invalid";
+      const record = store.get && proposal.record_id ? await store.get(proposal.record_id) : null;
+      return record && !["retired", "purged"].includes(record.status) && record.type === proposal.candidate.type && record.category === proposal.candidate.category && record.body === proposal.candidate.body && (record.mutation_log ?? []).some((entry) => entry.op === "apply-create" && entry.evidence?.proposal_id === proposal.id) ? "approved" : "invalid";
+    } catch { return "invalid"; }
+  }
   for (const { proposal, envelope } of index.byClaim.values()) {
     if (proposal.state === "rejected") {
       excluded.rejected += 1;
       continue;
     }
+    if (proposal.candidate?.type === "compiled" && !(await approvedCompiledSources(proposal, envelope))) {
+      excluded.observation_unreviewed = (excluded.observation_unreviewed ?? 0) + 1;
+      continue;
+    }
+    let observationSourceApproved;
+    if (envelope.sitting.id.startsWith("tool-event:")) {
+      const state = await observationState(envelope);
+      if (state !== "approved") excluded.observation_unreviewed = (excluded.observation_unreviewed ?? 0) + 1;
+      if (state === "invalid" || state === "rejected") continue;
+      observationSourceApproved = state === "approved";
+    }
     // A sealed claim never reaches a brief, but it still contests a rival: whether two claims disagree does not
     // depend on who may read them.
     if (isSealed(envelope.claim)) excluded.sealed += 1;
+    let acceptedConfidence = proposal.candidate?.confidence;
+    if (acceptedConfidence !== undefined && (typeof acceptedConfidence !== "number" || !Number.isFinite(acceptedConfidence) || acceptedConfidence < 0 || acceptedConfidence > 1)) { excluded.unverified += 1; continue; }
     if (proposal.state === "applied") {
       // Defence in depth: Corpus refuses SELF_APPROVAL, and a record the distiller approved still does not count.
       if (!proposal.reviewer_id || proposal.reviewer_id === proposal.proposer_id || proposal.reviewer_id === proposerId) {
@@ -103,6 +171,9 @@ async function briefItems(store, index, proposerId) {
       const record = store.get && proposal.record_id ? await store.get(proposal.record_id) : null;
       const bound = Boolean(record)
         && record.body === proposal.candidate.body
+        && (proposal.candidate.type === undefined || record.type === proposal.candidate.type)
+        && record.category === proposal.candidate.category
+        && record.confidence === proposal.candidate.confidence
         && (record.mutation_log ?? []).some((entry) => entry.op === "apply-create" && entry.evidence?.proposal_id === proposal.id);
       if (!bound) {
         excluded.unverified += 1;
@@ -113,7 +184,7 @@ async function briefItems(store, index, proposerId) {
         continue;
       }
     }
-    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, state: proposal.state, routing: envelope.decision });
+    items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, ...(observationSourceApproved === undefined ? {} : { observationSourceApproved }), ...(acceptedConfidence === undefined ? {} : { confidence: acceptedConfidence }), state: proposal.state, routing: envelope.decision });
   }
   return { items, excluded };
 }
@@ -149,6 +220,7 @@ function pruneReports(dir) {
  * @property {(name: string, root: string) => unknown} registerRoot
  * @property {string} root absolute, host-authorised memory root
  * @property {string} rootName
+ * @property {Array<{sourceId: string, project: string|null, data: string}>} [observationSources] host-authorized inputs with a stable opaque ID and explicit project or global scope
  * @property {Function} [extract] model-backed `MemoryExtract` (see model.js); not needed for a dry run
  * @property {() => object[] | Promise<object[]>} [reviewDecisions] Survey review decisions, for brief labels and metrics
  * @property {(batch: {runId: string, decisions: object[], reviewItems: object[], metrics: object|null}) => unknown} publish
@@ -207,6 +279,7 @@ export async function runDream(host, options = {}) {
     sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
     claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, facts_truncated: 0, rerouted: 0, contested_routed: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
+    ...(host.observationSources === undefined ? {} : { observation_proposals: [], observation_rejected: 0 }),
     review_items: 0,
     unreadable_proposals: 0,
     redaction_hits: 0,
@@ -239,6 +312,14 @@ export async function runDream(host, options = {}) {
       blocked: countBy(ingest.report.blocked, "reason"),
       cursor_held: ingest.report.cursor_held,
     };
+    // A source cursor advances only after every event in that source batch is processed.
+    // The same cursor file commits runtime and observation progress last.
+    const runtimeResidues = [...ingest.residues];
+    const observations = host.observationSources === undefined ? null : ingestObservationSources(host.observationSources, cursor.observations ?? {}, cursor.sittings, toolEventResidue, { isolateFailures: true });
+    if (observations) {
+      ingest.residues.push(...observations.batches.flatMap((batch) => batch.residues));
+      report.ingest.observations = { sources: observations.batches.length, events_returned: observations.batches.reduce((n, batch) => n + batch.eventIds.length, 0), events_emitted: observations.batches.reduce((n, batch) => n + batch.residues.length, 0), partial_sources: observations.batches.filter((batch) => batch.partial > 0).length, blocked: observations.blocked.map(({ sourceId, reason, errorClass }) => ({ source_ref: `sha256:${sha256(sourceId)}`, reason, error_class: errorClass })) };
+    }
     report.sittings.seen = ingest.residues.length;
     report.redaction_hits = redactionHits(ingest.residues);
 
@@ -358,9 +439,12 @@ export async function runDream(host, options = {}) {
         }
         report.claims.rejected += distilled.rejected.length;
 
-        const project = projectFromCwd(residue.provenance?.cwd ?? null);
+        const project = residue.source === "tool-event" ? residue.provenance.project : projectFromCwd(residue.provenance?.cwd ?? null);
         const ordered = [...distilled.claims].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-        const fitted = fitPlan(ordered.map((claim) => ({ claim, agreement: distilled.agreement[claim.id] ?? null, project })));
+        // Tool output is untrusted external data, not an independently asserted
+        // human statement. Keep its agreement unmeasured so the common router
+        // sends it to review rather than promoting it through opt-in briefing.
+        const fitted = fitPlan(ordered.map((claim) => ({ claim, agreement: residue.source === "tool-event" ? null : distilled.agreement[claim.id] ?? null, project })));
         plan = fitted.plan;
         report.claims.truncated += fitted.dropped; // reported, never silent
         report.claims.distilled += plan.length;
@@ -379,6 +463,22 @@ export async function runDream(host, options = {}) {
       }
 
       await stage("propose");
+      if (residue.source === "tool-event") {
+        // Raw observations are staged as Corpus proposals, not applied. Their key
+        // is anchored to the same source event on every retry.
+        const raw = await proposeMemory({ residue, candidates: [{ id: `observation-${residue.provenance.eventId}`, title: "Observed tool event", category: "memory.observation", body: JSON.stringify({ provenance: residue.provenance, turn: residue.turns[0] }) }], proposerId, store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName, requestScope: "observation-raw-v1", positions: [0] });
+        const proposalId = raw.proposals[0];
+        const proposal = (await store.listProposals()).find((item) => item.id === proposalId);
+        if (!proposal) throw dreamError("DREAM_OBSERVATION_UNCONFIRMED", "the observation proposal cannot be confirmed");
+        report.observation_proposals.push({ sitting_id: residue.sittingId, proposal_id: proposalId, state: proposal.state });
+        if (proposal.state === "rejected") {
+          const prior = index.sitting(residue.sittingId, residue.contentHash, vKey);
+          if (prior?.plan.some((entry) => index.byClaim.get(entry.claim.id)?.proposal.state !== "rejected")) {
+            throw dreamError("DREAM_OBSERVATION_RECONCILE", "rejected observation has dependent claims requiring review");
+          }
+          report.observation_rejected += 1; processed.add(residue.sittingId); continue;
+        }
+      }
       const result = await proposeSitting({ residue, plan, decisions: decided.map((entry) => entry.decision), visibilityKey: vKey, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true })
         .catch((error) => {
           // What landed before the failure is real, and the report must say so.
@@ -406,15 +506,15 @@ export async function runDream(host, options = {}) {
     // Briefs derive from the store every run, because review changes them without any new telemetry. The briefs are
     // written below; what they hold back as contested is decided here, once, and both the brief and the review queue
     // use that verdict: a contested claim belongs in the review queue, not the brief.
-    // The purge gate is read BEFORE the snapshot the brief is built from: a purge that opens after this reading makes
-    // the brief's token stale, and one already open holds the briefs back (purge-gate.js).
+    // Read the purge gate before the snapshot used by the brief and routing.
     const purgeGate = { before: readPurgeGate(dreamDir), current: () => readPurgeGate(dreamDir) };
-    const latest = indexProposals(await store.listProposals(), proposerId);
+    const proposalSnapshot = await store.listProposals();
+    const latest = indexProposals(proposalSnapshot, proposerId);
     // Routing in the backfill below must look at the same snapshot the brief judged, or a claim another writer adds
     // between the two reads would be named by the verdict and missing from the peers.
     index = latest;
     reslot();
-    const { items, excluded } = await briefItems(store, latest, proposerId);
+    const { items, excluded } = await briefItems(store, latest, proposerId, proposalSnapshot);
     const { views, byView } = effectiveItems(items, reviewDecisions);
     const contestedNow = classifyCurrent(views, policy).contested.map((view) => byView.get(view));
     const contestedBySlot = new Map();
@@ -467,11 +567,19 @@ export async function runDream(host, options = {}) {
     // (an incomplete sitting, one past the per-run cap, or one that failed).
     const sittings = { ...cursor.sittings };
     for (const residue of selected) if (processed.has(residue.sittingId)) sittings[residue.sittingId] = residue.contentHash;
-    const undone = ingest.residues.some((residue) => !processed.has(residue.sittingId));
+    const undone = runtimeResidues.some((residue) => !processed.has(residue.sittingId));
+    if (observations) for (const batch of observations.batches) {
+      if (batch.residues.every((residue) => processed.has(residue.sittingId))) {
+        observations.cursors[batch.key] = batch.cursor;
+        // The committed source cursor now owns replay identity for this prefix.
+        for (const id of batch.eventIds) delete sittings[id];
+      }
+    }
     const next = {
       schema_version: ingest.candidateCursor.schema_version,
       telemetry: undone ? cursor.telemetry : ingest.candidateCursor.telemetry,
       sittings,
+      ...(observations ? { observations: observations.cursors } : cursor.observations === undefined ? {} : { observations: cursor.observations }),
     };
     const changed = JSON.stringify(next) !== JSON.stringify(cursor);
     const nextBytes = `${JSON.stringify(next, null, 2)}\n`;
@@ -483,7 +591,7 @@ export async function runDream(host, options = {}) {
       return report;
     }
 
-    report.status = changed || report.sittings.distilled + report.sittings.resumed + report.sittings.reused > 0 ? "success" : "noop";
+    report.status = observations?.blocked.length ? "blocked" : changed || report.sittings.distilled + report.sittings.resumed + report.sittings.reused > 0 ? "success" : "noop";
     report.finished_at = now();
     await stage("report");
     writeReport(); // everything fallible is behind us: the report names the cursor it is about to commit

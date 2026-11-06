@@ -1,12 +1,13 @@
 // The dream run against the REAL Corpus store (the published @kontourai/corpus-store, pinned in package.json), not the
 // in-test store the other suites use. Always on: the package is a dev dependency.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { KitDefaultStoreAdapter, standaloneFileMutationLock } from "@kontourai/corpus-store";
 import { runDream } from "../../kits/knowledge/dream/run.js";
-import { FakeCorpusStore, SCRIPT, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
+import { FakeCorpusStore, NOW_ISO, SCRIPT, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
 
 
 async function realStore(ws) {
@@ -223,4 +224,83 @@ test("the in-test store answers a request key as the real store does: same reque
   }
   assert.equal((await fake.listProposals()).length, 1);
   assert.equal((await real.listProposals()).length, 1);
+});
+
+
+test('real Corpus deduplicates a tool-event retry after a crash before cursor commit', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = await realStore(ws); const sourceId = 'fixture-observation'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture-session', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
+  await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash before cursor'); } })), /crash before cursor/);
+  assert.equal(fs.existsSync(ws.cursorFile), false);
+  const first = await store.listProposals(); assert.equal(first.length, 2);
+  await runDream(host, runOptions(ws));
+  const second = await store.listProposals(); assert.equal(second.length, 2); assert.deepEqual(second.map((item) => item.id).sort(), first.map((item) => item.id).sort());
+  assert.equal((await runDream(host, runOptions(ws))).sittings.seen, 0);
+});
+
+test('real Corpus accepts tool-event provenance with an unavailable session', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = await realStore(ws); const sourceId = 'fixture-no-session'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: '', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws)); const proposal = (await store.listProposals()).find((item) => item.candidate.category === 'memory.claim');
+  assert.ok(proposal); assert.equal(proposal.candidate.provenance.session_id, undefined);
+  assert.equal(JSON.parse(proposal.candidate.provenance.note).session_id, null);
+});
+
+test('real Corpus: a tool-derived claim stays out of briefs until its raw source is independently applied', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = await realStore(ws); const sourceId = 'fixture-source-review'; const ordinal = 1;
+  const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const event = { id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." };
+  const importer = (_data, options) => ({ events: options.cursor ? [] : [event], malformed: 0, partial: 0, cursor: { version: 1, sourceId, lines: 1, digest: 'a'.repeat(64) } });
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { observationSources: [{ sourceId, project: null, data: 'fixture', importer }] });
+  await runDream(host, runOptions(ws)); const proposals = await store.listProposals();
+  const raw = proposals.find((item) => item.candidate.category === 'memory.observation'); const claim = proposals.find((item) => item.candidate.category === 'memory.claim');
+  await store.applyCreate(claim.id, 'independent-reviewer');
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+  const rawId = await store.applyCreate(raw.id, 'independent-reviewer');
+  assert.equal(rawId, `observation-${id}`, 'the reviewed raw ID is stable for migration links');
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 0);
+  assert.equal(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries.length, 1);
+  await store.retire(rawId, 'retired', { agent: 'independent-reviewer', rationale: 'not current' });
+  assert.equal((await runDream(host, runOptions(ws))).brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+});
+
+test('real Corpus: reviewed migrated instinct needs all reviewed sources to reach a brief', async (t) => {
+  const { planLegacyInstinct } = await import('../../kits/knowledge/instincts/migrate.js');
+  const { toolEventResidue } = await import('../../kits/knowledge/instincts/tool-event-residue.js');
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, ''); const store = await realStore(ws);
+  const sourceId = 'fixture-migration'; const ordinal = 1; const id = createHash('sha256').update(JSON.stringify([sourceId, ordinal])).digest('hex');
+  const source = toolEventResidue({ id, sourceId, ordinal, timestamp: NOW_ISO, session: 'fixture', projectId: 'fixture', projectName: 'Fixture', event: 'tool_complete', tool: 'shell', output: 'run focused tests' }, null);
+  const value = { schema_version: '1.0', id: 'fixture', event: 'tool_complete', tool: 'shell', context: 'tests', resolution: 'run focused tests', scope: 'global', observed_at: NOW_ISO, confidence_at: NOW_ISO, confidence: 0.8, source_ids: [id] };
+  const plan = planLegacyInstinct(value, [source], 'fixture', { visibility: { kind: 'restricted', audiences: ['user:owner'] } });
+  const rawIds = [];
+  for (const raw of [plan.legacyRaw, ...plan.observationRaw]) {
+    const rawProposal = await store.proposeCreate(raw, 'migrator', { agent: 'migrator', proposal: 'source' }, { requestKey: `fixture:${raw.id}` });
+    rawIds.push(await store.applyCreate(rawProposal, 'independent-reviewer'));
+  }
+  const proposal = await store.proposeCreate(plan.candidate, 'migrator', { agent: 'migrator', proposal: 'instinct' }, { requestKey: plan.requestKey });
+  const compiledId = await store.applyCreate(proposal, 'independent-reviewer');
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract());
+  let report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.observation_unreviewed, 0);
+  assert.ok(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries.some((entry) => entry.includes('run focused tests')));
+  await store.update(compiledId, { confidence: 1 }, { agent: 'fixture', note: 'unreviewed change' });
+  report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.unverified, 1, 'a confidence change outside the approved candidate is withheld');
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
+  await store.update(compiledId, { confidence: 0.8 }, { agent: 'fixture', note: 'restore' });
+  await store.retire(rawIds[0], 'retired', { agent: 'independent-reviewer', rationale: 'not current' });
+  report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.observation_unreviewed, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), 'utf8')).entries, []);
 });

@@ -363,12 +363,13 @@
     "test:delegation-rounds": "npm run build --silent && node --test src/cli/delegation-group-rounds.test.mjs src/cli/delegation-flow-runtime.test.mjs"
   },
   "devDependencies": {
-    "@kontourai/corpus-store": "0.1.0-next.0",
+    "@kontourai/corpus-store": "0.1.0-next.3",
     "@kontourai/forage": "1.0.2",
     "@kontourai/lookout": "0.8.9",
     "@kontourai/traverse": "5.0.3",
     "@kontourai/veritas": "1.12.1",
     "@types/node": "^26.6.6",
+
     "ajv": "8.20.0",
     "gcp-metadata": "9.2.3",
     "promptfoo": "^0.125.1",
@@ -379,7 +380,7 @@
     "@kontourai/conduit": "0.7.1",
     "@kontourai/datum": "0.8.1",
     "@kontourai/dispatch": "0.8.0",
-    "@kontourai/ferry": "0.6.0",
+    "@kontourai/ferry": "0.7.0",
     "@kontourai/flow": "5.4.0",
     "@kontourai/relay": "0.7.1",
     "@kontourai/surface": "5.0.0",

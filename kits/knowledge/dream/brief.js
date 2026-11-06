@@ -203,6 +203,7 @@ export function effectiveItems(items, reviewDecisions = []) {
 }
 
 export function isEligible(item, { includeUnreviewed = false } = {}) {
+  if (item.observationSourceApproved === false) return false;
   if (isSealed(item.claim)) return false;
   if (item.state === "applied") return true;
   return item.state === "pending" && includeUnreviewed && item.routing?.outcome === "proposed";
@@ -210,7 +211,9 @@ export function isEligible(item, { includeUnreviewed = false } = {}) {
 
 export function confidenceOf(item) {
   const agreement = item.agreement && item.agreement.passes > 0 ? Math.min(1, item.agreement.agreeing / item.agreement.passes) : 0;
-  return item.state === "applied" ? 0.55 + 0.45 * agreement : 0.5 * agreement;
+  // Reviewed record confidence uses the same review-state bands as agreement.
+  const confidence = typeof item.confidence === "number" && Number.isFinite(item.confidence) && item.confidence >= 0 && item.confidence <= 1 ? item.confidence : agreement;
+  return item.state === "applied" ? 0.55 + 0.45 * confidence : 0.5 * confidence;
 }
 
 function scopeMatch(item, project) {
