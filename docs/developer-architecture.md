@@ -32,6 +32,25 @@ dependency for its public snapshot store, reference builder and resolver. This
 keeps acquisition persistence and exact replay with their owning package while
 Lookout consumes the recorder's last handled snapshot reference.
 
+## Documentation tooling
+
+`corpus.json` maps canonical guides to the source, schemas, integrations and hooks
+they explain. Local `docs:check` and `docs:build` use the same reviewed Corpus
+revision selected by the docs workflow. A source change
+requires updated covering prose or a new complete local byte review explaining
+why the existing claims remain accurate; the [review contract](https://github.com/kontourai/corpus/blob/b127e35a818b532369843731b3c64792baade83e/docs/related-content.md#review-an-unchanged-covering-document)
+defines that alternative. Veritas governs evidence; Corpus checks the declared
+relationships and reviewed bytes. Neither establishes live runtime or published
+site correctness.
+
+This guide is also the fallback review owner for `src/**`: changes to CLI
+entrypoints, runtime modules and shared helpers require an architecture review
+even when no narrower guide is mapped. Specific contract and integration guides
+retain their own coverage. Narrative schemas belong to this source/schema
+boundary; workspace-kit and retrospective schemas additionally select their
+respective authoring and feedback guides. The engine-host integration reference
+is reviewed here alongside its packaged runtime imports.
+
 ## Orientation
 
 Flow Agents is the agent-facing operating layer. It turns a user's intent into workflow skills, local artifacts, sidecars, checks, and handoffs that a human or another agent can inspect later.

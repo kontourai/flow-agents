@@ -71,7 +71,8 @@
       "source": "docs/installed-kit-setup.md",
       "section": "Start Here",
       "covers": [
-        "src/kit-setup.ts"
+        "src/kit-setup.ts",
+        "src/cli/kit-setup.ts"
       ]
     },
     {
@@ -84,7 +85,13 @@
     },
     {
       "source": "docs/architecture-engine-and-kits.md",
-      "section": "Concepts"
+      "section": "Concepts",
+      "covers": [
+        "src/flow-kit/**",
+        "src/runtime-adapters.ts",
+        "kits/catalog.json",
+        "kits/*/kit.json"
+      ]
     },
     {
       "source": "docs/operating-layers.md",
@@ -97,11 +104,40 @@
     {
       "source": "docs/developer-architecture.md",
       "section": "Concepts",
-      "covers": ["src/tools/build-universal-bundles.ts", "src/tools/common.ts", "src/lib/package-version.ts", "src/lib/kit-flow-binding.ts", "src/lib/flow-resolver.ts", "src/lib/kit-registry.ts", "src/builder-gate-action-envelope.ts", "src/cli/narrative-sources.ts", "scripts/install-codex-home.sh", "scripts/verify-runtime-imports.js", "src/cli/init.ts", "src/cli/uninstall.ts", "package.json"]
+      "covers": [
+        "src/tools/build-universal-bundles.ts",
+        "src/tools/common.ts",
+        "src/lib/package-version.ts",
+        "src/lib/kit-flow-binding.ts",
+        "src/lib/flow-resolver.ts",
+        "src/lib/kit-registry.ts",
+        "src/builder-gate-action-envelope.ts",
+        "src/cli/narrative-sources.ts",
+        "scripts/install-codex-home.sh",
+        "scripts/verify-runtime-imports.js",
+        "src/cli/init.ts",
+        "src/cli/uninstall.ts",
+        "package.json",
+        "src/index.ts",
+        "src/knowledge-learning*.ts",
+        "src/memory-*.ts",
+        "src/retrospective-*.ts",
+        "pnpm-lock.yaml",
+        "src/**",
+        "integrations/engine-host/**",
+        "schemas/grounded-execution-narrative.schema.json",
+        "schemas/narrative-*.schema.json"
+      ]
     },
     {
       "source": "docs/workflow-artifact-lifecycle.md",
-      "section": "Concepts"
+      "section": "Concepts",
+      "covers": [
+        "src/cli/promote-workflow-artifact.ts",
+        "src/cli/workflow-artifact-cleanup-audit.ts",
+        "src/lib/local-artifact-root.ts",
+        "src/lib/artifact-residue-ignore.ts"
+      ]
     },
     {
       "source": "docs/verifiable-trust.md",
@@ -113,7 +149,11 @@
     },
     {
       "source": "docs/veritas-integration.md",
-      "section": "Concepts"
+      "section": "Concepts",
+      "covers": [
+        "integrations/veritas/**",
+        "src/cli/codex-governance-hook.ts"
+      ]
     },
     {
       "source": "docs/north-star.md",
@@ -133,7 +173,12 @@
     },
     {
       "source": "docs/kit-authoring-guide.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/workspace-kits.ts",
+        "src/cli/workspace-kit.ts",
+        "schemas/workspace-kits*.schema.json"
+      ]
     },
     {
       "source": "docs/survey-review-transports.md",
@@ -152,11 +197,38 @@
     },
     {
       "source": "docs/configurable-workflow-routing.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/lib/effective-flow-agents-config.ts",
+        "schemas/flow-agents-settings.schema.json",
+        "schemas/flow-agents-core-config.schema.json",
+        "schemas/flow-agents-kit-config.schema.json",
+        "src/cli/effective-flow-agents-config.ts"
+      ]
     },
     {
       "source": "docs/work-item-adapters.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/cli/merge-change.ts",
+        "src/cli/pull-work-provider.ts",
+        "src/cli/publish-change-helper.ts",
+        "src/publish-change-operation-authority.ts",
+        "src/merge-change-operation-authority.ts",
+        "src/lib/work-item-*.ts",
+        "schemas/backlog-provider-settings.schema.json",
+        "schemas/change-provider-settings.schema.json",
+        "src/cli/change-provider.ts",
+        "src/cli/effective-backlog-settings.ts",
+        "src/cli/effective-change-provider-settings.ts",
+        "src/cli/github-change-provider.ts",
+        "src/cli/github-mutation-renderer.ts",
+        "src/cli/local-file-provider-adapters.ts",
+        "src/cli/merge-change-provider.ts",
+        "src/cli/provider-bootstrap.ts",
+        "src/cli/provider-interfaces.ts",
+        "src/cli/work-item-mutation-provider.ts"
+      ]
     },
     {
       "source": "docs/knowledge-kit.md",
@@ -165,7 +237,8 @@
         "kits/knowledge/ingest/**",
         "kits/knowledge/adapters/flow-runner/classification.js",
         "kits/knowledge/flows/ingest.flow.json",
-        "kits/knowledge/adapters/shared/owned-artifacts.js"
+        "kits/knowledge/adapters/shared/owned-artifacts.js",
+        "schemas/knowledge/**"
       ]
     },
     {
@@ -179,12 +252,32 @@
     },
     {
       "source": "docs/survey-utterance-check.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/cli/utterance-check.ts",
+        "src/cli/utterance-model-extractor.ts"
+      ]
     },
     {
       "source": "docs/agent-usage-feedback-loop.md",
       "section": "Guides",
-      "covers": ["scripts/telemetry/lib/config.sh", "scripts/telemetry/lib/redact.sh", "context/scripts/telemetry/lib/config.sh", "context/scripts/telemetry/lib/redact.sh", "scripts/telemetry/lib/transport.sh", "context/scripts/telemetry/lib/transport.sh", "scripts/hooks/lib/audit-transport.sh", "context/scripts/hooks/lib/audit-transport.sh", "scripts/telemetry/telemetry.sh", "context/scripts/telemetry/telemetry.sh", "scripts/hooks/governance-audit.sh", "context/scripts/hooks/governance-audit.sh"]
+      "covers": [
+        "scripts/telemetry/lib/config.sh",
+        "scripts/telemetry/lib/redact.sh",
+        "context/scripts/telemetry/lib/config.sh",
+        "context/scripts/telemetry/lib/redact.sh",
+        "scripts/telemetry/lib/transport.sh",
+        "context/scripts/telemetry/lib/transport.sh",
+        "scripts/hooks/lib/audit-transport.sh",
+        "context/scripts/hooks/lib/audit-transport.sh",
+        "scripts/telemetry/telemetry.sh",
+        "context/scripts/telemetry/telemetry.sh",
+        "scripts/hooks/governance-audit.sh",
+        "context/scripts/hooks/governance-audit.sh",
+        "src/retrospective-*.ts",
+        "schemas/retrospective-*.schema.json",
+        "src/cli/usage-feedback.ts"
+      ]
     },
     {
       "source": "docs/integrations/index.md",
@@ -192,15 +285,31 @@
     },
     {
       "source": "docs/integrations/harness-install.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/tools/build-universal-bundles.ts",
+        "src/tools/common.ts",
+        "src/cli/init.ts",
+        "src/cli/uninstall.ts",
+        "scripts/dogfood.js",
+        "scripts/install-codex-home.sh",
+        "packaging/manifest.json"
+      ]
     },
     {
       "source": "docs/integrations/framework-adapter.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "integrations/strands/**",
+        "integrations/strands-ts/**"
+      ]
     },
     {
       "source": "docs/integrations/conformance.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "packaging/conformance/**"
+      ]
     },
     {
       "source": "docs/integrations/knowledge-kit-live.md",
@@ -208,7 +317,12 @@
     },
     {
       "source": "docs/integrations/flow-agents-console.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/cli/console-*.ts",
+        "src/console-contract.ts",
+        "src/lib/console-*.ts"
+      ]
     },
     {
       "source": "docs/public-workflow-cli.md",
@@ -216,20 +330,50 @@
       "covers": [
         "kits/builder/flows/review-existing.flow.json",
         "kits/builder/flows/deliver-existing.flow.json",
-        "kits/builder/flows/publish-existing.flow.json"
+        "kits/builder/flows/publish-existing.flow.json",
+        "src/cli.ts",
+        "src/cli/workflow.ts",
+        "src/cli/workflow-sidecar.ts",
+        "src/cli/builder-run.ts",
+        "src/cli/continuation-adapter.ts",
+        "src/continuation-*.ts",
+        "src/canonical-gate-projection.ts"
       ]
     },
     {
       "source": "docs/spec/runtime-hook-surface.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "scripts/hooks/**",
+        "context/scripts/hooks/**",
+        "src/runtime-adapters.ts",
+        "src/tools/build-universal-bundles.ts",
+        "packaging/manifest.json"
+      ]
     },
     {
       "source": "docs/spec/builder-flow-runtime.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/builder-*.ts",
+        "src/external-lifecycle-authority.ts",
+        "src/sealed-execution.ts",
+        "packaging/lifecycle-authority/**",
+        "schemas/builder-lifecycle-authorization.schema.json",
+        "schemas/lifecycle-authority-keys.schema.json"
+      ]
     },
     {
       "source": "docs/flow-kit-repository-contract.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/flow-kit/**",
+        "src/cli/kit.ts",
+        "src/runtime-adapters.ts",
+        "src/kit-review.ts",
+        "schemas/kit-review-request.schema.json",
+        "kits/catalog.json"
+      ]
     },
     {
       "source": "docs/kontour-resource-contract.md",
@@ -237,19 +381,35 @@
     },
     {
       "source": "docs/workflow-shared-contracts.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "context/contracts/**",
+        "schemas/workflow-*.schema.json",
+        "schemas/review-artifact.schema.json",
+        "schemas/run-correlation-envelope.schema.json",
+        "src/run-correlation.ts",
+        "src/run-reconstruction.ts",
+        "src/workflow-outcome.ts",
+        "src/cli/validate-workflow-artifacts.ts"
+      ]
     },
     {
       "source": "docs/kit-observability-contribution-contract.md",
       "section": "Reference",
       "covers": [
         "src/kit-observability-contract.ts",
-        "src/kit-observability-conformance.ts"
+        "src/kit-observability-conformance.ts",
+        "schemas/kit-observability-*.schema.json"
       ]
     },
     {
       "source": "docs/docker-worker-adapter.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "integrations/codex-host/**",
+        "src/kit-execution.ts",
+        "src/kit-execution-child.ts"
+      ]
     },
     {
       "source": "docs/system-git-provenance.md",
@@ -257,15 +417,26 @@
     },
     {
       "source": "docs/specs/harness-capability-matrix.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/lib/capability-declarations.ts",
+        "src/tools/generate-capability-matrix.ts"
+      ]
     },
     {
       "source": "docs/specs/host-integration-conformance.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/conduit-host-integration.ts",
+        "src/tools/generate-host-conformance.ts"
+      ]
     },
     {
       "source": "docs/specs/economics-record-contract.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/telemetry-semantics.ts"
+      ]
     },
     {
       "source": "docs/specs/learning-review-proposals-contract.md",
@@ -429,7 +600,10 @@
     },
     {
       "source": "docs/repository-structure.md",
-      "section": "Contribute"
+      "section": "Contribute",
+      "covers": [
+        "src/tools/**"
+      ]
     },
     {
       "source": "docs/developer-hook-setup.md",
@@ -490,7 +664,10 @@
         "src/delegation-continuation-receipt.ts",
         "src/delegation-rounds-recipient.ts",
         "src/delegation-authority-service-v3.ts",
-        "src/delegation-authority-local-file-v3.ts"
+        "src/delegation-authority-local-file-v3.ts",
+        "schemas/delegation-*.schema.json",
+        "src/delegation-flow-runtime.ts",
+        "src/delegation-flow-bindings.ts"
       ]
     },
     {
@@ -502,7 +679,10 @@
         "src/assignment-local-file.ts",
         "src/lib/assignment-model.ts",
         "src/lib/assignment-github.ts",
-        "src/lib/assignment-local-store.ts"
+        "src/lib/assignment-local-store.ts",
+        "schemas/assignment-provider-settings.schema.json",
+        "src/cli/assignment-provider.ts",
+        "src/cli/effective-assignment-provider-settings.ts"
       ]
     }
   ],
