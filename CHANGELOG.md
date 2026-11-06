@@ -1,5 +1,28 @@
 # Changelog
 
+## [9.13.0](https://github.com/kontourai/flow-agents/compare/v9.12.0...v9.13.0) (2026-11-06)
+
+
+### Features
+
+* **hooks:** context contributors and memory brief injection ([#1576](https://github.com/kontourai/flow-agents/issues/1576)) ([c344b63](https://github.com/kontourai/flow-agents/commit/c344b63f2b7042196521991cd4e87fd5f16ff160))
+* **knowledge:** adopt Corpus purge with tombstones; isolate Surface 6 to Living Context ([#1581](https://github.com/kontourai/flow-agents/issues/1581)) ([767d924](https://github.com/kontourai/flow-agents/commit/767d924db116ca166616ecf989b6e3d858e0ad66))
+* **knowledge:** ask Living Context a question of a real store ([#1595](https://github.com/kontourai/flow-agents/issues/1595), [#1596](https://github.com/kontourai/flow-agents/issues/1596), [#1597](https://github.com/kontourai/flow-agents/issues/1597)) ([#1601](https://github.com/kontourai/flow-agents/issues/1601)) ([4d57df6](https://github.com/kontourai/flow-agents/commit/4d57df688bc517994f3a0e1967872ee1c45e8a9d))
+* **knowledge:** dream run distils sessions into proposed memory claims with budgeted briefs ([#671](https://github.com/kontourai/flow-agents/issues/671)) ([#1580](https://github.com/kontourai/flow-agents/issues/1580)) ([4b49227](https://github.com/kontourai/flow-agents/commit/4b492276c19c15ed621aeba796e17683b19dc286))
+* **knowledge:** stage memory create proposals through Corpus ([#1573](https://github.com/kontourai/flow-agents/issues/1573)) ([5fcaef3](https://github.com/kontourai/flow-agents/commit/5fcaef337fe844d04539f10ec0c23d66202355be))
+
+
+### Fixes
+
+* **deps:** bump neo4j-driver from 5.28.3 to 6.3.0 ([#1615](https://github.com/kontourai/flow-agents/issues/1615)) ([1c684ac](https://github.com/kontourai/flow-agents/commit/1c684ac3a7e6af545afb5073b289decd5dad950c))
+* **deps:** consolidate updates and preserve integration contracts ([#1614](https://github.com/kontourai/flow-agents/issues/1614)) ([369c95a](https://github.com/kontourai/flow-agents/commit/369c95aec45bf2a10b88f02144642027ff841dc9))
+* **knowledge:** never serve a brief compiled before a purge ([#671](https://github.com/kontourai/flow-agents/issues/671)) ([#1613](https://github.com/kontourai/flow-agents/issues/1613)) ([d09b9aa](https://github.com/kontourai/flow-agents/commit/d09b9aa643122143129ede71cb766b43040ec48f))
+
+
+### Documentation
+
+* enforce canonical guide freshness for production inputs ([#1617](https://github.com/kontourai/flow-agents/issues/1617)) ([094dbe9](https://github.com/kontourai/flow-agents/commit/094dbe907ad00172aea2ad00297f9a66c951c738))
+
 ## [9.12.0](https://github.com/kontourai/flow-agents/compare/v9.11.0...v9.12.0) (2026-11-04)
 
 
