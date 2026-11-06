@@ -7,6 +7,8 @@ evidence:
     ref: https://github.com/kontourai/flow-agents/issues/1616
   - kind: issue
     ref: https://github.com/kontourai/flow-agents/issues/1611
+  - kind: issue
+    ref: https://github.com/kontourai/flow-agents/issues/1618
   - kind: doc
     ref: docs/developer-architecture.md
   - kind: doc
@@ -40,5 +42,13 @@ modules a host may import.
   pins to the runtime export names. They are not copies, so there is one codec, one marker, one brief compiler and one
   recall. `memory-recall` is a thin entry over the existing recall pieces; it decides nothing about who may read what.
   Authority and identity checks stay with the host that calls it.
+- **Entity proposals have a wire shape here; detection is a later change.** `memory-entity-envelope` defines category
+  `memory.entity-proposal` and the body `{ version, proposal }`, where `proposal` is Survey's `EntityProposal` verbatim
+  and is accepted only when `createEntityProposal(proposal.spec)` gives back the same bytes. It is a sibling module, not
+  part of `memory-envelope`, so a host that reads only claims does not load Survey. The create key derives from the
+  proposal id. Alternatives, evidence per alternative and excerpt size are bounded and refused at max + 1. The module
+  detects nothing and applies nothing: no identity mapping is applied from an accepted outcome (no published function does
+  that), and review stays human-only. The `dream` step that proposes candidates is tracked in flow-agents#1618 and ships
+  as its own change after this one merges.
 - **Surface alias unchanged.** `@kontourai/surface-knowledge` stays an alias of `@kontourai/surface` (flow-agents#1581);
   this record does not revisit it.

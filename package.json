@@ -223,6 +223,10 @@
       "types": "./kits/knowledge/dream/envelope.d.ts",
       "import": "./kits/knowledge/dream/envelope.js"
     },
+    "./memory-entity-envelope": {
+      "types": "./kits/knowledge/dream/entity-envelope.d.ts",
+      "import": "./kits/knowledge/dream/entity-envelope.js"
+    },
     "./memory-marker": {
       "types": "./kits/knowledge/memory-marker.d.ts",
       "import": "./kits/knowledge/memory-marker.js"

@@ -246,13 +246,14 @@ evidence and the metrics.
 
 ### Host entries for memory the host keeps
 
-A host that keeps its own memory and briefs from it imports four more subpaths. Each points at the
+A host that keeps its own memory and briefs from it imports five more subpaths. Each points at the
 Knowledge kit's own module, so there is one implementation of each; the `.d.ts` files beside them
 are checked against the runtime exports by `src/cli/memory-host-subpaths.test.mjs`.
 
 | Subpath | Exports | Use |
 | --- | --- | --- |
 | `@kontourai/flow-agents/memory-envelope` | `encodeEnvelope`, `decodeEnvelope`, `indexProposals` and the envelope limits | Read and write the dream run's published envelope; a malformed or unknown-version envelope is refused, not repaired. |
+| `@kontourai/flow-agents/memory-entity-envelope` | `encodeEntityEnvelope`, `decodeEntityEnvelope`, `indexEntityProposals`, `entityProposalKey`, `entityProposalTitle`, the category `memory.entity-proposal` and its bounds | Carry a merge, split or alias proposal in a memory root beside the claims. The body is `{ version, proposal }` with Survey's `EntityProposal` verbatim, accepted only when Survey rebuilds it from its own `spec` to the same bytes. It detects and applies nothing, and every bound refuses at max + 1. |
 | `@kontourai/flow-agents/memory-marker` | `INJECTED_MEMORY_OPEN`, `INJECTED_MEMORY_CLOSE` | The markers that wrap injected memory, so a transcript reader can skip it instead of ingesting it as new memory. |
 | `@kontourai/flow-agents/memory-brief` | `compileBrief`, `rankItems`, `classifyCurrent`, `effectiveItems`, `isSealed`, `writeBriefs` and the budget defaults | Compile a bounded brief from claims; what is current or sealed is decided as of the stated instants. |
 | `@kontourai/flow-agents/memory-recall` | `recallMemoryClaims` | Answer a question from the claims a reader may see, or abstain with `no_current_claim_states_it`. |
