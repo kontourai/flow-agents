@@ -19,9 +19,9 @@ import { acquireBundleBuildLock, releaseBundleBuildLock, startBundleBuildLockRef
 
 /** Pack while the caller holds the canonical build lock. */
 export function packUnderBundleBuildLock(lock: string): number {
-  const canonicalLock = path.join(root, "dist", ".build-lock");
-  if (lock !== canonicalLock || !fs.lstatSync(lock).isDirectory() || fs.readFileSync(path.join(lock, "pid"), "utf8").trim() !== String(process.pid)) throw new BundlePackError("bundle build lock is not owned by this process");
   const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
+  const canonicalLock = path.join(dist, ".build-lock");
+  if (lock !== canonicalLock || !fs.lstatSync(lock).isDirectory() || fs.readFileSync(path.join(lock, "pid"), "utf8").trim() !== String(process.pid)) throw new BundlePackError("bundle build lock is not owned by this process");
   for (const harness of BUNDLE_PACK_ROOTS) {
     if (!fs.existsSync(path.join(dist, harness, "install.sh"))) throw new BundlePackError(`dist/${harness} is not built; run npm run build:bundles first`);
   }
