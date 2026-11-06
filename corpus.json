@@ -71,7 +71,8 @@
       "source": "docs/installed-kit-setup.md",
       "section": "Start Here",
       "covers": [
-        "src/kit-setup.ts"
+        "src/kit-setup.ts",
+        "src/cli/kit-setup.ts"
       ]
     },
     {
@@ -121,7 +122,11 @@
         "src/knowledge-learning*.ts",
         "src/memory-*.ts",
         "src/retrospective-*.ts",
-        "pnpm-lock.yaml"
+        "pnpm-lock.yaml",
+        "src/**",
+        "integrations/engine-host/**",
+        "schemas/grounded-execution-narrative.schema.json",
+        "schemas/narrative-*.schema.json"
       ]
     },
     {
@@ -144,7 +149,11 @@
     },
     {
       "source": "docs/veritas-integration.md",
-      "section": "Concepts"
+      "section": "Concepts",
+      "covers": [
+        "integrations/veritas/**",
+        "src/cli/codex-governance-hook.ts"
+      ]
     },
     {
       "source": "docs/north-star.md",
@@ -164,7 +173,12 @@
     },
     {
       "source": "docs/kit-authoring-guide.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/workspace-kits.ts",
+        "src/cli/workspace-kit.ts",
+        "schemas/workspace-kits*.schema.json"
+      ]
     },
     {
       "source": "docs/survey-review-transports.md",
@@ -188,7 +202,8 @@
         "src/lib/effective-flow-agents-config.ts",
         "schemas/flow-agents-settings.schema.json",
         "schemas/flow-agents-core-config.schema.json",
-        "schemas/flow-agents-kit-config.schema.json"
+        "schemas/flow-agents-kit-config.schema.json",
+        "src/cli/effective-flow-agents-config.ts"
       ]
     },
     {
@@ -202,7 +217,17 @@
         "src/merge-change-operation-authority.ts",
         "src/lib/work-item-*.ts",
         "schemas/backlog-provider-settings.schema.json",
-        "schemas/change-provider-settings.schema.json"
+        "schemas/change-provider-settings.schema.json",
+        "src/cli/change-provider.ts",
+        "src/cli/effective-backlog-settings.ts",
+        "src/cli/effective-change-provider-settings.ts",
+        "src/cli/github-change-provider.ts",
+        "src/cli/github-mutation-renderer.ts",
+        "src/cli/local-file-provider-adapters.ts",
+        "src/cli/merge-change-provider.ts",
+        "src/cli/provider-bootstrap.ts",
+        "src/cli/provider-interfaces.ts",
+        "src/cli/work-item-mutation-provider.ts"
       ]
     },
     {
@@ -227,12 +252,32 @@
     },
     {
       "source": "docs/survey-utterance-check.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/cli/utterance-check.ts",
+        "src/cli/utterance-model-extractor.ts"
+      ]
     },
     {
       "source": "docs/agent-usage-feedback-loop.md",
       "section": "Guides",
-      "covers": ["scripts/telemetry/lib/config.sh", "scripts/telemetry/lib/redact.sh", "context/scripts/telemetry/lib/config.sh", "context/scripts/telemetry/lib/redact.sh", "scripts/telemetry/lib/transport.sh", "context/scripts/telemetry/lib/transport.sh", "scripts/hooks/lib/audit-transport.sh", "context/scripts/hooks/lib/audit-transport.sh", "scripts/telemetry/telemetry.sh", "context/scripts/telemetry/telemetry.sh", "scripts/hooks/governance-audit.sh", "context/scripts/hooks/governance-audit.sh"]
+      "covers": [
+        "scripts/telemetry/lib/config.sh",
+        "scripts/telemetry/lib/redact.sh",
+        "context/scripts/telemetry/lib/config.sh",
+        "context/scripts/telemetry/lib/redact.sh",
+        "scripts/telemetry/lib/transport.sh",
+        "context/scripts/telemetry/lib/transport.sh",
+        "scripts/hooks/lib/audit-transport.sh",
+        "context/scripts/hooks/lib/audit-transport.sh",
+        "scripts/telemetry/telemetry.sh",
+        "context/scripts/telemetry/telemetry.sh",
+        "scripts/hooks/governance-audit.sh",
+        "context/scripts/hooks/governance-audit.sh",
+        "src/retrospective-*.ts",
+        "schemas/retrospective-*.schema.json",
+        "src/cli/usage-feedback.ts"
+      ]
     },
     {
       "source": "docs/integrations/index.md",
@@ -272,7 +317,12 @@
     },
     {
       "source": "docs/integrations/flow-agents-console.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/cli/console-*.ts",
+        "src/console-contract.ts",
+        "src/lib/console-*.ts"
+      ]
     },
     {
       "source": "docs/public-workflow-cli.md",
@@ -280,7 +330,14 @@
       "covers": [
         "kits/builder/flows/review-existing.flow.json",
         "kits/builder/flows/deliver-existing.flow.json",
-        "kits/builder/flows/publish-existing.flow.json"
+        "kits/builder/flows/publish-existing.flow.json",
+        "src/cli.ts",
+        "src/cli/workflow.ts",
+        "src/cli/workflow-sidecar.ts",
+        "src/cli/builder-run.ts",
+        "src/cli/continuation-adapter.ts",
+        "src/continuation-*.ts",
+        "src/canonical-gate-projection.ts"
       ]
     },
     {
@@ -329,7 +386,11 @@
         "context/contracts/**",
         "schemas/workflow-*.schema.json",
         "schemas/review-artifact.schema.json",
-        "schemas/run-correlation-envelope.schema.json"
+        "schemas/run-correlation-envelope.schema.json",
+        "src/run-correlation.ts",
+        "src/run-reconstruction.ts",
+        "src/workflow-outcome.ts",
+        "src/cli/validate-workflow-artifacts.ts"
       ]
     },
     {
@@ -372,7 +433,10 @@
     },
     {
       "source": "docs/specs/economics-record-contract.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/telemetry-semantics.ts"
+      ]
     },
     {
       "source": "docs/specs/learning-review-proposals-contract.md",
@@ -536,7 +600,10 @@
     },
     {
       "source": "docs/repository-structure.md",
-      "section": "Contribute"
+      "section": "Contribute",
+      "covers": [
+        "src/tools/**"
+      ]
     },
     {
       "source": "docs/developer-hook-setup.md",
@@ -612,7 +679,10 @@
         "src/assignment-local-file.ts",
         "src/lib/assignment-model.ts",
         "src/lib/assignment-github.ts",
-        "src/lib/assignment-local-store.ts"
+        "src/lib/assignment-local-store.ts",
+        "schemas/assignment-provider-settings.schema.json",
+        "src/cli/assignment-provider.ts",
+        "src/cli/effective-assignment-provider-settings.ts"
       ]
     }
   ],

@@ -101,7 +101,7 @@ without an ordering dependency, and any callee `concurrency` other than Pages'
 own deployment group, so a pinned callee cannot reintroduce a shared queue.
 Updating a pin requires retaining and reviewing its new expansion.
 
-The Docs gate explicitly selects Docs Kit (Corpus repository) revision
+The Docs gate explicitly selects Corpus revision
 `b127e35a818b532369843731b3c64792baade83e` through the callee's
 `corpus-ref` input. Local `npm run docs:check` and `npm run docs:build` use that
 same revision. This changes source-bound freshness review behavior without
