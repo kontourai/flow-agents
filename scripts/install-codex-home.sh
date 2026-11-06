@@ -4,6 +4,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FA_BUNDLE_SNAPSHOT_ROOT="$(mktemp -d /tmp/fa-codex-bundle-snapshot.XXXXXX)"
+# Where dist/ comes from: the package's own dist/ in a checkout, or, in a published package, the Codex bundle expanded from the
+# bundle pack (bundles/flow-agents-bundles.pack) into a private scratch directory. Nothing is compiled either way.
+FA_DIST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/dist"
+FA_PACK_SCRATCH=""
 FA_OWNED_OVERLAY=""
 FA_SKILLS_OVERLAY=""
 FA_USER_HOOKS_STASH=""
@@ -15,6 +19,7 @@ FA_INSTALL_FINISHED=0
 fa_exit_trap() {
   local status=$?
   rm -rf "$FA_BUNDLE_SNAPSHOT_ROOT"
+  [[ -z "$FA_PACK_SCRATCH" ]] || rm -rf "$FA_PACK_SCRATCH"
   [[ -z "$FA_OWNED_OVERLAY" ]] || rm -rf "$FA_OWNED_OVERLAY"
   [[ -z "$FA_SKILLS_OVERLAY" ]] || rm -rf "$FA_SKILLS_OVERLAY"
   [[ -z "${FA_USER_HOOKS_STASH:-}" ]] || rm -f "$FA_USER_HOOKS_STASH"
@@ -23,15 +28,32 @@ fa_exit_trap() {
 }
 trap fa_exit_trap EXIT
 
+expand_packed_bundle() {
+  local pack="$ROOT_DIR/bundles/flow-agents-bundles.pack"
+  [[ ! -e "$ROOT_DIR/dist/codex" && ! -L "$ROOT_DIR/dist/codex" && -f "$pack" ]] || return 0
+  FA_PACK_SCRATCH="$(mktemp -d /tmp/fa-codex-bundle-pack.XXXXXX)"
+  if ! node "$ROOT_DIR/build/src/tools/bundle-pack-cli.js" extract "$FA_PACK_SCRATCH/dist" codex >"$FA_PACK_SCRATCH/out" 2>&1; then
+    cat "$FA_PACK_SCRATCH/out" >&2
+    cat >&2 <<'MSG'
+install-codex-home.sh: required prebuilt Codex bundle is missing or invalid.
+This @kontourai/flow-agents package is incomplete or corrupt; reinstall it and retry.
+If you are running from a source checkout, regenerate the bundle with: npm run build:bundles
+MSG
+    exit 1
+  fi
+  FA_DIST_ROOT="$FA_PACK_SCRATCH/dist"
+}
+expand_packed_bundle
+
 validate_shipped_bundle() {
-  if node - "$ROOT_DIR" "$FA_BUNDLE_SNAPSHOT_ROOT/codex" <<'NODE'
+  if node - "$ROOT_DIR" "$FA_BUNDLE_SNAPSHOT_ROOT/codex" "$FA_DIST_ROOT" <<'NODE'
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
 try {
 const root = process.argv[2];
-const source = path.join(root, "dist/codex");
+const source = path.join(process.argv[4], "codex");
 const snapshot = process.argv[3];
 
 function readRegular(file) {
@@ -211,7 +233,7 @@ NODE
 [[ ! -L "$DEST" ]] || { echo "install-codex-home.sh: refusing symlink destination root: $DEST" >&2; exit 1; }
 [[ ! -L "$SKILLS_DIR" ]] || { echo "install-codex-home.sh: refusing symlink skills destination root: $SKILLS_DIR" >&2; exit 1; }
 ROOT_REAL="$(canonicalize_path "$ROOT_DIR")"
-BUNDLE_SOURCE_REAL="$(canonicalize_path "$ROOT_DIR/dist/codex")"
+BUNDLE_SOURCE_REAL="$(canonicalize_path "$FA_DIST_ROOT/codex")"
 DEST_REAL="$(canonicalize_path "$DEST")"
 SKILLS_DIR_REAL="$(canonicalize_path "$SKILLS_DIR")"
 if ! node - "$SKILLS_DIR" <<'NODE'

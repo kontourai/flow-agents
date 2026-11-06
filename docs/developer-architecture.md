@@ -244,6 +244,23 @@ required. The visibility order is Surface's (`meetVisibility`) and entity propos
 the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
 evidence and the metrics.
 
+### Host entries for memory the host keeps
+
+A host that keeps its own memory and briefs from it imports five more subpaths. Each points at the
+Knowledge kit's own module, so there is one implementation of each; the `.d.ts` files beside them
+are checked against the runtime exports by `src/cli/memory-host-subpaths.test.mjs`.
+
+| Subpath | Exports | Use |
+| --- | --- | --- |
+| `@kontourai/flow-agents/memory-envelope` | `encodeEnvelope`, `decodeEnvelope`, `indexProposals` and the envelope limits | Read and write the dream run's published envelope; a malformed or unknown-version envelope is refused, not repaired. |
+| `@kontourai/flow-agents/memory-entity-envelope` | `encodeEntityEnvelope`, `decodeEntityEnvelope`, `indexEntityProposals`, `entityProposalKey`, `entityProposalTitle`, the category `memory.entity-proposal` and its bounds | Carry a merge, split or alias proposal in a memory root beside the claims. The body is `{ version, proposal }` with Survey's `EntityProposal`, accepted only when Survey rebuilds it from its `spec` to the same canonical JSON. It detects and applies nothing, and every bound refuses at max + 1. |
+| `@kontourai/flow-agents/memory-marker` | `INJECTED_MEMORY_OPEN`, `INJECTED_MEMORY_CLOSE` | The markers that wrap injected memory, so a transcript reader can skip it instead of ingesting it as new memory. |
+| `@kontourai/flow-agents/memory-brief` | `compileBrief`, `rankItems`, `classifyCurrent`, `effectiveItems`, `isSealed`, `writeBriefs` and the budget defaults | Rank eligible claims with `rankItems`, then pass them to `compileBrief`; its byte budget covers joined display entries, not the serialized JSON. `writeBriefs` combines these steps. |
+| `@kontourai/flow-agents/memory-recall` | `recallMemoryClaims` | Select lexical matches and passages from claim excerpts, with labels, missing terms and abstention reasons. An `answered` result does not establish semantic answer correctness. |
+
+The host must pass only claims the reader is authorized to see and supply trusted review and routing records. These helpers do not authenticate callers or enforce restricted-audience membership. Ranking and recall exclude sealed claims; `compileBrief` expects already-ranked inputs. `rankItems` uses `now` for ranking, while `classifyCurrent` has no as-of input.
+Recall's current, contested and superseded labels use the brief's local rules. They are not Surface's protected accumulation projection; the authority input needed for that projection is tracked in flow-agents#1586.
+
 ## Delegation authority and bounded rounds
 
 The package exports separate `delegation-group-rounds` and
@@ -446,6 +463,29 @@ standalone CLI loading, hostile/apostrophe paths, corruption/collision refusal,
 invalid settings, dry-run, repeat installation and uninstall. Run after
 `npm run build:bundles`, with actual Node and Python binaries on PATH before HOME
 is isolated. Set `FLOW_AGENTS_PACK_EVIDENCE_DIR` to retain the tested tarball and
-SHA256SUMS. npm packaging excludes the transient `dist/.build-lock/` directory.
+SHA256SUMS. The test writes the bundle pack first (as `prepack` does), checks
+that the tarball holds no `dist/`, `src/` or `evals/`, installs from the pack alone,
+and expands a bundle next to the package only for the steps that edit one.
 This simulates npm source eviction; real Claude sessions, registry
 publication and provider execution require separate qualification.
+
+### How the published package carries the install bundles
+
+`npm run build:bundles` writes one full tree per harness under `dist/`. Those trees
+share most of their bytes and a host that only imports the package never reads them,
+so the published package does not ship `dist/`. `prepack` runs
+`node build/src/tools/bundle-pack-cli.js pack`, which writes every distinct file once
+into `bundles/flow-agents-bundles.pack`: a header listing each path, mode and SHA-256,
+then one Brotli stream. The package also leaves out `src/` and `evals/`.
+
+`init`, `kit`, `workflow doctor` and `uninstall` ask
+`src/lib/bundle-store.ts` for a harness. The Codex installer expands the same pack directly. The resolver returns the package's own `dist/<harness>`
+when one is built (a checkout), and otherwise expands that harness from the pack into
+a private temporary directory that is removed when the command ends. Every blob is
+checked against its SHA-256 before the first file is written, so a damaged pack is
+refused whichever harness was asked for and writes nothing. Nothing is compiled or
+downloaded, and the installed package directory is never written to. The decision to
+pack rather than to generate the bundles at install time is in
+`docs/decisions/` (consumers must not compile; the builder is not hoist-aware).
+`node build/src/tools/bundle-pack-cli.js info` prints what a pack holds, and
+`extract <dir> [harness...]` expands it for inspection.

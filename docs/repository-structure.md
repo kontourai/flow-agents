@@ -13,6 +13,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 - Do not commit local runtime state from `.kontourai/flow-agents/<slug>/`, `.flow-agents/` except `.flow-agents/config/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, generated `.veritas/` output, or tool caches; intentionally tracked `.veritas/` governance/config remains durable source.
 - Runtime workflow artifacts stay local and ignored; promote reviewable or durable outcomes to docs, source, schemas, or provider records before merging to `main`.
 - Treat generated exports and installed runtime config as products of `packaging/manifest.json`, `src/tools/build-universal-bundles.ts`, `scripts/install-*.sh`, and the source directories they copy.
+- Published packages carry the generated harness bundles in `bundles/flow-agents-bundles.pack`; `src/tools/bundle-pack-cli.ts` packs and expands those bytes.
 - Use `.kontourai/` for non-durable local or generated Kontour workspace state. Keep durable tracked files in intuitive product-owned paths such as `.veritas/`, `.flow/`, `.agents/`, `.claude/commands`, and `docs/`; existing transition ignores remain during migration.
 
 ## Target Layout

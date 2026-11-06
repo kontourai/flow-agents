@@ -72,21 +72,23 @@ const required = [
   "build/",
   "console.telemetry.json",
   "context/",
+  "bundles/",
   "docs/",
-  "dist/",
-  "evals/",
   "install.sh",
   "kits/",
   "packaging/",
   "scripts/",
   "skills/",
-  "src/",
 ];
 for (const entry of required) {
   if (!files.includes(entry)) throw new Error(`package files allowlist missing ${entry}`);
 }
+// #1616: the per-harness install trees (dist/), the TypeScript input of build/ (src/) and the package's own acceptance harness
+// (evals/) are not published. The install bundles travel as the one bundle pack under bundles/.
+for (const entry of ["dist/", "src/", "evals/"]) {
+  if (files.includes(entry)) throw new Error(`package files allowlist must not publish ${entry}`);
+}
 const requiredExcludes = [
-  "!evals/cases/dev/node_modules/",
   "!**/.flow-agents/",
   "!**/.kontourai/",
   "!**/.surface/",

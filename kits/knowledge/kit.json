@@ -190,6 +190,11 @@
       "description": "Living Context manifest producer for distilled memory claims, presented through presentMemoryClaims with posture and review label in the claim text (flow-agents#1595)."
     },
     {
+      "id": "knowledge.memory-recall",
+      "path": "context-check/memory-recall.js",
+      "description": "Ask a question of memory claims a host already holds (for example in Corpus): the brief's currency rules, presentMemoryClaims, and the Living Context picker, over each claim's own source excerpt. Exported as @kontourai/flow-agents/memory-recall."
+    },
+    {
       "id": "knowledge.change-observer",
       "path": "context-check/observe-change.js",
       "description": "Bounded repository-change observation: observeRepositoryChange({repoRoot, base, head, maxPaths}) lists the paths touched between two raw commits (sanitized Git, no hooks or textconv) as the diff.paths a Context Check takes, and refuses an empty or oversized change instead of truncating. A thin shim: Lookout has no Git-revision source yet."

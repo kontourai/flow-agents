@@ -218,6 +218,26 @@
     "./memory-routing-flow": {
       "types": "./build/src/memory-routing-flow.d.ts",
       "import": "./build/src/memory-routing-flow.js"
+    },
+    "./memory-envelope": {
+      "types": "./kits/knowledge/dream/envelope.d.ts",
+      "import": "./kits/knowledge/dream/envelope.js"
+    },
+    "./memory-entity-envelope": {
+      "types": "./kits/knowledge/dream/entity-envelope.d.ts",
+      "import": "./kits/knowledge/dream/entity-envelope.js"
+    },
+    "./memory-marker": {
+      "types": "./kits/knowledge/memory-marker.d.ts",
+      "import": "./kits/knowledge/memory-marker.js"
+    },
+    "./memory-brief": {
+      "types": "./kits/knowledge/dream/brief.d.ts",
+      "import": "./kits/knowledge/dream/brief.js"
+    },
+    "./memory-recall": {
+      "types": "./kits/knowledge/context-check/memory-recall.d.ts",
+      "import": "./kits/knowledge/context-check/memory-recall.js"
     }
   },
   "repository": {
@@ -271,11 +291,10 @@
     "agent-cards/",
     "agents/",
     "build/",
+    "bundles/",
     "console.telemetry.json",
     "context/",
     "docs/",
-    "dist/",
-    "evals/",
     "install.sh",
     "integrations/",
     "kits/",
@@ -285,11 +304,8 @@
     "schemas/",
     "scripts/",
     "skills/",
-    "src/",
     "tsconfig.json",
     "veritas.claims.json",
-    "!evals/cases/dev/node_modules/",
-    "!evals/results/",
     "!**/.DS_Store",
     "!**/.flow-agents/",
     "!**/.kontourai/",
@@ -297,7 +313,6 @@
     "!**/.telemetry/",
     "!**/.veritas/",
     "!**/node_modules/",
-    "!dist/.build-lock/",
     "!build/src/cli/workflow.test-support.js",
     "integrations/codex-host/"
   ],
@@ -354,7 +369,7 @@
     "check:hachure-boundary": "node scripts/check-hachure-boundary.mjs",
     "check:decisions": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus decisions check --base ${DECISIONS_BASE:-origin/main}",
     "gen:decisions-index": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus decisions index",
-    "prepack": "npm run build:bundles --silent && npm run validate:source --",
+    "prepack": "npm run build:bundles --silent && node build/src/tools/bundle-pack-cli.js pack && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit",
     "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources",
     "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs",

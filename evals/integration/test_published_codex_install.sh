@@ -8,7 +8,7 @@ NODE_BIN="$(node -p 'process.execPath')"
 export PATH="$(dirname "$NODE_BIN"):$PATH"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMPDIR_EVAL="$(mktemp -d /tmp/published-codex-install.XXXXXX)"
+TMPDIR_EVAL="$(mktemp -d "${TMPDIR:-/tmp}/published-codex-install.XXXXXX")"
 cleanup() { rm -rf "$TMPDIR_EVAL"; }
 trap cleanup EXIT
 
@@ -44,8 +44,15 @@ TARBALL="$(find "$PACK_DIR" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
 node "$ROOT_DIR/evals/integration/codex-offline-uninstall.mjs" "$TARBALL" published
 TARBALL_LIST="$TMPDIR_EVAL/tarball.list"
 tar -tzf "$TARBALL" > "$TARBALL_LIST"
-grep -Fxq 'package/dist/codex/.codex/hooks.json' "$TARBALL_LIST"
-grep -Fxq 'package/dist/codex/build/src/cli.js' "$TARBALL_LIST"
+# #1616: the install bundles travel as ONE bundle pack. The per-harness dist/ trees, src/ and the acceptance harness are not published.
+grep -Fxq 'package/bundles/flow-agents-bundles.pack' "$TARBALL_LIST"
+grep -Fxq 'package/build/src/cli.js' "$TARBALL_LIST"
+for unpublished in dist src evals; do
+  if grep -q "^package/$unpublished/" "$TARBALL_LIST"; then
+    echo "published package must not contain $unpublished/" >&2
+    exit 1
+  fi
+done
 # Publisher-owned files must all be link-free before npm adds its own production
 # dependencies. Keep this guard separate from npm-generated nested .bin links.
 SHIPPED_ROOT="$TMPDIR_EVAL/shipped"
@@ -71,8 +78,11 @@ case "$PACKAGE_REAL/" in
   *) echo "packed package resolved outside isolated consumer: $PACKAGE_REAL" >&2; exit 1 ;;
 esac
 node "$ROOT_DIR/evals/integration/packed-package-links.mjs" "$SHIPPED_ROOT/package" "$PACKAGE_ROOT" "$CONSUMER"
-[[ -f "$PACKAGE_ROOT/dist/codex/.codex/hooks.json" ]]
-[[ -f "$PACKAGE_ROOT/dist/codex/.agents/skills/deliver/SKILL.md" ]]
+[[ -f "$PACKAGE_ROOT/bundles/flow-agents-bundles.pack" && ! -e "$PACKAGE_ROOT/dist" ]]
+node "$PACKAGE_ROOT/build/src/tools/bundle-pack-cli.js" extract "$TMPDIR_EVAL/expanded-codex" codex >/dev/null
+[[ -f "$TMPDIR_EVAL/expanded-codex/codex/.codex/hooks.json" ]]
+[[ -f "$TMPDIR_EVAL/expanded-codex/codex/.agents/skills/deliver/SKILL.md" ]]
+rm -rf "$TMPDIR_EVAL/expanded-codex"
 FLOW_AGENTS_BIN="$CONSUMER/node_modules/.bin/flow-agents"
 [[ -e "$FLOW_AGENTS_BIN" ]]
 BIN_REAL="$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$FLOW_AGENTS_BIN")"
@@ -95,6 +105,8 @@ esac
   ./node_modules/.bin/flow-agents init --runtime codex --global --activate-kits --yes
 )
 
+# Expanding the bundle must not write into the installed package (it may be read-only or shared).
+[[ ! -e "$PACKAGE_ROOT/dist" ]]
 SKILLS_REAL="$(cd "$SKILLS_DIR" && pwd -P)"
 case "$SKILLS_REAL/" in
   "$REAL_USER_SKILLS/"*) echo "hermetic skills destination resolves into the real user catalog: $SKILLS_REAL" >&2; exit 1 ;;
@@ -140,6 +152,8 @@ NODE
 # actionable diagnostic. It must not attempt an install-time TypeScript build.
 CORRUPT_ROOT="$CONSUMER/node_modules/@kontourai/flow-agents-corrupt"
 cp -R "$PACKAGE_ROOT" "$CORRUPT_ROOT"
+# A checkout-style dist/ takes precedence over the pack, so expand the bundle into the copy to corrupt it as a built tree.
+node "$CORRUPT_ROOT/build/src/tools/bundle-pack-cli.js" extract "$CORRUPT_ROOT/dist" >/dev/null
 EXTERNAL_HOOKS="$TMPDIR_EVAL/external-hooks.json"
 printf '{"hooks":{"Stop":[{"sentinel":"must-not-install"}]}}\n' > "$EXTERNAL_HOOKS"
 rm "$CORRUPT_ROOT/dist/codex/.codex/hooks.json"
@@ -173,8 +187,33 @@ if grep -Fq 'npm run build:bundles --silent' "$CORRUPT_ROOT/scripts/install-code
   exit 1
 fi
 
+# A damaged bundle PACK must fail the same way: before any write, with the same actionable diagnostic, never by compiling anything.
+for pack_case in flipped truncated; do
+  PACK_ROOT="$CONSUMER/node_modules/@kontourai/flow-agents-pack-$pack_case"
+  cp -R "$PACKAGE_ROOT" "$PACK_ROOT"
+  node - "$PACK_ROOT/bundles/flow-agents-bundles.pack" "$pack_case" <<'NODE'
+const fs = require("node:fs");
+const [file, mode] = process.argv.slice(2);
+const bytes = fs.readFileSync(file);
+if (mode === "flipped") { bytes[bytes.length - 64] ^= 0xff; fs.writeFileSync(file, bytes); }
+else fs.writeFileSync(file, bytes.subarray(0, Math.floor(bytes.length / 2)));
+NODE
+  PACK_DEST="$TMPDIR_EVAL/pack-corrupt-$pack_case"
+  if HOME="$HOME_DIR" CODEX_HOME="$PACK_DEST" CODEX_REAL_HOME="$PACK_DEST" \
+    FLOW_AGENTS_SKILLS_DIR="$TMPDIR_EVAL/pack-skills-$pack_case" NPM_CONFIG_CACHE="$NPM_CACHE" \
+    node "$PACK_ROOT/build/src/cli.js" init --runtime codex --global --yes >"$TMPDIR_EVAL/pack-$pack_case.out" 2>&1; then
+    echo "damaged bundle pack unexpectedly installed: $pack_case" >&2
+    exit 1
+  fi
+  grep -Fq 'bundle pack' "$TMPDIR_EVAL/pack-$pack_case.out"
+  grep -Fq 'required prebuilt Codex bundle is missing or invalid' "$TMPDIR_EVAL/pack-$pack_case.out"
+  [[ ! -e "$PACK_DEST" && ! -e "$TMPDIR_EVAL/pack-skills-$pack_case" && ! -e "$PACK_ROOT/dist" ]]
+  rm -rf "$PACK_ROOT"
+done
 
-# Runtime inventory corruption must fail before either destination is created.
+
+# Runtime inventory corruption must fail before either destination is created. The cases corrupt a built tree, so expand one first.
+node "$PACKAGE_ROOT/build/src/tools/bundle-pack-cli.js" extract "$PACKAGE_ROOT/dist" codex >/dev/null
 for runtime_case in missing changed extra panel; do
   case "$runtime_case" in
     missing) mv "$PACKAGE_ROOT/dist/codex/build/src/vendor/flow/index.mjs" "$TMPDIR_EVAL/flow-index.mjs" ;;
@@ -197,6 +236,7 @@ for runtime_case in missing changed extra panel; do
     extra) rm "$PACKAGE_ROOT/dist/codex/build/src/vendor/unowned.js" ;;
   esac
 done
+rm -rf "$PACKAGE_ROOT/dist"
 
 # The public installer must leave an executable runtime after all package and
 # cache state is removed, from a project with no node_modules of its own.

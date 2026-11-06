@@ -16,6 +16,7 @@ This page walks through three harness installs: Claude Code (the L2 reference ru
 - An `install.sh` that places the generated files at the host-expected paths.
 
 `flow-agents init` (from `npx @kontourai/flow-agents`) calls `install.sh` for the selected runtime.
+Published packages carry the built bundles in a single pack. The installer expands the selected bundle into a private temporary directory; a source checkout uses its generated `dist/` tree.
 
 ## Claude Code
 

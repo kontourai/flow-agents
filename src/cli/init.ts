@@ -11,6 +11,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
+import { isExpandedBundle, resolveBundle } from "../lib/bundle-store.js";
 import { acquireBundleBuildLock, buildAllBundles, refreshBundleBuildLock, releaseBundleBuildLock, startBundleBuildLockRefresher } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
@@ -985,12 +986,30 @@ export function ensureBundle(runtime: Runtime): string {
  * everything while accepting the arguments.
  */
 export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebuilt: boolean } {
+  // A published package carries the bundles as one pack, not as dist/ trees: expand the harness asked for and use it as is.
+  // Nothing is rebuilt there (a pack is the publisher's build), so a stale or damaged one is reported, never repaired.
+  let packed: ReturnType<typeof resolveBundle>;
+  try {
+    packed = resolveBundle(runtimeBundles[runtime]);
+  } catch (error) {
+    throw new Error(`the ${runtime} bundle in this package's bundle pack is missing or invalid (${(error as Error).message}); reinstall the package`);
+  }
+  if (packed?.fromPack) {
+    const installer = path.join(packed.dir, "install.sh");
+    if (!fs.existsSync(installer) || !installerSupportsPreserveExcludes(fs.readFileSync(installer, "utf8"))) {
+      throw new Error(`the ${runtime} bundle in this package's bundle pack is missing or out of date; reinstall the package`);
+    }
+    return { bundle: packed.dir, rebuilt: false };
+  }
   const bundle = path.join(root, "dist", runtimeBundles[runtime]);
   const installSh = path.join(bundle, "install.sh");
   const current = (): boolean =>
     fs.existsSync(installSh) && installerSupportsPreserveExcludes(fs.readFileSync(installSh, "utf8"));
   let rebuilt = false;
   if (!current()) {
+    if (!fs.existsSync(path.join(root, "src", "tools", "build-universal-bundles.ts"))) {
+      throw new Error(`the ${runtime} bundle is missing or invalid; reinstall the package`);
+    }
     // Serialize the rebuild across processes and RE-CHECK under the lock: concurrent init
     // processes finding dist/ stale at once used to race resetDir (ENOTEMPTY), and a waiter
     // that rebuilt anyway would delete the tree the winner's install had started reading.
@@ -1393,7 +1412,9 @@ export function installBundleArgs(
  * resetDir. Builders and init's read span now mutually exclude; the refresher child keeps
  * the lock fresh for however long the span runs.
  */
-function withBundleReadLock<T>(fn: () => T): T {
+function withBundleReadLock<T>(fn: () => T, bundle?: string): T {
+  // A bundle expanded from the pack lives in this process's own private directory: no builder can reset it.
+  if (bundle !== undefined && isExpandedBundle(bundle)) return fn();
   const lockDir = acquireBundleBuildLock();
   const stopRefresher = startBundleBuildLockRefresher(lockDir);
   try {
@@ -1670,7 +1691,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (options.global && options.runtime === "claude-code") {
       // Global commands consume a publisher-built runtime; a missing/corrupt artifact
       // must never trigger compilation or dependency installation in a consumer.
-      const bundle = path.join(root, "dist", runtimeBundles[options.runtime]);
+      let resolved: ReturnType<typeof resolveBundle>;
+      try {
+        resolved = resolveBundle(runtimeBundles[options.runtime]);
+      } catch (error) {
+        // A damaged pack is refused with the same words as a missing bundle, plus the integrity failure that explains it.
+        throw new Error(`required prebuilt Claude Code bundle is missing or invalid (${(error as Error).message}); reinstall the package`);
+      }
+      const bundle = resolved?.dir ?? path.join(root, "dist", runtimeBundles[options.runtime]);
       const installer = path.join(bundle, "install.sh");
       if (!fs.existsSync(installer) || !installerSupportsPreserveExcludes(fs.readFileSync(installer, "utf8"))) {
         throw new Error("required prebuilt Claude Code bundle is missing or invalid; reinstall the package, or regenerate with npm run build:bundles in a source checkout");
@@ -1836,7 +1864,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       } finally {
         fs.rmSync(overlay, { recursive: true, force: true });
       }
-      });
+      }, bundle);
       if (globalExit !== null) return globalExit;
       return configureWorkflowProviders(options);
     }
@@ -2038,7 +2066,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // #1288: a silent no-op and a 191-file overwrite must not both read as a bare success.
     for (const line of formatInstallSummaryLines(plan, options.dest, racedCreates)) console.log(line);
     return null;
-    });
+    }, bundle);
     if (guardedExit !== null) return guardedExit;
     const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies

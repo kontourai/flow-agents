@@ -1,4 +1,5 @@
 import {openInstalledKitReview} from '../kit-review.js';
+import { resolveBundle } from "../lib/bundle-store.js";
 import {kitSetupMain} from './kit-setup.js';
 import {executeInstalledKit} from '../kit-execution.js';
 import { workspaceKitMain } from "./workspace-kit.js";
@@ -679,9 +680,13 @@ function resolveBuiltinKitDest(flags: ReturnType<typeof parseArgs>["flags"]): Bu
  * error instead.
  */
 function resolveClaudeCodeBundleDir(): string {
-  const bundle = path.join(root, "dist", "claude-code");
+  // dist/claude-code in a checkout; in a published package, the claude-code bundle expanded from the package's bundle pack.
+  let bundle: string;
+  try { bundle = resolveBundle("claude-code")?.dir ?? path.join(root, "dist", "claude-code"); }
+  catch (error) { throw new Error(`claude-code bundle is invalid (${(error as Error).message}); reinstall the package`); }
   if (!fs.existsSync(path.join(bundle, "install.sh"))) {
-    throw new Error(`compiled claude-code bundle not found at ${bundle}; run 'npm run build:bundles' first`);
+    const remedy = fs.existsSync(path.join(root, "src", "tools", "build-universal-bundles.ts")) ? "run 'npm run build:bundles' first" : "reinstall the package";
+    throw new Error(`compiled claude-code bundle not found at ${bundle}; ${remedy}`);
   }
   return bundle;
 }

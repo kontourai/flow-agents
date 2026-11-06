@@ -12,6 +12,7 @@ The repo root stays canonical:
 - `src/` contains TypeScript CLI, runtime adapter, packaging, validation, context-map, and repository tooling source that compiles to `build/src/`.
 - `packaging/manifest.json` describes target-specific copy rules, profile definitions, substitutions, and model/provider mappings.
 - Generated bundles live under `dist/`, are intentionally untracked, and can be recreated at any time.
+- The published npm package does not contain `dist/`. `prepack` packs the built bundles into the single file `bundles/flow-agents-bundles.pack` (every distinct file once, each with its SHA-256), and `init`, `kit`, `workflow doctor`, `uninstall` and the Codex installer expand the harness they need into a private temporary directory. A built `dist/` in a checkout takes precedence. See `docs/decisions/published-package-contents.md`.
 
 For the full source/generated/runtime inventory, see [Repository Structure](../docs/repository-structure.md).
 
