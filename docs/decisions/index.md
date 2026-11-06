@@ -35,6 +35,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [model-routing](./model-routing.md) | current | Model routing |
 | [portable-host-integration](./portable-host-integration.md) | current | Portable host integration boundary |
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
+| [published-package-contents](./published-package-contents.md) | current | Published package contents and host memory entries |
 | [standing-directives](./standing-directives.md) | current | Standing directives |
 | [survey-evidence-flow-gates](./survey-evidence-flow-gates.md) | current | Survey evidence for paused Flow gates |
 | [three-hard-boundary-model](./three-hard-boundary-model.md) | needs-decision | Three-hard-boundary model |

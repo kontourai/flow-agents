@@ -1,5 +1,5 @@
 // #945/#980: packed Claude runtime survives eviction, using owned bundle assets.
-// Build bundles first. Keep the tested tarball when FLOW_AGENTS_PACK_EVIDENCE_DIR is set.
+// Build bundles first (the published package ships them as one bundle pack, not as dist/). Keep the tested tarball when FLOW_AGENTS_PACK_EVIDENCE_DIR is set.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,13 +37,20 @@ try {
   // that lock, and other static tests legitimately rebuild dist/.
   const { acquireBundleBuildLock, releaseBundleBuildLock } = await import('../../build/src/tools/build-universal-bundles.js');
   const lock = acquireBundleBuildLock();
-  try { ok(run('npm',['pack','--ignore-scripts','--json','--pack-destination',pack],{cwd:root})); }
+  try {
+    // --ignore-scripts skips prepack, so write the pack from the built dist/ the way prepack does.
+    ok(run(process.execPath,[path.join(root,'build/src/tools/bundle-pack-cli.js'),'pack'],{cwd:root}));
+    ok(run('npm',['pack','--ignore-scripts','--json','--pack-destination',pack],{cwd:root}));
+  }
   finally { releaseBundleBuildLock(lock); }
   const tarball=path.join(pack,fs.readdirSync(pack).find(n=>n.endsWith('.tgz')));
   fs.writeFileSync(path.join(pack,'SHA256SUMS'),`${digest(tarball)}  ${path.basename(tarball)}\n`);
   ok(run('tar',['-xzf',tarball,'-C',temp]));
   console.log('packed artifact extracted');
-  const source=path.join(temp,'package');assert(!fs.existsSync(path.join(source,'dist/.build-lock')));
+  const source=path.join(temp,'package');
+  // #1616: the tarball carries the bundles as one pack. No per-harness dist/, no build lock, no src/ or evals/.
+  assert(fs.existsSync(path.join(source,'bundles/flow-agents-bundles.pack')));
+  for(const unpublished of ['dist','src','evals'])assert(!fs.existsSync(path.join(source,unpublished)),`published package contains ${unpublished}/`);
   // Initial CLI may consume its normal npm dependencies. After eviction no module
   // from that tree is available; installed runtime is exercised offline below.
   fs.symlinkSync(path.join(root,'node_modules'),path.join(source,'node_modules'),'dir');
@@ -54,12 +61,18 @@ try {
   assert.match(dry.stdout,/\.flow-agents\/runtime\/scripts/);
   const invalid=path.join(home,'invalid');fs.mkdirSync(invalid);fs.writeFileSync(path.join(invalid,'settings.json'),'{broken');
   const invalidBefore=tree(invalid);const refused=cli(source,invalid,['--force']);assert.notEqual(refused.status,0);assert.match(refused.stderr,/not valid JSON/);assert.deepEqual(tree(invalid),invalidBefore);
-  const installer=path.join(source,'dist/claude-code/install.sh');fs.renameSync(installer,installer+'-saved');
-  const missingDest=path.join(home,'missing-bundle');const missing=cli(source,missingDest);assert.notEqual(missing.status,0);assert.match(missing.stderr,/required prebuilt Claude Code bundle/);assert(!fs.existsSync(missingDest));fs.renameSync(installer+'-saved',installer);
+  // With neither dist/ nor a usable pack there is no bundle; the install refuses before writing anything, and never compiles.
+  const packFile=path.join(source,'bundles/flow-agents-bundles.pack');fs.renameSync(packFile,packFile+'-saved');
+  const missingDest=path.join(home,'missing-bundle');const missing=cli(source,missingDest);assert.notEqual(missing.status,0);assert.match(missing.stderr,/required prebuilt Claude Code bundle/);assert(!fs.existsSync(missingDest));fs.renameSync(packFile+'-saved',packFile);
+  // A damaged pack is refused the same way (every file is checked against the pack's digests before it is written).
+  const packBytes=fs.readFileSync(packFile);const flipped=Buffer.from(packBytes);flipped[flipped.length-64]^=0xff;fs.writeFileSync(packFile,flipped);
+  const damagedDest=path.join(home,'damaged-pack');const damaged=cli(source,damagedDest);assert.notEqual(damaged.status,0);assert.match(damaged.stderr,/required prebuilt Claude Code bundle/);assert(!fs.existsSync(damagedDest));assert(!fs.existsSync(path.join(source,'dist')));fs.writeFileSync(packFile,packBytes);
   const sourceBefore=tree(source);
   ok(cli(source,dest));console.log('initial global install completed');assert.deepEqual(tree(source),sourceBefore);const settingsFile=path.join(dest,'settings.json');const settingsBytes=fs.readFileSync(settingsFile);const settings=JSON.parse(settingsBytes);assert.equal(settings.sentinel,'keep');
   ok(cli(source,dest));assert.deepEqual(fs.readFileSync(settingsFile),settingsBytes);
   const runtime=path.join(dest,'.flow-agents/runtime');
+  // The rest edits a built bundle, which takes precedence over the pack, so expand the Claude Code bundle next to the package first.
+  ok(run(process.execPath,[path.join(source,'build/src/tools/bundle-pack-cli.js'),'extract',path.join(source,'dist'),'claude-code']));
   // Simulate a new bundle revision: a hash-matching owned runtime file updates,
   // user hook/config and unrelated content survive, then repeat is idempotent.
   const upgradeRel='scripts/hooks/claude-telemetry-hook.js';

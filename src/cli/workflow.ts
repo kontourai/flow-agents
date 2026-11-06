@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
+import { resolveBundle } from "../lib/bundle-store.js";
 import * as path from "node:path";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
@@ -4155,7 +4156,7 @@ function validateCanonicalSessionDir(candidate: string): string {
 
 function verifyInstalledAssets(projectRoot: string, packageRoot: string, runtime: string): { ok: boolean; problems: string[]; hook_config: string | null } {
   const problems: string[] = [];
-  const bundleRoot = path.join(packageRoot, "dist", runtime);
+  const bundleRoot = resolveBundle(runtime, packageRoot)?.dir ?? path.join(packageRoot, "dist", runtime);
   for (const relativeRoot of ["build/src", "scripts/hooks"]) {
     const expectedRoot = path.join(bundleRoot, relativeRoot);
     if (!fs.existsSync(expectedRoot)) {
