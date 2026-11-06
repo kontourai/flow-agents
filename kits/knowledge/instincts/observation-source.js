@@ -1,16 +1,4 @@
-/**
- * Temporary injection seam for Ferry's importObservations API. The host owns
- * source bytes and commits the returned cursor after replay-safe downstream
- * effects. This shim does not parse files or commit cursors. Replace the
- * injected importer after the Ferry release containing kontourai/thread#80.
- */
-export function importObservationSource(importer, data, options) {
-  if (typeof importer !== 'function') throw new TypeError('observation importer must be a function');
-  if (!options || typeof options.sourceId !== 'string' || !options.sourceId.trim()) throw new TypeError('sourceId must be a non-empty string');
-  // Ferry owns parsing, cursor validation, omission limits and replay checks.
-  // Copy the options so an adapter cannot mutate the caller's saved cursor.
-  return importer(data, structuredClone(options));
-}
+import { importObservations } from '@kontourai/ferry';
 
 const sourceError = (code, message) => Object.assign(new Error(message), { code });
 
@@ -38,7 +26,7 @@ export function ingestObservationSources(sources, saved, seen, toResidue, { isol
     const old = savedSource?.cursor;
     if (savedSource !== undefined && (!old || typeof old !== 'object' || old.version !== 1 || old.sourceId !== source.sourceId || !Number.isSafeInteger(old.lines) || old.lines < 0 || !/^[a-f0-9]{64}$/.test(old.digest ?? ''))) throw sourceError('OBSERVATION_CURSOR_INVALID', 'invalid observation cursor');
     let result;
-    try { result = importObservationSource(source.importer, source.data, { sourceId: source.sourceId, maxMalformed: 0, ...(old ? { cursor: old } : {}) }); }
+    try { result = (source.importer ?? importObservations)(source.data, structuredClone({ sourceId: source.sourceId, maxMalformed: 0, ...(old ? { cursor: old } : {}) })); }
     catch (cause) { const error = sourceError('OBSERVATION_IMPORT_FAILED', 'observation importer failed'); error.cause = cause; throw error; }
     if (!result || !Array.isArray(result.events) || !result.cursor || result.cursor.version !== 1 || result.cursor.sourceId !== source.sourceId || !Number.isSafeInteger(result.cursor.lines) || result.cursor.lines < 0 || !/^[a-f0-9]{64}$/.test(result.cursor.digest ?? '') || (old && result.cursor.lines < old.lines) || !Number.isSafeInteger(result.malformed) || result.malformed !== 0 || ![0, 1].includes(result.partial)) throw sourceError('OBSERVATION_RESULT_INVALID', 'observation import was incomplete or invalid');
     const nextTotal = totalEvents + result.events.length;

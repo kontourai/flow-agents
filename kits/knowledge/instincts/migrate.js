@@ -87,7 +87,7 @@ export function planLegacyInstinct(value, sources, sourceNamespace, { visibility
   return { legacyRaw, observationRaw, candidate, decision, requestKey: `knowledge.instinct-migration:${identity}` };
 }
 
-/** The caller supplies Ferry's importer and explicitly authorized source roots. */
+/** Preview explicitly authorized source roots. */
 export function previewMigration({ legacyRoot, instinctsRoot, sourceNamespace, sourceMap = [], sourceProjects = [], importer }) {
   if (typeof sourceNamespace !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(sourceNamespace)) throw new Error('source namespace must be a stable opaque identifier');
   if (!Array.isArray(sourceMap) || sourceMap.length > MAX_EVENTS) throw new Error('source map must be a bounded array');
@@ -150,27 +150,25 @@ export function previewMigration({ legacyRoot, instinctsRoot, sourceNamespace, s
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  let legacyRoot, instinctsRoot, importerPath, sourceNamespace, sourceMapPath, sourceProjectsPath; let dryRun = false; const seen = new Set();
+  let legacyRoot, instinctsRoot, sourceNamespace, sourceMapPath, sourceProjectsPath; let dryRun = false; const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
     if (seen.has(argv[i])) throw new Error('duplicate option');
     seen.add(argv[i]);
     if (argv[i] === '--dry-run') dryRun = true;
     else if (argv[i] === '--source-namespace') { sourceNamespace = argv[++i]; if (!sourceNamespace || !/^[A-Za-z0-9._:-]{1,128}$/.test(sourceNamespace)) throw new Error('--source-namespace requires a stable opaque identifier'); }
-    else if (['--legacy-root', '--instincts-root', '--importer', '--source-map', '--source-projects'].includes(argv[i])) { const flag = argv[i]; const value = argv[++i]; if (!value || !path.isAbsolute(value)) throw new Error(`${flag} requires an absolute path`); if (flag === '--legacy-root') legacyRoot = value; else if (flag === '--instincts-root') instinctsRoot = value; else if (flag === '--source-map') sourceMapPath = value; else if (flag === '--source-projects') sourceProjectsPath = value; else importerPath = value; }
-    else throw new Error('usage: migrate --dry-run --legacy-root ABS --source-namespace ID --importer ABS [--instincts-root ABS] [--source-map ABS] [--source-projects ABS]');
+    else if (['--legacy-root', '--instincts-root', '--source-map', '--source-projects'].includes(argv[i])) { const flag = argv[i]; const value = argv[++i]; if (!value || !path.isAbsolute(value)) throw new Error(`${flag} requires an absolute path`); if (flag === '--legacy-root') legacyRoot = value; else if (flag === '--instincts-root') instinctsRoot = value; else if (flag === '--source-map') sourceMapPath = value; else if (flag === '--source-projects') sourceProjectsPath = value; }
+    else throw new Error('usage: migrate --dry-run --legacy-root ABS --source-namespace ID [--instincts-root ABS] [--source-map ABS] [--source-projects ABS]');
   }
-  if (!dryRun || !legacyRoot || !importerPath || !sourceNamespace) throw new Error('usage: migrate --dry-run --legacy-root ABS --source-namespace ID --importer ABS [--instincts-root ABS] [--source-map ABS] [--source-projects ABS]');
-  const importer = (await import(pathToFileURL(importerPath).href)).importObservations;
-  if (typeof importer !== 'function') throw new Error('importer must export importObservations');
+  if (!dryRun || !legacyRoot || !sourceNamespace) throw new Error('usage: migrate --dry-run --legacy-root ABS --source-namespace ID [--instincts-root ABS] [--source-map ABS] [--source-projects ABS]');
   let sourceMap = [];
   if (sourceMapPath !== undefined) { try { sourceMap = JSON.parse(readStable(sourceMapPath)); } catch { throw new Error('source map cannot be read as JSON'); } }
   let sourceProjects = [];
   if (sourceProjectsPath !== undefined) { try { sourceProjects = JSON.parse(readStable(sourceProjectsPath)); } catch { throw new Error('source projects cannot be read as JSON'); } }
-  return previewMigration({ legacyRoot, instinctsRoot, sourceNamespace, sourceMap, sourceProjects, importer });
+  return previewMigration({ legacyRoot, instinctsRoot, sourceNamespace, sourceMap, sourceProjects });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (process.argv.length === 3 && process.argv[2] === '--help') {
-    process.stdout.write('Usage: node kits/knowledge/instincts/migrate.js --dry-run --legacy-root ABS --source-namespace ID --importer ABS [--instincts-root ABS] [--source-map ABS] [--source-projects ABS]\nChoose a stable source namespace for the original store and use it for its copies. The importer must be trusted code exporting importObservations. Preview counts and planned shapes only. No records are written.\n');
+    process.stdout.write('Usage: node kits/knowledge/instincts/migrate.js --dry-run --legacy-root ABS --source-namespace ID [--instincts-root ABS] [--source-map ABS] [--source-projects ABS]\nChoose a stable source namespace for the original store and use it for its copies. Preview counts and planned shapes only. No records are written.\n');
   } else main().then((result) => process.stdout.write(`${JSON.stringify(result)}\n`)).catch((error) => { process.stderr.write(`migration preview failed: ${error.message}\n`); process.exitCode = 1; });
 }

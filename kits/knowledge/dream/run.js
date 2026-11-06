@@ -220,7 +220,7 @@ function pruneReports(dir) {
  * @property {(name: string, root: string) => unknown} registerRoot
  * @property {string} root absolute, host-authorised memory root
  * @property {string} rootName
- * @property {Array<{sourceId: string, project: string|null, data: string, importer: Function}>} [observationSources] host-authorized inputs with a stable opaque ID and explicit project or global scope
+ * @property {Array<{sourceId: string, project: string|null, data: string}>} [observationSources] host-authorized inputs with a stable opaque ID and explicit project or global scope
  * @property {Function} [extract] model-backed `MemoryExtract` (see model.js); not needed for a dry run
  * @property {() => object[] | Promise<object[]>} [reviewDecisions] Survey review decisions, for brief labels and metrics
  * @property {(batch: {runId: string, decisions: object[], reviewItems: object[], metrics: object|null}) => unknown} publish
