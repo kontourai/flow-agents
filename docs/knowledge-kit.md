@@ -34,9 +34,8 @@ claims may enter a brief.
 
 The migration command produces a dry-run plan for source-backed instincts,
 retaining confidence in the compiled candidates. The Kit includes observation
-ingest, instinct analysis and instinct review skills. Live migration,
-retirement of the old capture path and schedule activation require operator
-action. See the [dream guide](../kits/knowledge/docs/dream.md) for the host
+ingest, instinct analysis and instinct review skills. A live migration command is not implemented. The operator must run the live
+migration, retire the separate instinct-analysis job and archive its store. See the [dream guide](../kits/knowledge/docs/dream.md) for the host
 contract and retirement checklist.
 
 **Store adapters** — two adapters ship:
