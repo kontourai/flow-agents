@@ -1215,6 +1215,27 @@ test('tool observations replay by stable request key after a crash before cursor
   assert.equal(store.calls.proposeCreate, after, 'saved cursor emits no new proposals');
 });
 
+test('released Ferry observations replay safely after a crash and stop at the saved cursor', async (t) => {
+  const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
+  const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract();
+  const sourceId = 'released-ferry-replay';
+  const data = `${JSON.stringify({ timestamp: NOW_ISO, session: 'fixture-session', project_id: 'fixture', project_name: 'fixture', event: 'tool_complete', tool: 'shell', output: "I switched to banker's rounding on the total." })}\n`;
+  // No injected importer: this exercises the package export used by the host.
+  const host = hostFor(ws, store, extract, { observationSources: [{ sourceId, project: null, data }] });
+  await assert.rejects(runDream(host, runOptions(ws, { onStage: (stage) => { if (stage === 'cursor') throw new Error('crash before cursor'); } })), /crash before cursor/);
+  assert.equal(fs.existsSync(ws.cursorFile), false);
+  assert.equal((await store.listProposals()).length, 2);
+  const before = store.calls.proposeCreate;
+  await runDream(host, runOptions(ws));
+  assert.equal(store.calls.proposeCreate, before + 2, 'replay retries both stable keys');
+  assert.equal((await store.listProposals()).length, 2, 'replay adds no duplicate proposals');
+  assert.equal(JSON.parse(fs.readFileSync(ws.cursorFile, 'utf8')).observations[`source:${sourceId}`].cursor.lines, 1);
+  const after = store.calls.proposeCreate;
+  const replay = await runDream(host, runOptions(ws));
+  assert.equal(replay.ingest.observations.events_emitted, 0);
+  assert.equal(store.calls.proposeCreate, after, 'the saved cursor creates no proposals');
+});
+
 test('observation cursor waits for all events when the run cap defers work', async (t) => {
   const ws = workspace(); t.after(ws.cleanup); fs.writeFileSync(ws.telemetryFile, '');
   const store = new FakeCorpusStore(ws.memoryRoot); const extract = await scriptedExtract(); const sourceId = 'fixture-cap';
