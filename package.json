@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "9.12.0",
+  "version": "9.13.0",
   "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
@@ -358,8 +358,8 @@
     "kit": "npm run build --silent && node build/src/cli.js kit",
     "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources",
     "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs",
-    "docs:check": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus check",
-    "docs:build": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus build",
+    "docs:check": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/b127e35a818b532369843731b3c64792baade83e -- corpus check",
+    "docs:build": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/b127e35a818b532369843731b3c64792baade83e -- corpus build",
     "test:delegation-rounds": "npm run build --silent && node --test src/cli/delegation-group-rounds.test.mjs src/cli/delegation-flow-runtime.test.mjs"
   },
   "devDependencies": {
@@ -391,7 +391,7 @@
   },
   "optionalDependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
-    "neo4j-driver": "^5.28.0"
+    "neo4j-driver": "^6.3.0"
   },
   "packageManager": "pnpm@11.25.0"
 }

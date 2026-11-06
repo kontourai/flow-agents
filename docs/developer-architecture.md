@@ -6,7 +6,7 @@ title: Developer Architecture
 
 This guide is the local starting point for Flow Agents maintainers who need to understand how this repository coordinates with Flow, Surface, Veritas, and Builder Kit. It describes the architecture from the Flow Agents side only; product-specific runtime details remain in their owning products.
 
-**Package identity:** This source guide accompanies `@kontourai/flow-agents` version `9.12.0`, as declared in [`package.json`](../package.json). <!-- x-release-please-version -->
+**Package identity:** This source guide accompanies `@kontourai/flow-agents` version `9.13.0`, as declared in [`package.json`](../package.json). <!-- x-release-please-version -->
 
 Release Please updates this binding alongside package metadata through the
 `extra-files` entry in [`release-please-config.json`](../release-please-config.json).
@@ -21,10 +21,35 @@ the build checks that artifact before compiling. A YAML dependency update must
 regenerate it alongside the lockfile. The optional Anthropic SDK remains behind
 the optional-dependency boundary.
 
+The Knowledge Kit also loads `neo4j-driver` 6.3 lazily as an optional dependency.
+Its connection adapter uses the public `driver`, `auth.basic`, session and
+connectivity APIs; selecting no graph or an unavailable graph retains the file
+provider fallback. Provider unit and conformance tests use an injected driver.
+They do not qualify a live Neo4j server or database migration.
+
 The deterministic reviewed-grounding reference declares Forage as a development
 dependency for its public snapshot store, reference builder and resolver. This
 keeps acquisition persistence and exact replay with their owning package while
 Lookout consumes the recorder's last handled snapshot reference.
+
+## Documentation tooling
+
+`corpus.json` maps canonical guides to the source, schemas, integrations and hooks
+they explain. Local `docs:check` and `docs:build` use the same reviewed Corpus
+revision selected by the docs workflow. A source change
+requires updated covering prose or a new complete local byte review explaining
+why the existing claims remain accurate; the [review contract](https://github.com/kontourai/corpus/blob/b127e35a818b532369843731b3c64792baade83e/docs/related-content.md#review-an-unchanged-covering-document)
+defines that alternative. Veritas governs evidence; Corpus checks the declared
+relationships and reviewed bytes. Neither establishes live runtime or published
+site correctness.
+
+This guide is also the fallback review owner for `src/**`: changes to CLI
+entrypoints, runtime modules and shared helpers require an architecture review
+even when no narrower guide is mapped. Specific contract and integration guides
+retain their own coverage. Narrative schemas belong to this source/schema
+boundary; workspace-kit and retrospective schemas additionally select their
+respective authoring and feedback guides. The engine-host integration reference
+is reviewed here alongside its packaged runtime imports.
 
 ## Orientation
 
