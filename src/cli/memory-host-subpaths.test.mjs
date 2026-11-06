@@ -135,6 +135,11 @@ test("recall never quotes a displayed value that is absent from the source excer
   assert.equal(result.outcome, "abstained");
   assert.equal(result.results[0].reason, "no_passage_on_question");
   assert.equal(result.results[0].passage, undefined);
+  const correctionOnly = recall.recallMemoryClaims({ items: [{ ...template, claim }], reviewDecisions, question: "violet", now: "2026-11-02T12:00:00.000Z" });
+  assert.equal(correctionOnly.results.length, 1, "a term found only in the corrected value selects the claim");
+  assert.equal(correctionOnly.results[0].review.label, "corrected");
+  assert.equal(correctionOnly.outcome, "abstained");
+  assert.equal(correctionOnly.results[0].passage, undefined);
 });
 
 test("recall judges currency by the brief's rules: a rival contests, a successor replaces, an ended interval is not in effect", async (t) => {
