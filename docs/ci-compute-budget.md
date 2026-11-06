@@ -101,6 +101,17 @@ without an ordering dependency, and any callee `concurrency` other than Pages'
 own deployment group, so a pinned callee cannot reintroduce a shared queue.
 Updating a pin requires retaining and reviewing its new expansion.
 
+The Docs gate explicitly selects Docs Kit (Corpus repository) revision
+`b127e35a818b532369843731b3c64792baade83e` through the callee's
+`corpus-ref` input. Local `npm run docs:check` and `npm run docs:build` use that
+same revision. This changes source-bound freshness review behavior without
+changing the callee snapshot, runner expansion, permissions or concurrency.
+PR and merge-group checks remain strict against their base: unchanged covering
+prose requires a new complete local source/document byte review under the
+[review contract](https://github.com/kontourai/corpus/blob/b127e35a818b532369843731b3c64792baade83e/docs/related-content.md#review-an-unchanged-covering-document).
+Pages retains its independently pinned build and deployment implementation;
+this gate selection does not qualify publication.
+
 ## Job execution deadlines
 
 Source and Static has a 30-minute deadline, matching Runtime and Kit. In

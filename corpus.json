@@ -84,7 +84,13 @@
     },
     {
       "source": "docs/architecture-engine-and-kits.md",
-      "section": "Concepts"
+      "section": "Concepts",
+      "covers": [
+        "src/flow-kit/**",
+        "src/runtime-adapters.ts",
+        "kits/catalog.json",
+        "kits/*/kit.json"
+      ]
     },
     {
       "source": "docs/operating-layers.md",
@@ -97,11 +103,36 @@
     {
       "source": "docs/developer-architecture.md",
       "section": "Concepts",
-      "covers": ["src/tools/build-universal-bundles.ts", "src/tools/common.ts", "src/lib/package-version.ts", "src/lib/kit-flow-binding.ts", "src/lib/flow-resolver.ts", "src/lib/kit-registry.ts", "src/builder-gate-action-envelope.ts", "src/cli/narrative-sources.ts", "scripts/install-codex-home.sh", "scripts/verify-runtime-imports.js", "src/cli/init.ts", "src/cli/uninstall.ts", "package.json"]
+      "covers": [
+        "src/tools/build-universal-bundles.ts",
+        "src/tools/common.ts",
+        "src/lib/package-version.ts",
+        "src/lib/kit-flow-binding.ts",
+        "src/lib/flow-resolver.ts",
+        "src/lib/kit-registry.ts",
+        "src/builder-gate-action-envelope.ts",
+        "src/cli/narrative-sources.ts",
+        "scripts/install-codex-home.sh",
+        "scripts/verify-runtime-imports.js",
+        "src/cli/init.ts",
+        "src/cli/uninstall.ts",
+        "package.json",
+        "src/index.ts",
+        "src/knowledge-learning*.ts",
+        "src/memory-*.ts",
+        "src/retrospective-*.ts",
+        "pnpm-lock.yaml"
+      ]
     },
     {
       "source": "docs/workflow-artifact-lifecycle.md",
-      "section": "Concepts"
+      "section": "Concepts",
+      "covers": [
+        "src/cli/promote-workflow-artifact.ts",
+        "src/cli/workflow-artifact-cleanup-audit.ts",
+        "src/lib/local-artifact-root.ts",
+        "src/lib/artifact-residue-ignore.ts"
+      ]
     },
     {
       "source": "docs/verifiable-trust.md",
@@ -152,11 +183,27 @@
     },
     {
       "source": "docs/configurable-workflow-routing.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/lib/effective-flow-agents-config.ts",
+        "schemas/flow-agents-settings.schema.json",
+        "schemas/flow-agents-core-config.schema.json",
+        "schemas/flow-agents-kit-config.schema.json"
+      ]
     },
     {
       "source": "docs/work-item-adapters.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/cli/merge-change.ts",
+        "src/cli/pull-work-provider.ts",
+        "src/cli/publish-change-helper.ts",
+        "src/publish-change-operation-authority.ts",
+        "src/merge-change-operation-authority.ts",
+        "src/lib/work-item-*.ts",
+        "schemas/backlog-provider-settings.schema.json",
+        "schemas/change-provider-settings.schema.json"
+      ]
     },
     {
       "source": "docs/knowledge-kit.md",
@@ -165,7 +212,8 @@
         "kits/knowledge/ingest/**",
         "kits/knowledge/adapters/flow-runner/classification.js",
         "kits/knowledge/flows/ingest.flow.json",
-        "kits/knowledge/adapters/shared/owned-artifacts.js"
+        "kits/knowledge/adapters/shared/owned-artifacts.js",
+        "schemas/knowledge/**"
       ]
     },
     {
@@ -192,15 +240,31 @@
     },
     {
       "source": "docs/integrations/harness-install.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "src/tools/build-universal-bundles.ts",
+        "src/tools/common.ts",
+        "src/cli/init.ts",
+        "src/cli/uninstall.ts",
+        "scripts/dogfood.js",
+        "scripts/install-codex-home.sh",
+        "packaging/manifest.json"
+      ]
     },
     {
       "source": "docs/integrations/framework-adapter.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "integrations/strands/**",
+        "integrations/strands-ts/**"
+      ]
     },
     {
       "source": "docs/integrations/conformance.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "packaging/conformance/**"
+      ]
     },
     {
       "source": "docs/integrations/knowledge-kit-live.md",
@@ -221,15 +285,38 @@
     },
     {
       "source": "docs/spec/runtime-hook-surface.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "scripts/hooks/**",
+        "context/scripts/hooks/**",
+        "src/runtime-adapters.ts",
+        "src/tools/build-universal-bundles.ts",
+        "packaging/manifest.json"
+      ]
     },
     {
       "source": "docs/spec/builder-flow-runtime.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/builder-*.ts",
+        "src/external-lifecycle-authority.ts",
+        "src/sealed-execution.ts",
+        "packaging/lifecycle-authority/**",
+        "schemas/builder-lifecycle-authorization.schema.json",
+        "schemas/lifecycle-authority-keys.schema.json"
+      ]
     },
     {
       "source": "docs/flow-kit-repository-contract.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/flow-kit/**",
+        "src/cli/kit.ts",
+        "src/runtime-adapters.ts",
+        "src/kit-review.ts",
+        "schemas/kit-review-request.schema.json",
+        "kits/catalog.json"
+      ]
     },
     {
       "source": "docs/kontour-resource-contract.md",
@@ -237,19 +324,31 @@
     },
     {
       "source": "docs/workflow-shared-contracts.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "context/contracts/**",
+        "schemas/workflow-*.schema.json",
+        "schemas/review-artifact.schema.json",
+        "schemas/run-correlation-envelope.schema.json"
+      ]
     },
     {
       "source": "docs/kit-observability-contribution-contract.md",
       "section": "Reference",
       "covers": [
         "src/kit-observability-contract.ts",
-        "src/kit-observability-conformance.ts"
+        "src/kit-observability-conformance.ts",
+        "schemas/kit-observability-*.schema.json"
       ]
     },
     {
       "source": "docs/docker-worker-adapter.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "integrations/codex-host/**",
+        "src/kit-execution.ts",
+        "src/kit-execution-child.ts"
+      ]
     },
     {
       "source": "docs/system-git-provenance.md",
@@ -257,11 +356,19 @@
     },
     {
       "source": "docs/specs/harness-capability-matrix.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/lib/capability-declarations.ts",
+        "src/tools/generate-capability-matrix.ts"
+      ]
     },
     {
       "source": "docs/specs/host-integration-conformance.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/conduit-host-integration.ts",
+        "src/tools/generate-host-conformance.ts"
+      ]
     },
     {
       "source": "docs/specs/economics-record-contract.md",
@@ -490,7 +597,10 @@
         "src/delegation-continuation-receipt.ts",
         "src/delegation-rounds-recipient.ts",
         "src/delegation-authority-service-v3.ts",
-        "src/delegation-authority-local-file-v3.ts"
+        "src/delegation-authority-local-file-v3.ts",
+        "schemas/delegation-*.schema.json",
+        "src/delegation-flow-runtime.ts",
+        "src/delegation-flow-bindings.ts"
       ]
     },
     {
