@@ -1032,6 +1032,7 @@ test("a malformed measurement_basis is never trusted or carried forward: it is r
   const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), "hello"]));
   const malformed = [
     { measured_on: "bogus" },
+    { measured_on: "bogus", thresholds: { min_occurrences: 5, min_sessions: 3 }, decided_at: "2026-10-01T00:00:00Z" }, // only measured_on wrong
     { measured_on: "inferred", thresholds: "x" },                                        // would be trusted as inferred
     { measured_on: "human" },                                                            // no thresholds, no decided_at
     { measured_on: "inferred", thresholds: { min_occurrences: 0, min_sessions: 3 }, decided_at: "2026-10-01T00:00:00Z" },
