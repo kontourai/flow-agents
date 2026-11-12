@@ -57,13 +57,14 @@ import { declaredFlowStepIds, declaredKitFlows, flowDefinitionResolverContractIs
  * which door refused them and re-run the exact command.
  */
 export function flowAdmissionRefusal(flow: string, repoRoot: string, surface: string): string | null {
-  const declarations = declaredKitFlows(repoRoot);
+  const skippedSources: string[] = [];
+  const declarations = declaredKitFlows(repoRoot, skippedSources);
   // The FIRST declaration in root order is the authorizing one — a project kit can add a flow but
   // can never shadow a packaged one, matching what the run binding has always done.
   const declaration = declarations.find((candidate) => candidate.flowId === flow);
   if (!declaration) {
     const ids = [...new Set(declarations.map((candidate) => candidate.flowId))].sort();
-    return `${surface} ${JSON.stringify(flow)} is not a flow declared by the installed kits; declared flows: ${ids.length > 0 ? ids.join(", ") : "<none>"}`;
+    return `${surface} ${JSON.stringify(flow)} is not a flow declared by the installed kits; declared flows: ${ids.length > 0 ? ids.join(", ") : "<none>"}${skippedSources.length ? `; skipped kit sources: ${skippedSources.join("; ")}` : ""}`;
   }
 
   const definition = declaredFlowDefinition(declaration);
