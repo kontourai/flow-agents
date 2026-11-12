@@ -23,6 +23,7 @@ Concrete engine pieces in this repository include:
 - **Runtime and harness adapters** — Flow Agents compiles the same canonical policy classes to host surfaces such as Claude Code, Codex, Kiro, opencode, pi, and framework adapters. The Runtime Hook Surface spec defines the runtime-neutral vocabulary.
 - **SDK, evidence, and trust primitives** — workflow sidecars, trust bundles, evidence records, command capture, and CI reconciliation give gates something inspectable to evaluate instead of relying on chat memory.
 - **Kit validation framework** — `kit.json` is validated as a Flow Kit container, then Flow Agents validates extension fields such as `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies`, `workflow_triggers`, and `hook_influence_expectations`.
+  A kit eval may be a `*.test.js` file. The published package excludes test files and lists declared evals by path, so declaring an eval (as the Knowledge Kit does for its adapter conformance suites) also needs a `files` entry; the packaging check fails without one.
 
 The important boundary: the engine owns the generic process machinery, not the domain workflow. A coding delivery workflow, a knowledge-store workflow, and an agentless CI evidence workflow all pass through the same container and gate model.
 

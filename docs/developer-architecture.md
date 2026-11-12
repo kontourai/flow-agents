@@ -32,6 +32,22 @@ dependency for its public snapshot store, reference builder and resolver. This
 keeps acquisition persistence and exact replay with their owning package while
 Lookout consumes the recorder's last handled snapshot reference.
 
+The Knowledge Kit's dream run loads `@kontourai/traverse` lazily for schema-guided
+extraction, so Traverse is an exact runtime dependency, not a development one.
+`scripts/check-shipped-dependencies.mjs` (the `shipped-runtime-dependencies` CI
+check) enforces that class: it lists the files `npm pack` would publish, parses
+each shipped JavaScript or TypeScript source, and fails when a static import,
+string-literal dynamic import or `require` names a package outside
+`dependencies`, `peerDependencies` and `optionalDependencies`. A second pass
+covers `require.resolve` and calls through a `createRequire` result, which esbuild
+does not report. Exemptions carry a stated reason in the script. Non-literal
+specifiers and Node code embedded in shell scripts are outside its view.
+
+Test files (`*.test.js`, `*.test.mjs`, `*.test.cjs`) are excluded from the package
+by `files` negations, except the kit evals a `kit.json` declares, which `files`
+re-includes by path. The same check fails when a declared kit asset is missing
+from the pack, so a new test-file eval needs its own `files` entry.
+
 ## Documentation tooling
 
 `corpus.json` maps canonical guides to the source, schemas, integrations and hooks
