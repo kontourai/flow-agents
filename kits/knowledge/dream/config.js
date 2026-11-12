@@ -36,9 +36,14 @@ export const PASS_ENV_REFUSED = Object.freeze([
   "PYTHONSTARTUP", "PYTHONPATH", "PYTHONHOME",
   "PERL5OPT", "PERL5LIB", "PERLLIB", "RUBYOPT", "RUBYLIB",
   "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS",
+  "GIT_CONFIG", "GIT_SSH_COMMAND", "GIT_SSH", "GIT_EXEC_PATH", "GIT_ASKPASS", "SSH_ASKPASS", "GCONV_PATH",
 ]);
-/** Name prefixes `runtime.passEnv` refuses: the macOS dynamic loader's variables. */
-export const PASS_ENV_REFUSED_PREFIXES = Object.freeze(["DYLD_"]);
+/**
+ * Name prefixes `runtime.passEnv` refuses: the macOS dynamic loader's variables, and git's environment configuration
+ * (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n/VALUE_n, GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM, GIT_CONFIG_PARAMETERS, ...), which can
+ * set any git option, including commands git runs.
+ */
+export const PASS_ENV_REFUSED_PREFIXES = Object.freeze(["DYLD_", "GIT_CONFIG_"]);
 const refusedPassEnv = (name) => {
   const upper = name.toUpperCase();
   return PASS_ENV_REFUSED.includes(upper) || PASS_ENV_REFUSED_PREFIXES.some((prefix) => upper.startsWith(prefix));

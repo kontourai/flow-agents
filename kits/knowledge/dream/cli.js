@@ -12,6 +12,8 @@
  * under `--dry-run`, and the host must then create and write nothing; a host whose
  * memory root does not exist yet returns no `store` then, see storeForMissingRoot):
  *   { store, registerRoot, root, rootName, publish, runtime?, extract?, reviewDecisions? }
+ * `publish` must be idempotent: a run that is interrupted or crashes after publishing does not commit its cursor, so
+ * the next run publishes the same batch again.
  * With neither `runtime` nor `extract`, the model is the config's `runtime` (the
  * Claude Code CLI) when it names one, and otherwise the Datum role named by the
  * config (default `extraction-default`); either way it is a Relay runtime routed
@@ -26,7 +28,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { PROCESS_TERMINATION_GRACE_MS } from "@kontourai/relay/process";
 
@@ -135,7 +137,10 @@ function abortOnSignals() {
   };
   for (const name of Object.keys(SIGNAL_EXIT)) {
     handlers[name] = () => {
-      if (received) process.exit(SIGNAL_EXIT[name]);
+      if (received) {
+        fs.writeSync(2, "dream: interrupted twice; stopping claude processes\n");
+        process.exit(SIGNAL_EXIT[name]);
+      }
       received = name;
       controller.abort(dreamError("DREAM_INTERRUPTED", `stopped by ${name}`));
     };
@@ -255,6 +260,16 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** Whether this module is the program node was started with, compared by real path, so a symlinked path still runs it. */
+function isEntryPoint(argv1) {
+  if (!argv1) return false;
+  try {
+    return fs.realpathSync(argv1) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint(process.argv[1])) {
   process.exitCode = await main(process.argv.slice(2), { handleSignals: true });
 }
