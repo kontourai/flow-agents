@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "repository": "kontourai/flow-agents",
+  "reviews": [
+    {
+      "id": "public-workflow-cli-stamped-status-function",
+      "reviewedAt": "2026-11-12T00:00:00Z",
+      "note": "src/cli/workflow-sidecar.ts changed only how the checkpoint seal and render-trust-panel choose a Surface status function: both now re-derive a stored trust.bundle with the version stamped in its source instead of the installed Surface's default, and refuse a stamp the installed Surface cannot evaluate. docs/public-workflow-cli.md describes when and against which head checkpoints are sealed and never states which status function derives a sealed report or the trust panel, so every statement in it remains accurate.",
+      "limits": "Source and document byte review only. Does not verify sealing or trust-panel rendering at runtime, and does not review other documents that cover this file.",
+      "inputs": [
+        {
+          "path": "src/cli/workflow-sidecar.ts",
+          "sha256": "8b85f74ea1edf71504d1ab8a347b8c320d5395917c86ce2f2da597c8431ee572"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/public-workflow-cli.md",
+          "sha256": "79e198bed34dc9c33b5673837fcfc0f2bbe844a4694c3029000afe1d3f242e27"
+        }
+      ]
+    }
+  ]
+}

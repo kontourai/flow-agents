@@ -90,9 +90,11 @@ Two behavior changes apply to existing callers that pass only
 Both engines share every trust boundary except the sandbox, and that
 difference is disclosed rather than papered over:
 
-- **codex** executes inside the pinned official `openai/codex-action` with an
-  OS-level read-only sandbox, `drop-sudo`, and provider-side schema
-  enforcement of the assessment.
+- **codex** executes inside the pinned official `openai/codex-action` (v1.13)
+  with an OS-level read-only sandbox, `drop-sudo`, and provider-side schema
+  enforcement of the assessment. On Linux, that action's `drop-sudo` needs
+  unprivileged user namespaces, `setfacl` (the `acl` package) and ACL support
+  on `/run`; a runner without them fails closed before Codex starts.
 - **kiro** has no equivalent OS sandbox. Containment is CLI tool policy only:
   the run trusts the three read-only file tools, `fs_read` (the CLI's alias
   for `read`), `grep`, and `glob` — no shell, no write tools, no network
