@@ -102,6 +102,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check hachure-boundary
 
+      - name: Shipped runtime dependencies
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check shipped-runtime-dependencies
+
       - name: Decision registry
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check decision-registry

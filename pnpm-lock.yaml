@@ -38,6 +38,9 @@ importers:
       '@kontourai/thread':
         specifier: 0.5.0
         version: 0.5.0
+      '@kontourai/traverse':
+        specifier: 5.0.3
+        version: 5.0.3(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
@@ -51,9 +54,6 @@ importers:
       '@kontourai/lookout':
         specifier: 0.8.9
         version: 0.8.9(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
-      '@kontourai/traverse':
-        specifier: 5.0.3
-        version: 5.0.3(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/veritas':
         specifier: 1.12.1
         version: 1.12.1(@kontourai/survey@8.4.0(typescript@7.0.2))(zod@4.6.7)
