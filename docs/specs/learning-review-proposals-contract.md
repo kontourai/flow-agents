@@ -390,9 +390,10 @@ script and the advisory-only guardrails.
 
 ```json
 {
-  "proposal_id": "correction-recurrence-<target.kind>-<theme.id>[-after-<decision time>]",
+  "proposal_id": "correction-recurrence-<target.kind>-<theme.id>[-after-<decision time>]-<all | r<8 hex>>",
   "source": { "family": "correction-recurrence", "producer": "knowledge.learn", "contract_version": "0.2", "classifier_version": "1" },
   "scope": { "kind": "repo", "repo": "~/dev/<repository main worktree>" },
+  "authority": "human | inferred",
   "target": { "kind": "agents-md | skill | hook | veritas-check", "id": "<rule file name, or the theme id>" },
   "pattern": "correction-recurrence",
   "theme": { "id": "<stable slug>", "label": "<the rule, at most 15 words>" },
@@ -424,9 +425,16 @@ script and the advisory-only guardrails.
   `<harness>:<session id>`, `message_id`) with a scrubbed excerpt of at most 200 bytes. At most 8
   are kept (highest pain first, then most recent); `citations_total` is the full count. The
   schema requires at least one.
-- **Human turns only.** An occurrence is a user message whose Thread `origin.kind` is `"human"`
-  (Ferry 0.8.0 or later). Agent briefs and every other origin, including `unknown` and an
-  absent origin, never count.
+- **Human turns, unless inference is opted into.** An occurrence is a user message whose Thread
+  `origin.kind` is `"human"` (Ferry 0.8.0 or later) and that is not wholly an envelope
+  (`origin.envelope`). Agent briefs and every other origin, including `unknown` and an absent
+  origin, never count. Under `--infer-human` (off by default), `unknown`-origin turns (no
+  envelope, no sidechain) that a conservative model author classifier judges human also count,
+  marked `authority: "inferred"` on the citation. A proposal is `authority: "inferred"` when any
+  citation is, and `evidence.cost` carries `human_occurrences` and `inferred_occurrences`. A theme
+  carried only by inferred turns needs them in at least 2 sessions.
+- **Ids carry the scope.** The id ends in `all` (all-projects) or `r` plus 8 hex of a hash of
+  `scope.repo`, so proposals of several scopes can share one ledger.
 - **Scope.** `scope` is the repository the sessions were read from (`{kind: "repo", repo}`, the
   main worktree path with the home directory as `~`), or `{kind: "all-projects"}`. Theme history
   and effect measurement use only entries of the run's own scope.

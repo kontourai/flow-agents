@@ -8,7 +8,8 @@
  *
  * By default only sessions whose working directory is inside the current Git repository (any subdirectory or
  * worktree of it) count; see learn/scope.js. `--all-projects` reads every project and warns that their excerpts
- * will be written into this repository's ledger.
+ * will be written into this repository's ledger. `--infer-human` (off by default) lets a model judge whether an
+ * `unknown`-origin turn was typed by a person; see learn/author.js.
  *
  * The model is the Datum role named by --role (default: the dream run's `extraction-default`), routed through Relay
  * and Dispatch exactly as the dream run's is. --dry-run makes no model call and writes nothing.
@@ -37,7 +38,7 @@ const CONFIGURATION_CODES = new Set([
   "DREAM_CONFIG_INVALID", "DREAM_MODEL_UNCONFIGURED", "DREAM_MODEL_UNAVAILABLE", "DREAM_MODEL_UNSUPPORTED",
 ]);
 const DAY_MS = 86_400_000;
-const USAGE = "usage: flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--all-projects] [--transcripts DIR]... [--ledger PATH] [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]";
+const USAGE = "usage: flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--all-projects] [--infer-human] [--transcripts DIR]... [--ledger PATH] [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]";
 
 /** `30d`, `YYYY-MM-DD` (UTC midnight) or a full ISO-8601 timestamp. Anything else is refused. */
 export function parseSince(value, nowMs) {
@@ -53,12 +54,13 @@ export function parseSince(value, nowMs) {
 const NUMERIC = { "--min-occurrences": "minOccurrences", "--min-sessions": "minSessions", "--min-high-pain": "minHighPain" };
 
 export function parseArgs(argv, nowMs = Date.now()) {
-  const out = { dryRun: false, json: false, allProjects: false, transcripts: [], thresholds: {}, since: `${DEFAULT_SINCE_DAYS}d` };
+  const out = { dryRun: false, json: false, allProjects: false, inferHuman: false, transcripts: [], thresholds: {}, since: `${DEFAULT_SINCE_DAYS}d` };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === "--dry-run") out.dryRun = true;
     else if (flag === "--json") out.json = true;
     else if (flag === "--all-projects") out.allProjects = true;
+    else if (flag === "--infer-human") out.inferHuman = true;
     else if (flag === "-h" || flag === "--help") out.help = true;
     else if (["--since", "--transcripts", "--ledger", "--rules-file", "--role", ...Object.keys(NUMERIC)].includes(flag)) {
       const value = argv[(i += 1)];
@@ -104,6 +106,7 @@ export function summarize(document) {
     `  scope: ${document.scope.kind === "repo" ? `this repository (${document.scope.repo}); ${r.sessions_out_of_scope} sessions from other projects ignored` : "ALL projects"}`,
     `  transcripts: ${r.files_seen} seen, ${r.files_read} read, ${r.sessions_read} sessions${Object.keys(r.files_skipped).length ? `; skipped ${Object.entries(r.files_skipped).map(([k, v]) => `${k}=${v}`).join(", ")}` : ""}`,
     `  user messages: ${r.user_messages} (${Object.entries(r.user_messages_by_origin).sort().map(([k, v]) => `${k}=${v}`).join(", ") || "none"}); only origin human counts`,
+    `  unknown-origin turns in window: ${r.unknown_turns_in_window}${r.infer_human ? ` (--infer-human: ${r.unknown_candidates} to judge${document.dry_run ? ` in ${r.author_batches} model batch(es)` : `, ${r.inferred_human_turns} judged human`})` : " (not counted; --infer-human would let a model judge them)"}`,
     `  human turns in window: ${r.human_turns_in_window} across ${r.human_sessions_in_window} sessions; ${r.continuation_pings_excluded} continuation pings excluded; ${r.candidates} to classify${document.dry_run ? ` in ${r.classify_batches} model batch(es)` : ""}`,
   ];
   if (!document.dry_run && document.outcome === "ok") {
@@ -114,6 +117,7 @@ export function summarize(document) {
       lines.push(`  - [${proposal.already_proposed ? "already proposed" : "NEW"}] ${proposal.proposal_id}`);
       lines.push(`      rule: ${proposal.rule}`);
       lines.push(`      ${c.occurrences} times in ${c.sessions} sessions, ${c.high_pain} high-pain; enforcement: ${proposal.enforcement.recommended} (${proposal.enforcement.reason})`);
+      if (proposal.authority === "inferred") lines.push(`      authority: INFERRED (${c.inferred_occurrences} of ${c.occurrences} occurrences are unknown-origin turns a model judged human)`);
       if (proposal.conflict) lines.push(`      CONFLICTS with ${proposal.conflict.file}:${proposal.conflict.line}: ${proposal.conflict.text}`);
       if (proposal.covered_by) lines.push(`      already in ${proposal.covered_by.file}:${proposal.covered_by.line}: ${proposal.covered_by.text}`);
     }
@@ -163,8 +167,9 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     }
     const document = await runLearn({
       roots,
-      // The default ledger is at the root of the worktree the command runs in (not a subdirectory of it).
-      ledgerPath: args.ledger ?? defaultLedger(env, scope.kind === "repo" ? scope.root : cwd),
+      // The default ledger is at the repository's main checkout, shared by all of its worktrees (see scope.js).
+      ledgerPath: args.ledger ?? defaultLedger(env, scope.kind === "repo" ? scope.ledgerRoot : cwd),
+      inferHuman: args.inferHuman,
       sinceMs: args.sinceMs,
       nowMs,
       scope,

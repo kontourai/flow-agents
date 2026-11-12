@@ -48,11 +48,22 @@ export function defaultTranscriptRoots(env = process.env) {
 }
 
 /**
- * The one origin filter: a user message counts only when its importer says a person typed it.
- * Absent origin (an importer that derives none) and `unknown` are not human.
+ * The one origin filter: a user message counts only when its importer says a person typed it, and it is not
+ * wholly a harness envelope. Ferry marks `[Request interrupted by user]` (and a slash command's wrapper) as human
+ * with an `origin.envelope`: a person caused it, but there is no sentence in it to learn from. Absent origin (an
+ * importer that derives none) and `unknown` are not human.
  */
 export function isHumanTurn(message) {
-  return message?.role === "user" && message.origin?.kind === "human" && message.sidechain !== true;
+  return message?.role === "user" && message.origin?.kind === "human" && !message.origin.envelope && message.sidechain !== true;
+}
+
+/**
+ * A turn the opt-in inference may look at: a user message whose importer looked and could not tell who wrote it
+ * (`origin.kind === "unknown"`, typically a prompt submitted through an SDK or IDE host). Never an agent, harness,
+ * hook, compaction or task-notification turn, never an absent origin, never an envelope, never a sidechain.
+ */
+export function isInferenceCandidate(message) {
+  return message?.role === "user" && message.origin?.kind === "unknown" && !message.origin.envelope && message.sidechain !== true;
 }
 
 export function humanTurns(messages) {
@@ -138,10 +149,13 @@ const bump = (counts, key, by = 1) => {
  * `scope(cwd)` decides whether a session belongs to the repository being learned for (learn/scope.js); a session
  * outside it is counted in `sessions_out_of_scope` and contributes nothing. `scope: null` reads every project.
  *
+ * `unknown`-origin turns (see `isInferenceCandidate`) are always counted (`unknown_turns_in_window`), and returned in
+ * `unknownTurns`, with the same shape and scrub, only when `includeUnknown` is set. Nothing here decides they are human.
+ *
  * @param {{ roots: string[], sinceMs?: number | null, untilMs?: number | null, scope?: ((cwd: string | null) => boolean) | null,
- *   readMessages?: typeof readRuntimeMessages }} options
+ *   includeUnknown?: boolean, readMessages?: typeof readRuntimeMessages }} options
  */
-export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = null, readMessages = readRuntimeMessages }) {
+export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = null, includeUnknown = false, readMessages = readRuntimeMessages }) {
   const report = {
     roots: roots.length,
     files_seen: 0,
@@ -156,8 +170,11 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
     unknown_origin_by_evidence: {},
     human_turns_in_window: 0,
     human_turns_duplicate: 0,
+    unknown_turns_in_window: 0,
   };
   const turns = [];
+  const unknownTurns = [];
+  const unknownSessions = new Set();
   const seen = new Set();
   const sessions = new Set();
   for (const root of roots) {
@@ -205,9 +222,14 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
         report.user_messages += 1;
         bump(report.user_messages_by_origin, message.origin?.kind ?? "absent");
         if (message.origin?.kind === "unknown") bump(report.unknown_origin_by_evidence, typeof message.origin.evidence === "string" ? message.origin.evidence.slice(0, 80) : "unstated");
-        if (!isHumanTurn(message) || !message.text) continue;
+        const human = isHumanTurn(message);
+        if ((!human && !isInferenceCandidate(message)) || !message.text) continue;
         if (sinceMs !== null && message.timestampMs < sinceMs) continue;
         if (untilMs !== null && message.timestampMs > untilMs) continue;
+        if (!human) {
+          report.unknown_turns_in_window += 1;
+          if (!includeUnknown) continue;
+        }
         const text = scrubResidueText(message.text);
         const key = `${parsed.harness}\u0000${message.timestampMs}\u0000${createHash("sha256").update(text).digest("hex")}`;
         if (seen.has(key)) {
@@ -215,8 +237,8 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
           continue;
         }
         seen.add(key);
-        sessions.add(threadId);
-        turns.push({
+        (human ? sessions : unknownSessions).add(threadId);
+        (human ? turns : unknownTurns).push({
           key: `${threadId}#${message.id}`,
           threadId,
           harness: parsed.harness,
@@ -227,12 +249,16 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
           text: truncateUtf8(text, MAX_TURN_BYTES),
           // Scrubbed whole, then cut: cutting first could split a secret so the scrub no longer recognises it.
           context: lastAssistant ? tailUtf8(scrubResidueText(lastAssistant), MAX_CONTEXT_BYTES) : "",
+          authority: human ? "human" : "unknown",
         });
       }
     }
   }
-  turns.sort((a, b) => a.atMs - b.atMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const order = (a, b) => a.atMs - b.atMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  turns.sort(order);
+  unknownTurns.sort(order);
   report.human_turns_in_window = turns.length;
   report.human_sessions_in_window = sessions.size;
-  return { turns, report };
+  report.unknown_sessions_in_window = unknownSessions.size;
+  return { turns, unknownTurns, report };
 }

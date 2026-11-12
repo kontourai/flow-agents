@@ -70,7 +70,12 @@ export function repoScope(cwd) {
   // The repository's identity in the ledger: its main worktree path (the common dir's parent for a `.git` common
   // dir, else the common dir itself), scrubbed (home directory -> ~). Every worktree of the repository shares it.
   const mainRoot = path.basename(commonDir) === ".git" ? path.dirname(commonDir) : commonDir;
-  return { kind: "repo", root: real(top) ?? top, repo: scrubResidueText(mainRoot), matches };
+  // `ledgerRoot` is where the default ledger lives: the main checkout, shared by every worktree, so a proposal is
+  // raised once per repository and removing a worktree never removes decisions. A repository whose common directory
+  // is not a `.git` inside a checkout (a bare repository with worktrees) has no main checkout; its ledger stays in
+  // the worktree the command runs in.
+  const ledgerRoot = path.basename(commonDir) === ".git" ? mainRoot : real(top) ?? top;
+  return { kind: "repo", root: real(top) ?? top, ledgerRoot, repo: scrubResidueText(mainRoot), matches };
 }
 
 /** The scope a ledger entry records, and the key effect measurement and theme history compare. */

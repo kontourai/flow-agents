@@ -15,6 +15,7 @@
 
 import * as path from "node:path";
 
+import { inferHumanTurns } from "./author.js";
 import { CLASSIFIER_VERSION, DEFAULT_BATCH_SIZE, batchCount, classifyTurns, isContinuationPing } from "./classify.js";
 import { clusterRules } from "./cluster.js";
 import { readRulesFile } from "./judge.js";
@@ -43,6 +44,7 @@ export const DEFAULT_SINCE_DAYS = 30;
  * @param {string|null} [options.rulesFile]  the rule file proposals target and are judged against
  * @param {object} [options.thresholds]
  * @param {object} [options.effect]  effect statistics (`minDays`, `minExpected`, `tolerance`)
+ * @param {boolean} [options.inferHuman]  opt-in: let a model judge `unknown`-origin turns (see author.js); default off
  * @param {Function} [options.readMessages]  transcript reader seam (tests)
  * @param {(stage: string) => void | Promise<void>} [options.onStage]  called at stage boundaries (tests inject here)
  */
@@ -69,18 +71,26 @@ export async function runLearn(options) {
   }
   const scope = scopeRecord(options.scope);
 
-  const { turns, report: read } = readHumanTurns({
+  const inferHuman = options.inferHuman === true;
+  const { turns, unknownTurns, report: read } = readHumanTurns({
     roots: options.roots, sinceMs, untilMs: nowMs,
     scope: options.scope.kind === "repo" ? options.scope.matches : null,
+    includeUnknown: inferHuman,
     ...(options.readMessages ? { readMessages: options.readMessages } : {}),
   });
-  const candidates = turns.filter((turn) => !isContinuationPing(turn.text));
+  const humanCandidates = turns.filter((turn) => !isContinuationPing(turn.text));
+  const unknownCandidates = unknownTurns.filter((turn) => !isContinuationPing(turn.text));
   const ledger = readLedger(options.ledgerPath); // strict, read-only: a corrupt ledger stops the run here
   const report = {
     ...read,
-    continuation_pings_excluded: turns.length - candidates.length,
-    candidates: candidates.length,
-    classify_batches: dryRun ? batchCount(candidates.length, batchSize) : 0,
+    continuation_pings_excluded: turns.length - humanCandidates.length + unknownTurns.length - unknownCandidates.length,
+    infer_human: inferHuman,
+    // Under --infer-human: the unknown-origin turns the author classifier would judge, and how many it kept.
+    unknown_candidates: unknownCandidates.length,
+    author_batches: dryRun && inferHuman ? batchCount(unknownCandidates.length, batchSize) : 0,
+    inferred_human_turns: 0,
+    candidates: humanCandidates.length,
+    classify_batches: dryRun ? batchCount(humanCandidates.length, batchSize) : 0,
     classified_invalid: 0,
     occurrences: 0,
     themes: 0,
@@ -101,7 +111,7 @@ export async function runLearn(options) {
     source_family: SOURCE_FAMILY,
     scope,
     window,
-    records_considered: candidates.length,
+    records_considered: humanCandidates.length,
     outcome: "ok",
     aggregates: { by_kit: [], by_gate: [], by_theme: [], partial: false },
     proposals: [],
@@ -122,14 +132,20 @@ export async function runLearn(options) {
     throw learnError("LEARN_ORIGIN_UNAVAILABLE", "no user message carries an origin: the installed @kontourai/ferry predates origin (needs >= 0.8.0), so no turn can be counted as human");
   }
   const unknown = read.user_messages_by_origin.unknown ?? 0;
-  if (unknown > 0 && unknown >= (read.user_messages_by_origin.human ?? 0)) {
+  if (unknown > 0 && unknown >= (read.user_messages_by_origin.human ?? 0) && !inferHuman) {
     const top = Object.entries(read.unknown_origin_by_evidence).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 3).map(([evidence, n]) => `${evidence} (${n})`).join(", ");
     document.notes.push(`${unknown} user message(s) have origin "unknown" (${top}): typically prompts submitted through an SDK or IDE host, which the importer cannot tell apart from agent briefs, so they are not counted. A host that records who typed a prompt would let them count.`);
   }
-  if (read.human_sessions_in_window < minWindowSessions) {
+  if (inferHuman) {
+    document.notes.push(`inferred-human mode: ${read.unknown_turns_in_window} unknown-origin turn(s) in the window; a model judges whether a person wrote each (conservatively). Proposals citing any of them say authority "inferred"; agent briefs sent through the same host can still be misjudged.`);
+  }
+  // With --infer-human, sessions holding unknown-origin candidates count toward the minimum too: the author
+  // classifier decides later which of their turns are kept.
+  const sessionsAvailable = read.human_sessions_in_window + (inferHuman ? read.unknown_sessions_in_window : 0);
+  if (sessionsAvailable < minWindowSessions) {
     document.outcome = "insufficient-data";
     document.aggregates.partial = true;
-    document.notes.push(`${read.human_sessions_in_window} session(s) with human turns in the window; at least ${minWindowSessions} are needed (widen --since, or wait for more history)`);
+    document.notes.push(`${sessionsAvailable} session(s) with ${inferHuman ? "human or unknown-origin" : "human"} turns in the window; at least ${minWindowSessions} are needed (widen --since, or wait for more history)`);
     return document;
   }
   if (dryRun) return document;
@@ -142,6 +158,10 @@ export async function runLearn(options) {
   const onRetry = () => {
     report.model_retries += 1;
   };
+  const inferred = inferHuman && unknownCandidates.length ? await inferHumanTurns({ turns: unknownCandidates, invoke, batchSize, onRetry }) : [];
+  report.inferred_human_turns = inferred.length;
+  const candidates = [...humanCandidates, ...inferred].sort((a, b) => a.atMs - b.atMs || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  document.records_considered = candidates.length;
   const { classified, invalid } = await classifyTurns({ turns: candidates, invoke, batchSize, onRetry });
   report.classified_invalid = invalid;
   const occurrences = classified.filter((item) => item.kind !== "none" && item.general);

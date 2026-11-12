@@ -9,9 +9,9 @@ It needs no Flow run, no telemetry setup and no kit adoption: it reads the trans
 Claude Code and Codex already keep (`~/.claude/projects`, `~/.codex/sessions`).
 
 **Required version.** The loop counts only messages the transcript importer marks as typed by
-a person, which needs `@kontourai/ferry` **0.8.0 or later** (with `@kontourai/thread` 0.7.0,
-schema 1.3.0, which adds `Message.origin`). The Flow Agents package still pins Ferry 0.6.0
-until the dependency bump lands; with it, `flow-agents learn` refuses with exit 2
+a person, which needs `@kontourai/ferry` **0.8.0 or later** with `@kontourai/thread` **0.7.0**
+(schema 1.3.0, which adds `Message.origin`). Flow Agents pins exactly those versions. With an
+older Ferry, which derives no origin, `flow-agents learn` refuses with exit 2
 (`LEARN_ORIGIN_UNAVAILABLE`) and `--dry-run` reports `origin-unavailable`.
 
 Proposals use the `correction-recurrence` source family of the
@@ -43,11 +43,14 @@ directory its session ran in, and:
   worktree Git still lists. A session from a worktree that has since been removed, and that lived
   outside those paths, cannot be attributed and is not counted.
 
-Each worktree has its own default ledger, at that worktree's root. Its sessions, however,
-cover every worktree of the repository. Run the loop from one checkout (or pass the same
-`--ledger`) so proposals and their measurements accumulate in one place. Proposals record the
-repository they were learned for (`scope`), and a run measures and builds on only the entries
-of its own scope.
+The default ledger is in the repository's **main checkout**
+(`<main checkout>/.kontourai/telemetry/learning-review-proposals.jsonl`), whichever worktree
+you run from. So a proposal is raised once per repository, and removing a worktree never
+removes your decisions. (A bare repository has no main checkout, so its ledger stays in the
+worktree you run from.) The rule file is the `AGENTS.md`/`CLAUDE.md` of the worktree you run
+in. Proposals record the repository they were learned for (`scope`). The scope is part of every
+proposal id, so all-projects and repository proposals can share one ledger without colliding.
+A run measures and builds on only the entries of its own scope.
 
 `--all-projects` reads every project on the machine. It prints a warning, because excerpts of
 corrections you made in other repositories are then written into this repository's ledger.
@@ -66,8 +69,9 @@ role.
 | `--since` | `30d` | `Nd`, `YYYY-MM-DD` (UTC) or an ISO-8601 timestamp. Anything else is refused. |
 | `--dry-run` | off | Read and count only. No model call, no ledger, no review items. |
 | `--all-projects` | off | Read every project, not just this repository (see above). |
+| `--infer-human` | off | Let a model judge whether `unknown`-origin turns were typed by a person (see below). |
 | `--transcripts DIR` | the two harness directories | Repeatable. Every `*.jsonl` below it is read; symlinks are not followed. |
-| `--ledger PATH` | `$LEARNING_REVIEW_PROPOSALS_LEDGER`, else `<worktree root>/.kontourai/telemetry/learning-review-proposals.jsonl` | The contract's ledger. |
+| `--ledger PATH` | `$LEARNING_REVIEW_PROPOSALS_LEDGER`, else `<main checkout>/.kontourai/telemetry/learning-review-proposals.jsonl` | The contract's ledger. |
 | `--rules-file PATH` | `AGENTS.md`, else `CLAUDE.md`, at the worktree root | The file proposals target and are judged against. A symlink is followed to a regular file you own that no other user can write. |
 | `--min-occurrences`, `--min-sessions`, `--min-high-pain` | 5, 3, 2 | The thresholds below. |
 | `--json` | off | Print the contract document instead of the summary. |
@@ -100,12 +104,43 @@ A user message counts only when the transcript importer
 `origin.kind === "human"`. Agent briefs, harness and hook injections, compaction summaries,
 task notifications, `unknown`, and messages with no origin never count.
 
+A message that is wholly a harness envelope is not counted either, even when the importer says a
+person caused it. `[Request interrupted by user]` and a slash command's wrapper are examples:
+there is no sentence in them to learn from.
+
 This is what keeps an orchestrator from looking like a person. An orchestrating agent repeats
 its rules to every delegate it starts. Counted as user messages, those briefs look like
 dozens of independent human corrections. Counting only `human` removes them by construction.
 
 When no user message carries an origin at all (an older Ferry), a real run refuses with exit
 2, and a dry run reports `origin-unavailable`, rather than reporting "no corrections".
+
+### Opt-in: inferring human turns (`--infer-human`)
+
+If you send prompts through an SDK or IDE host (T3 Code drives Claude Code through the SDK, so
+prompts are `promptSource: sdk`; Codex IDE sessions are `session_meta.source=vscode`), the
+importer reports them as `unknown`. Delegated agent briefs arrive the same way. With only
+`human` turns counted, such a workflow gives the loop almost nothing.
+`flow-agents learn --dry-run` reports how many `unknown` turns your window has.
+
+`--infer-human` (off by default) sends **only** `unknown`-origin user turns to a model author
+classifier. Turns that are agent, harness, hook, compaction or task notifications, wholly
+envelopes, or sidechains are never sent. The classifier runs through the same scrubbed model
+route. It answers `human` only when a message clearly reads as a person typing to the agent in
+real time, and `not-human` for briefs, specifications, templated text, and anything it is
+unsure about. Turns it keeps:
+
+- are marked `inferred`, never `human`, in the citations;
+- make any proposal citing them `authority: "inferred"`, with `human_occurrences` and
+  `inferred_occurrences` in its evidence;
+- can carry a theme alone only across at least **2** sessions. Otherwise the theme needs at
+  least one human-origin occurrence.
+
+**The risk is real.** An orchestrator's brief that is short and conversational can read as a
+person. A misjudged brief becomes an inferred occurrence, which is exactly the echo problem the
+human-only rule exists to prevent. Read an `inferred` proposal's citations before ratifying it.
+A dry run with `--infer-human` reports how many turns would be judged and in how many model
+batches, and makes no model call.
 
 ### Two kinds of noise are removed on purpose
 
@@ -262,12 +297,13 @@ in that list, so it also measures the filter.
 
 ## Limitations
 
-- **Prompts sent through an SDK or IDE host are not counted.** Ferry reports a prompt submitted
-  through the Claude Code SDK (`promptSource=sdk`) or a Codex IDE session
+- **Prompts sent through an SDK or IDE host are not counted by default.** Ferry reports a prompt
+  submitted through the Claude Code SDK (`promptSource=sdk`) or a Codex IDE session
   (`session_meta.source=vscode`) as `unknown`, because delegated agent briefs arrive the same
-  way. If you work mostly through such a host, the loop sees few or no human turns. The report
-  counts `unknown` origins by Ferry's evidence so you can see this. The fix belongs upstream: a
-  host that records who typed a prompt.
+  way. If you work mostly through such a host, the loop sees few or no human turns unless you opt
+  into `--infer-human`, which trades that gap for the false-positive risk described above. The
+  report counts `unknown` origins by Ferry's evidence. The real fix belongs upstream: a host
+  that records who typed a prompt.
 - **The model is the judge.** Classification, theme grouping and the conflict check are model
   judgements with the model's biases. An ambiguous turn may be classified either way, two
   themes may merge or split differently on another model, and a conflict judgement is a

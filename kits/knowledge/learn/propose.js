@@ -24,6 +24,7 @@
  * @module learn/propose
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -38,7 +39,7 @@ export const PRODUCER_ID = "knowledge.learn";
 export const CONTRACT = "kontour.learning-review-proposals";
 export const CONTRACT_VERSION = "0.2";
 export const ENFORCEMENT_LADDER = Object.freeze(["agents-md", "skill", "hook", "veritas-check"]);
-export const DEFAULT_THRESHOLDS = Object.freeze({ minOccurrences: 5, minSessions: 3, minHighPain: 2, minHighPainSessions: 2, highPainLevel: 3 });
+export const DEFAULT_THRESHOLDS = Object.freeze({ minOccurrences: 5, minSessions: 3, minHighPain: 2, minHighPainSessions: 2, highPainLevel: 3, minInferredSessions: 2 });
 /** Effect statistics: see `measureEffect`. */
 export const DEFAULT_EFFECT = Object.freeze({ minDays: 14, minExpected: 3, tolerance: 0.3 });
 export const MAX_CITATIONS = 8;
@@ -79,6 +80,7 @@ export function aggregate(rootId, label, items, thresholds = DEFAULT_THRESHOLDS)
   const by_kind = { correction: 0, nudge: 0, frustration: 0 };
   for (const item of sorted) by_kind[item.kind] += 1;
   const high = sorted.filter((item) => item.pain >= thresholds.highPainLevel);
+  const inferred = sorted.filter((item) => item.turn.authority === "inferred");
   return {
     theme_id: rootId,
     label,
@@ -86,6 +88,9 @@ export function aggregate(rootId, label, items, thresholds = DEFAULT_THRESHOLDS)
     sessions: new Set(sorted.map((item) => item.turn.threadId)).size,
     high_pain: high.length,
     high_pain_sessions: new Set(high.map((item) => item.turn.threadId)).size,
+    human_occurrences: sorted.length - inferred.length,
+    inferred_occurrences: inferred.length,
+    inferred_sessions: new Set(inferred.map((item) => item.turn.threadId)).size,
     by_kind,
     mean_pain: sorted.length ? round4(sorted.reduce((sum, item) => sum + item.pain, 0) / sorted.length) : 0,
     first_at: sorted[0]?.turn.at ?? null,
@@ -94,10 +99,15 @@ export function aggregate(rootId, label, items, thresholds = DEFAULT_THRESHOLDS)
   };
 }
 
-/** Blume-style: enough recurrence across enough sessions, or enough high-pain episodes across at least two sessions. */
+/**
+ * Blume-style: enough recurrence across enough sessions, or enough high-pain episodes across at least two sessions.
+ * Under inferred-human mode a theme also needs at least one human-origin occurrence, or inferred occurrences in at
+ * least `minInferredSessions` sessions, so one misjudged session of agent briefs cannot carry a theme alone.
+ */
 export function qualifies(row, thresholds = DEFAULT_THRESHOLDS) {
-  return (row.occurrences >= thresholds.minOccurrences && row.sessions >= thresholds.minSessions)
-    || (row.high_pain >= thresholds.minHighPain && row.high_pain_sessions >= thresholds.minHighPainSessions);
+  const authority = (row.human_occurrences ?? row.occurrences) >= 1 || (row.inferred_sessions ?? 0) >= thresholds.minInferredSessions;
+  return authority && ((row.occurrences >= thresholds.minOccurrences && row.sessions >= thresholds.minSessions)
+    || (row.high_pain >= thresholds.minHighPain && row.high_pain_sessions >= thresholds.minHighPainSessions));
 }
 
 const rungOf = (entry) => {
@@ -150,8 +160,16 @@ function proposedChange(kind, rule, rulesFileName) {
   }
 }
 
-export function proposalId(kind, themeId, suffix = "") {
-  return `${SOURCE_FAMILY}-${kind}-${themeId}${suffix}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+/**
+ * `all` for an all-projects proposal, `r<8 hex>` (a hash of the repository identity) for a repository's. Part of
+ * every proposal id, so one ledger can hold proposals of several scopes without one scope's id answering for another.
+ */
+export function scopeTag(scope) {
+  return scope?.kind === "repo" ? `r${createHash("sha256").update(String(scope.repo)).digest("hex").slice(0, 8)}` : "all";
+}
+
+export function proposalId(kind, themeId, suffix = "", scope = { kind: "all-projects" }) {
+  return `${SOURCE_FAMILY}-${kind}-${themeId}${suffix}-${scopeTag(scope)}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function citations(items) {
@@ -164,6 +182,7 @@ function citations(items) {
       message_id: item.turn.messageId,
       harness: item.turn.harness,
       at: item.turn.at,
+      authority: item.turn.authority === "inferred" ? "inferred" : "human",
       kind: item.kind,
       pain: item.pain,
       excerpt: truncateUtf8(item.turn.text.replace(/\s+/g, " ").trim(), MAX_EXCERPT_BYTES),
@@ -182,9 +201,11 @@ export function buildProposal(row, { state, window, judgement, conflictCheck, ru
   const cite = (j) => (j ? { file: conflictCheck.file, line: j.line, text: j.text, explanation: j.explanation, judge: "model" } : null);
   const coveredNote = judgement?.relation === "covers" ? `; line ${judgement.line} of the rule file already says this (not a reason to escalate: only a measured ratified rung is)` : "";
   return {
-    proposal_id: proposalId(kind, row.theme_id, state.suffix),
+    proposal_id: proposalId(kind, row.theme_id, state.suffix, scope),
     source: { family: SOURCE_FAMILY, producer: PRODUCER_ID, contract_version: CONTRACT_VERSION, classifier_version: classifierVersion },
     scope,
+    // "inferred" when any cited occurrence was an unknown-origin turn the author classifier judged human.
+    authority: row.inferred_occurrences > 0 ? "inferred" : "human",
     target: { kind, id: kind === "agents-md" ? (rulesFileName ?? "agent-rules") : row.theme_id },
     pattern: SOURCE_FAMILY,
     theme: { id: row.theme_id, label: row.label },
@@ -198,6 +219,9 @@ export function buildProposal(row, { state, window, judgement, conflictCheck, ru
         sessions: row.sessions,
         high_pain: row.high_pain,
         high_pain_sessions: row.high_pain_sessions,
+        human_occurrences: row.human_occurrences,
+        inferred_occurrences: row.inferred_occurrences,
+        inferred_sessions: row.inferred_sessions,
         mean_pain: row.mean_pain,
         by_kind: row.by_kind,
         first_at: row.first_at,

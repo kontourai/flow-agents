@@ -3,7 +3,6 @@
 // with invented sessions, paths and text. No real transcript is used anywhere.
 import fs from "node:fs";
 import path from "node:path";
-import { readRuntimeMessages } from "../../kits/knowledge/promote/runtime-transcript.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 export const NOW_MS = Date.parse("2026-11-12T00:00:00Z");
@@ -73,43 +72,6 @@ export function workspace() {
   return { root, ledger: path.join(root, ".kontourai", "telemetry", "learning-review-proposals.jsonl"), reviewItems: path.join(root, ".kontourai", "telemetry", "correction-recurrence.review-items.json") };
 }
 
-/** Does the installed Ferry derive `origin` on user messages (>= 0.8.0)? */
-export function ferryDerivesOrigin() {
-  const probe = claudeSession(sessionId(999), NOW_MS - DAY_MS, [{ text: "probe" }]);
-  return readRuntimeMessages("claude-code", Buffer.from(probe)).messages.some((message) => message.origin !== undefined);
-}
-
-/**
- * STAND-IN for Ferry >= 0.8.0's Claude Code origin derivation, used only when the installed Ferry derives none, so the
- * pipeline below the importer can be tested on either version. It covers the subset of signals these fixtures use
- * (Ferry's `claudeUserOrigin`); the real derivation is exercised whenever the installed Ferry has it (see
- * `ferryDerivesOrigin` and the "real Ferry" test).
- */
-export function readMessagesWithFixtureOrigin(harness, content) {
-  const parsed = readRuntimeMessages(harness, content);
-  if (parsed.messages.some((message) => message.origin !== undefined)) return parsed;
-  const events = new Map(content.toString("utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).map((event) => [event.uuid, event]));
-  const MAP = { human: "human", "task-notification": "task-notification", peer: "agent", coordinator: "agent", "auto-continuation": "harness" };
-  const originOf = (event) => {
-    const text = typeof event.message?.content === "string" ? event.message.content : "";
-    if (event.isCompactSummary === true) return { kind: "compaction" };
-    const source = event.promptSource;
-    if (source === "suggestion_accepted") return { kind: "unknown" };
-    const mapped = MAP[event.origin?.kind];
-    const trusted = source === undefined || source === "typed" || source === "queued";
-    if (mapped && (mapped !== "human" || trusted)) return { kind: mapped };
-    if (mapped === "human" && source === "sdk") return { kind: "unknown", evidence: "claude-code:origin.kind=human,promptSource=sdk" };
-    if (/^\s*<system-reminder>[\s\S]*<\/system-reminder>\s*$/.test(text)) return { kind: "harness" };
-    if (source === "typed" || source === "queued") return { kind: "human" };
-    if (event.isSidechain === true) return { kind: "agent" };
-    return { kind: "unknown" };
-  };
-  return { ...parsed, messages: parsed.messages.map((message) => (message.role === "user" ? { ...message, origin: originOf(events.get(message.id) ?? {}) } : message)) };
-}
-
-/** The reader the tests use: the real importer when it derives origin, else the stand-in above. */
-export const testReader = () => (ferryDerivesOrigin() ? undefined : readMessagesWithFixtureOrigin);
-
 /** A correction a person typed, tagged so the fake model can classify it. */
 export const fix = (theme, pain = 1, kind = "correction", words = "please do this differently next time") => `${words} [fix:${theme}:${kind}:${pain}]`;
 
@@ -132,6 +94,7 @@ export function promptJson(prompt, marker) {
  *  - cluster: a rule equal to an existing theme label joins it; otherwise one new theme per distinct rule, with
  *    `parents[rule]` (a label) naming its parent theme when that label is an existing theme
  *  - judge: `judgements[rule] = { relation, needle }` -> the first line containing needle
+ *  - author (--infer-human): `[author:human]` in the text -> human; anything else -> not-human
  *  - `failOn: tool` answers that tool with no tool call every time; `failOnce: tool` only the first time
  */
 export function recordingRuntime({ judgements = {}, parents = {}, failOn = null, failOnce = null } = {}) {
@@ -171,6 +134,10 @@ export function recordingRuntime({ judgements = {}, parents = {}, failOn = null,
           return { i, theme: created.get(rule) };
         });
         return result(tool, { new_themes: [...created].map(([label, key]) => ({ key, label, parent: existing.get(parents[label]) ?? null })), assignments });
+      }
+      if (tool === "record_message_authors") {
+        const items = promptJson(prompt, "MESSAGES_JSON:").map(({ i, text }) => ({ i, author: text.includes("[author:human]") ? "human" : "not-human" }));
+        return result(tool, { items });
       }
       if (tool === "judge_rule_against_file") {
         const rule = JSON.parse(/PROPOSED_RULE_JSON: (.+)/.exec(prompt)[1]);

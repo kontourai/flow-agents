@@ -17,9 +17,9 @@ import { scorePredictions } from "../../kits/knowledge/learn/evaluate.js";
 import { acquireLedgerLock } from "../../kits/knowledge/learn/ledger-lock.js";
 import { repoScope } from "../../kits/knowledge/learn/scope.js";
 import { readHumanTurns } from "../../kits/knowledge/learn/sessions.js";
+import { readRuntimeMessages } from "../../kits/knowledge/promote/runtime-transcript.js";
 import {
-  CANARIES, DAY_MS, NOW_MS, THEME_RULES, claudeSession, ferryDerivesOrigin, fix, promptJson, readMessagesWithFixtureOrigin, recordingRuntime,
-  sessionId, sessionsWith, testReader, transcriptRoot, workspace,
+  CANARIES, DAY_MS, NOW_MS, THEME_RULES, claudeSession, fix, promptJson, recordingRuntime, sessionId, sessionsWith, transcriptRoot, workspace,
 } from "./learn-support.mjs";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -30,15 +30,26 @@ const DECIDE = path.join(REPO, "scripts", "telemetry", "learning-review-decide.s
 const ANALYZER = path.join(REPO, "scripts", "telemetry", "learning-review-proposals.sh");
 const ALL = { kind: "all-projects" };
 const FETCH_ROOT = "fetch-latest-main-before-starting-any-work";
+const authorRequests = (runtime) => runtime.requests.filter((request) => request.tools[0].name === "record_message_authors");
 
 async function learn(sessions, { runtime = recordingRuntime(), ws = workspace(), rulesFile = null, judge, scope = ALL, ...extra } = {}) {
   const root = transcriptRoot(sessions);
   const invoke = toolInvoker(runtime);
   const document = await runLearn({
     roots: [root], ledgerPath: ws.ledger, nowMs: NOW_MS, sinceMs: NOW_MS - 60 * DAY_MS, invoke, scope,
-    rulesFile, judge: judge ?? (rulesFile ? modelJudge(invoke) : undefined), readMessages: testReader(), ...extra,
+    rulesFile, judge: judge ?? (rulesFile ? modelJudge(invoke) : undefined), ...extra,
   });
   return { document, runtime, ws, root };
+}
+
+const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args], { stdio: "ignore" });
+function gitRepo({ ignoreKontourai = true } = {}) {
+  const dir = fs.realpathSync(makeFixtureDir("learn-repo-"));
+  git(dir, "init", "-q");
+  if (ignoreKontourai) fs.writeFileSync(path.join(dir, ".gitignore"), ".kontourai/\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "--allow-empty", "-m", "fixture");
+  return dir;
 }
 
 const sentText = (runtime) => runtime.requests.map((request) => request.messages[0].content).join("\n");
@@ -113,7 +124,7 @@ test("a user message with no origin at all is never human, and a run that sees o
   const ws = workspace();
   const root = transcriptRoot(RECURRING());
   const stripOrigin = (harness, content) => {
-    const parsed = readMessagesWithFixtureOrigin(harness, content);
+    const parsed = readRuntimeMessages(harness, content);
     return { ...parsed, messages: parsed.messages.map(({ origin, ...message }) => message) };
   };
   const common = { roots: [root], ledgerPath: ws.ledger, nowMs: NOW_MS, sinceMs: NOW_MS - 60 * DAY_MS, readMessages: stripOrigin, scope: ALL };
@@ -124,11 +135,7 @@ test("a user message with no origin at all is never human, and a run that sees o
   assert.equal(fs.existsSync(ws.ledger), false);
 });
 
-test("real Ferry derives the origins these fixtures rely on", (t) => {
-  if (!ferryDerivesOrigin()) {
-    t.skip("installed @kontourai/ferry predates Message.origin (< 0.8.0); the stand-in reader covers the pipeline until the bump lands");
-    return;
-  }
+test("real Ferry derives the origins these fixtures rely on", () => {
   const dir = makeFixtureDir("learn-one-");
   fs.writeFileSync(path.join(dir, `${sessionId(7)}.jsonl`), claudeSession(sessionId(7), NOW_MS - DAY_MS, [
     { text: "typed by a person" },
@@ -201,7 +208,7 @@ test("a theme label with no Latin letters gets a stable hash slug, not a shared 
 // ── thresholds ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 test("threshold defaults are 5 occurrences in 3 sessions, or 2 high-pain (pain 3) in 2 sessions", () => {
-  assert.deepEqual({ ...DEFAULT_THRESHOLDS }, { minOccurrences: 5, minSessions: 3, minHighPain: 2, minHighPainSessions: 2, highPainLevel: 3 });
+  assert.deepEqual({ ...DEFAULT_THRESHOLDS }, { minOccurrences: 5, minSessions: 3, minHighPain: 2, minHighPainSessions: 2, highPainLevel: 3, minInferredSessions: 2 });
   const row = (occurrences, sessions, highPain = 0, highPainSessions = 0) => ({ occurrences, sessions, high_pain: highPain, high_pain_sessions: highPainSessions });
   assert.equal(qualifies(row(5, 3)), true, "5 in 3: at both bounds");
   assert.equal(qualifies(row(4, 3)), false, "one occurrence short");
@@ -230,7 +237,7 @@ test("pipeline threshold boundary: 5 occurrences in 3 sessions proposes, 4 does 
 test("a proposal cites Thread message locators with short scrubbed excerpts, starts as a prose rule, and is advisory", async () => {
   const { document, ws } = await learn(RECURRING());
   const [proposal] = document.proposals;
-  assert.equal(proposal.proposal_id, `correction-recurrence-agents-md-${FETCH_ROOT}`);
+  assert.equal(proposal.proposal_id, `correction-recurrence-agents-md-${FETCH_ROOT}-all`);
   assert.equal(proposal.severity, "advisory");
   assert.equal(proposal.enforcement.recommended, "agents-md");
   assert.deepEqual(proposal.scope, ALL);
@@ -289,8 +296,7 @@ test("dry run makes no model call and writes nothing, through the CLI", async ()
   assert.equal(document.dry_run, true);
   assert.equal(document.report.model_calls, 0);
   assert.deepEqual(document.proposals, []);
-  if (ferryDerivesOrigin()) assert.equal(document.report.candidates, 9, "9 typed turns, none a continuation ping");
-  else assert.equal(document.outcome, "origin-unavailable");
+  assert.equal(document.report.candidates, 9, "9 typed turns, none a continuation ping");
 });
 
 test("insufficient history is reported, not turned into proposals, and spends no model call", async () => {
@@ -400,12 +406,8 @@ test("a symlinked rules file is followed to a file the user owns; a loop or dang
   const code = await learnMain(["--all-projects", "--transcripts", transcriptRoot(RECURRING()), "--ledger", ws.ledger, "--rules-file", path.join(dir, "loop-a"), "--since", "60d"], {
     stdout: { write: () => {} }, stderr: { write: (s) => err.push(s) }, env: {}, cwd: ws.root, nowMs: NOW_MS, createRuntime: async () => recordingRuntime(),
   });
-  if (ferryDerivesOrigin()) {
-    assert.equal(code, 2, err.join(""));
-    assert.match(err.join(""), /LEARN_CONFIG_INVALID: rules file/);
-  } else {
-    assert.equal(code, 2, "on a Ferry without origin the run refuses earlier, also with exit 2");
-  }
+  assert.equal(code, 2, err.join(""));
+  assert.match(err.join(""), /LEARN_CONFIG_INVALID: rules file/);
 });
 
 // ── theme history: what may be proposed, and from when ───────────────────────────────────────────────────────────
@@ -563,16 +565,6 @@ test("a corrupt ledger line stops the run before anything is written", async () 
 
 // ── repository scope ─────────────────────────────────────────────────────────────────────────────────────────────
 
-const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args], { stdio: "ignore" });
-function gitRepo({ ignoreKontourai = true } = {}) {
-  const dir = fs.realpathSync(makeFixtureDir("learn-repo-"));
-  git(dir, "init", "-q");
-  if (ignoreKontourai) fs.writeFileSync(path.join(dir, ".gitignore"), ".kontourai/\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-q", "--allow-empty", "-m", "fixture");
-  return dir;
-}
-
 test("by default only this repository's sessions count: subdirectories and worktrees in, other repositories out", async () => {
   const repo = gitRepo();
   fs.mkdirSync(path.join(repo, "pkg", "sub"), { recursive: true });
@@ -678,4 +670,130 @@ test("evaluation scoring: precision and recall of 'counts as a correction' again
   assert.equal(score.precision, 0.3333);
   assert.equal(score.recall, 0.5);
   assert.deepEqual(score.missing, ["e"]);
+});
+
+// ── round 2: envelopes, context scrub, scope ids, one ledger per repository ───────────────────────────────────────
+
+test("a human turn that is wholly an envelope ([Request interrupted by user]) is not a correction", async () => {
+  const sessions = sessionsWith(Array.from({ length: 4 }, () => ["[Request interrupted by user]", fix("fetch-main")]));
+  const { document, runtime } = await learn(sessions);
+  assert.equal(document.report.human_turns_in_window, 4, "only the four typed corrections");
+  const sent = runtime.requests.filter((request) => request.tools[0].name === "record_turn_classifications").flatMap((request) => promptJson(request.messages[0].content, "MESSAGES_JSON:").map((item) => item.text));
+  assert.ok(!sent.some((text) => text.includes("Request interrupted")), "the interruption marker never reached the classifier");
+  const dir = makeFixtureDir("learn-env-");
+  fs.writeFileSync(path.join(dir, `${sessionId(8)}.jsonl`), claudeSession(sessionId(8), NOW_MS - DAY_MS, [{ text: "[Request interrupted by user]" }]));
+  const [message] = readRuntimeMessages("claude-code", fs.readFileSync(path.join(dir, `${sessionId(8)}.jsonl`))).messages;
+  assert.deepEqual([message.origin.kind, typeof message.origin.envelope], ["human", "string"], "the fixture is what Ferry marks human-with-envelope");
+});
+
+test("the assistant context sent with a turn is scrubbed: a canary there never reaches the classifier", async () => {
+  const sessions = Array.from({ length: 3 }, (_, n) => ({
+    id: sessionId(n + 1),
+    startMs: NOW_MS - (10 - n) * DAY_MS,
+    turns: [{ role: "assistant", text: `I called the API with ${CANARIES.openai} and ${CANARIES.github}.` }, { text: fix("fetch-main") }],
+  }));
+  const { runtime } = await learn(sessions);
+  const items = promptJson(runtime.requests[0].messages[0].content, "MESSAGES_JSON:");
+  assert.ok(items.every((item) => item.context && item.context.includes("<SECRET>")), "each turn carried the scrubbed context");
+  const sent = JSON.stringify(runtime.requests);
+  for (const value of Object.values(CANARIES)) assert.ok(!sent.includes(value), "a canary in the assistant context reached the model");
+});
+
+test("theme history is per scope: another scope's open proposal for the same theme does not block this one", async () => {
+  const ws = workspace();
+  seedLedger(ws, [decidedEntry("agents-md", "proposed", 0, 1, { id: "elsewhere-open", scope: { kind: "repo", repo: "~/dev/elsewhere" } })]);
+  const { document } = await learn(RECURRING(), { ws });
+  assert.deepEqual(document.proposals.map((p) => [p.proposal_id, p.already_proposed]), [[`correction-recurrence-agents-md-${FETCH_ROOT}-all`, false]]);
+  assert.equal(ledgerLines(ws).length, 2);
+});
+
+test("proposal ids carry the scope: an --all-projects run never answers for a repository's proposal in the same ledger", async () => {
+  const repo = gitRepo();
+  const ws = workspace(); // the ledger lives outside the repository, shared by both runs
+  const sessions = RECURRING({ cwd: repo });
+  const all = await learn(sessions, { ws });
+  const mine = await learn(sessions, { ws, scope: repoScope(repo) });
+  assert.match(all.document.proposals[0].proposal_id, /-all$/);
+  assert.match(mine.document.proposals[0].proposal_id, /-r[0-9a-f]{8}$/);
+  assert.equal(mine.document.proposals[0].already_proposed, false, "the repository's proposal is new, and written");
+  assert.deepEqual(ledgerLines(ws).map((entry) => entry.scope.kind).sort(), ["all-projects", "repo"]);
+});
+
+test("one ledger per repository: a run from a linked worktree writes to the main checkout's ledger", async () => {
+  const repo = gitRepo();
+  const worktree = path.join(fs.realpathSync(makeFixtureDir("learn-wt-")), "lane");
+  git(repo, "worktree", "add", "-q", worktree);
+  const root = transcriptRoot(RECURRING({ cwd: worktree }));
+  const err = [];
+  const code = await learnMain(["--transcripts", root, "--since", "60d"], {
+    stdout: { write: () => {} }, stderr: { write: (s) => err.push(s) }, env: {}, cwd: worktree, nowMs: NOW_MS, createRuntime: async () => recordingRuntime(),
+  });
+  assert.equal(code, 0, err.join(""));
+  const main = path.join(repo, ".kontourai", "telemetry", "learning-review-proposals.jsonl");
+  assert.equal(fs.existsSync(main), true, "the ledger is in the main checkout");
+  assert.equal(fs.existsSync(path.join(worktree, ".kontourai")), false, "nothing in the worktree");
+  assert.equal(ledgerLines({ ledger: main }).length, 1);
+});
+
+// ── round 2: opt-in inferred-human mode ──────────────────────────────────────────────────────────────────────────
+
+const sdk = (text) => ({ text, origin: { kind: "human" }, promptSource: "sdk" }); // Ferry: unknown (claude-code:promptSource=sdk)
+
+test("inferred-human mode is off by default: unknown-origin turns are counted, never judged or used", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("pin-sha"), sdk(`[author:human] ${fix("fetch-main")}`)]));
+  const { document, runtime } = await learn(sessions);
+  assert.equal(authorRequests(runtime).length, 0);
+  assert.equal(document.report.unknown_turns_in_window, 5);
+  assert.equal(document.report.occurrences, 5, "only the five human pin-sha corrections");
+  assert.ok(document.proposals.every((proposal) => proposal.authority === "human"));
+});
+
+test("only unknown-origin turns reach the author classifier: never agent, harness, compaction, envelope or human turns", async () => {
+  const kinds = [
+    { text: "coordinator brief", origin: { kind: "coordinator" } },
+    { text: "<system-reminder>harness text</system-reminder>", bare: true },
+    { text: "compaction summary", isCompactSummary: true, promptSource: "system" },
+    { text: "[Request interrupted by user]" },
+    { text: "typed by a person" },
+    sdk("sdk prompt one"),
+    { text: "accepted suggestion", origin: { kind: "human" }, promptSource: "suggestion_accepted" },
+  ];
+  const sessions = sessionsWith(Array.from({ length: 3 }, () => kinds));
+  const { runtime } = await learn(sessions, { inferHuman: true });
+  const judged = authorRequests(runtime).flatMap((request) => promptJson(request.messages[0].content, "MESSAGES_JSON:").map((item) => item.text));
+  assert.deepEqual([...new Set(judged)].sort(), ["accepted suggestion", "sdk prompt one"]);
+});
+
+test("inferred-human dry run counts unknown turns and makes no model call", async () => {
+  const ws = workspace();
+  const root = transcriptRoot(sessionsWith(Array.from({ length: 4 }, () => [sdk(`[author:human] ${fix("fetch-main")}`), sdk("brief")])));
+  const runtime = recordingRuntime();
+  const document = await runLearn({ roots: [root], ledgerPath: ws.ledger, nowMs: NOW_MS, sinceMs: NOW_MS - 60 * DAY_MS, scope: ALL, dryRun: true, inferHuman: true, invoke: toolInvoker(runtime) });
+  assert.equal(runtime.requests.length, 0);
+  assert.deepEqual([document.report.unknown_turns_in_window, document.report.unknown_candidates, document.report.author_batches], [8, 8, 1]);
+  assert.equal(fs.existsSync(ws.root) && fs.readdirSync(ws.root).length, 0);
+});
+
+test("turns judged human are kept as inferred, and every proposal citing one says authority inferred, into the ledger", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [sdk(`[author:human] ${fix("fetch-main")}`), sdk(`${fix("batch-prs")} (a brief)`)]));
+  const { document, ws } = await learn(sessions, { inferHuman: true });
+  assert.equal(document.report.inferred_human_turns, 5, "the conservative classifier kept only the tagged turns");
+  const [proposal] = document.proposals;
+  assert.equal(proposal.theme.label, THEME_RULES["fetch-main"], "the not-human batch-prs briefs made no theme");
+  assert.equal(proposal.authority, "inferred");
+  assert.deepEqual([proposal.evidence.cost.human_occurrences, proposal.evidence.cost.inferred_occurrences], [0, 5]);
+  assert.ok(proposal.evidence.defect.citations.every((citation) => citation.authority === "inferred"));
+  assert.equal(ledgerLines(ws)[0].authority, "inferred");
+});
+
+test("a theme carried by inferred turns needs them in at least two sessions, or one human occurrence", async () => {
+  const thresholds = { minOccurrences: 3, minSessions: 1 };
+  const filler = [["hello"], ["fine"]];
+  const oneSession = sessionsWith([[sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`)], ...filler]);
+  assert.deepEqual((await learn(oneSession, { inferHuman: true, thresholds })).document.proposals, [], "inferred in one session only");
+  const twoSessions = sessionsWith([[sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`)], [sdk(`[author:human] ${fix("fetch-main")}`)], ...filler]);
+  assert.equal((await learn(twoSessions, { inferHuman: true, thresholds })).document.proposals.length, 1);
+  const withHuman = sessionsWith([[sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`), fix("fetch-main")], ...filler]);
+  const mixed = (await learn(withHuman, { inferHuman: true, thresholds })).document.proposals;
+  assert.deepEqual(mixed.map((p) => [p.authority, p.evidence.cost.human_occurrences]), [["inferred", 1]]);
 });

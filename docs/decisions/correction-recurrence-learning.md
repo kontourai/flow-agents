@@ -49,6 +49,10 @@ executable checks. A human decides every proposal.
   the current repository (any subdirectory or worktree, by Git's common directory). Reading every
   project is explicit (`--all-projects`) and warned about, and the loop refuses to write its
   ledger where Git would track it.
+- **Inferring human turns is opt-in and labelled.** `--infer-human` lets a conservative model
+  judge `unknown`-origin turns (SDK and IDE hosts). It is off by default because agent briefs
+  arrive through the same channels. Every proposal that rests on such a turn says
+  `authority: "inferred"`.
 - **Writers take one lock.** The learn loop and both ledger scripts share the dream run's epoch
   lock; the loop re-reads under it and refuses if a decision changed during the run.
 - **Conflicts are surfaced, not resolved.** A model judge checks each rule against the target
@@ -66,8 +70,8 @@ some that contradicted rules already written.
 ## Consequences
 
 - A developer who submits prompts through an SDK or IDE host gets `unknown` origins and
-  therefore few or no counted turns until the host records who typed a prompt. The report
-  counts `unknown` origins by Ferry's evidence so the gap is visible.
+  therefore few or no counted turns by default. `--infer-human` recovers them at a stated
+  false-positive risk; the upstream fix is a host that records who typed a prompt.
 - Recall on rules written from review postmortems is low: those come from one costly event,
   not repetition. This loop complements postmortems; it does not replace them.
 - The loop needs weeks of history, and each run re-classifies its window.

@@ -219,7 +219,7 @@
       "description": "v0.2: a correction-recurrence proposal (flow-agents learn) cites Thread messages (never raw transcripts), recommends an enforcement rung, and records whether a model judge found a conflicting or covering line in the target rule file.",
       "if": { "properties": { "pattern": { "const": "correction-recurrence" } }, "required": ["pattern"] },
       "then": {
-        "required": ["source", "scope", "theme", "rule", "severity", "enforcement", "conflict", "conflict_check"],
+        "required": ["source", "scope", "authority", "theme", "rule", "severity", "enforcement", "conflict", "conflict_check"],
         "properties": {
           "severity": { "const": "advisory" },
           "source": {
@@ -238,6 +238,7 @@
             "if": { "properties": { "kind": { "const": "repo" } } },
             "then": { "required": ["repo"] }
           },
+          "authority": { "description": "inferred when any cited occurrence is an unknown-origin turn a model judged human (--infer-human)", "enum": ["human", "inferred"] },
           "target": { "properties": { "kind": { "enum": ["agents-md", "skill", "hook", "veritas-check"] } } },
           "theme": {
             "type": "object",
@@ -247,7 +248,7 @@
           "rule": { "type": "string", "minLength": 1 },
           "evidence": {
             "properties": {
-              "cost": { "required": ["occurrences", "sessions", "high_pain", "rate_per_week"] },
+              "cost": { "required": ["occurrences", "sessions", "high_pain", "rate_per_week", "human_occurrences", "inferred_occurrences"] },
               "defect": {
                 "required": ["rule", "citations"],
                 "properties": {
@@ -264,6 +265,7 @@
                         "at": { "type": "string" },
                         "excerpt": { "type": "string", "maxLength": 200 },
                         "kind": { "enum": ["correction", "nudge", "frustration"] },
+                        "authority": { "enum": ["human", "inferred"] },
                         "pain": { "type": "integer", "minimum": 0, "maximum": 3 }
                       }
                     }
