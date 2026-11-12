@@ -39,9 +39,18 @@ executable checks. A human decides every proposal.
   transcript reader, scrub and Relay/Dispatch model route rather than forking them. Unlike the
   dream, it needs no telemetry file or host: it reads the harnesses' own transcript
   directories, so it works without a Flow run or kit adoption.
-- **Enforcement escalates with recurrence.** A theme's first proposal is a prose rule. It
-  climbs to a skill, a hook and an executable check when a ratified rung is measured not to
-  stop the recurrence, and starts at a skill when the rule is already written down.
+- **Only measured failure escalates.** A theme's first proposal is a prose rule. It climbs to a
+  skill, a hook and an executable check only when a ratified rung is measured not to reduce the
+  recurrence. A rule already written down is reported, not escalated on.
+- **The ledger's decisions are respected.** A theme with an open proposal gets no second one.
+  After a rejection or a ratification, only later occurrences count. A rejected theme returns
+  only if those cross the threshold again.
+- **Scoped to one repository by default.** Sessions count when their working directory belongs to
+  the current repository (any subdirectory or worktree, by Git's common directory). Reading every
+  project is explicit (`--all-projects`) and warned about, and the loop refuses to write its
+  ledger where Git would track it.
+- **Writers take one lock.** The learn loop and both ledger scripts share the dream run's epoch
+  lock; the loop re-reads under it and refuses if a decision changed during the run.
 - **Conflicts are surfaced, not resolved.** A model judge checks each rule against the target
   rule file and cites the line. A contradiction is shown to the reviewer as a current/proposed
   pair, because a learned preference that contradicts a written rule is itself worth deciding.

@@ -8,6 +8,12 @@ person ratifies, rejects or defers every proposal. Nothing is ever applied for y
 It needs no Flow run, no telemetry setup and no kit adoption: it reads the transcripts
 Claude Code and Codex already keep (`~/.claude/projects`, `~/.codex/sessions`).
 
+**Required version.** The loop counts only messages the transcript importer marks as typed by
+a person, which needs `@kontourai/ferry` **0.8.0 or later** (with `@kontourai/thread` 0.7.0,
+schema 1.3.0, which adds `Message.origin`). The Flow Agents package still pins Ferry 0.6.0
+until the dependency bump lands; with it, `flow-agents learn` refuses with exit 2
+(`LEARN_ORIGIN_UNAVAILABLE`) and `--dry-run` reports `origin-unavailable`.
+
 Proposals use the `correction-recurrence` source family of the
 [`kontour.learning-review-proposals` contract](../../../docs/specs/learning-review-proposals-contract.md)
 (v0.2), so they share that contract's ledger, decision script and effect measurement with
@@ -21,8 +27,34 @@ flow-agents learn --since 60d          # classify, cluster, propose
 flow-agents learn --json > learn.json  # the full contract document
 ```
 
-Run it in the repository whose `AGENTS.md` (or `CLAUDE.md`) the proposals should target. Without
-either file it still proposes, but skips the conflict check and says so.
+Run it inside the repository you want to learn for. Its `AGENTS.md` (or `CLAUDE.md`) at the
+repository root is the file proposals target. Without either file the loop still proposes, but
+it skips the conflict check and says so.
+
+### Which sessions count
+
+By default, only sessions recorded in **this repository** count. A transcript records the
+directory its session ran in, and:
+
+- a directory that still exists counts when Git says it belongs to the same repository (the
+  same `git rev-parse --git-common-dir`). That includes every subdirectory and every linked
+  worktree, and excludes a different repository nested under this one's path.
+- a directory that no longer exists counts when its path is under the main checkout or a
+  worktree Git still lists. A session from a worktree that has since been removed, and that lived
+  outside those paths, cannot be attributed and is not counted.
+
+Each worktree has its own default ledger, at that worktree's root. Its sessions, however,
+cover every worktree of the repository. Run the loop from one checkout (or pass the same
+`--ledger`) so proposals and their measurements accumulate in one place. Proposals record the
+repository they were learned for (`scope`), and a run measures and builds on only the entries
+of its own scope.
+
+`--all-projects` reads every project on the machine. It prints a warning, because excerpts of
+corrections you made in other repositories are then written into this repository's ledger.
+
+Outside a Git repository, the loop refuses (exit 2) unless you pass `--all-projects`. Inside
+one, it refuses to write its ledger or review queue anywhere Git would track or commit them
+(`LEARN_LEDGER_TRACKED`): `.kontourai/` must be ignored, as it is in this repository.
 
 The model is the Datum role `extraction-default`, the same role and route the
 [dream run](dream.md) uses. A machine already set up for the dream needs nothing more; otherwise
@@ -33,27 +65,33 @@ role.
 | --- | --- | --- |
 | `--since` | `30d` | `Nd`, `YYYY-MM-DD` (UTC) or an ISO-8601 timestamp. Anything else is refused. |
 | `--dry-run` | off | Read and count only. No model call, no ledger, no review items. |
+| `--all-projects` | off | Read every project, not just this repository (see above). |
 | `--transcripts DIR` | the two harness directories | Repeatable. Every `*.jsonl` below it is read; symlinks are not followed. |
-| `--ledger PATH` | `$LEARNING_REVIEW_PROPOSALS_LEDGER`, else `<cwd>/.kontourai/telemetry/learning-review-proposals.jsonl` | The contract's ledger. |
-| `--rules-file PATH` | `AGENTS.md`, else `CLAUDE.md`, in the working directory | The file proposals target and are judged against. |
+| `--ledger PATH` | `$LEARNING_REVIEW_PROPOSALS_LEDGER`, else `<worktree root>/.kontourai/telemetry/learning-review-proposals.jsonl` | The contract's ledger. |
+| `--rules-file PATH` | `AGENTS.md`, else `CLAUDE.md`, at the worktree root | The file proposals target and are judged against. A symlink is followed to a regular file you own that no other user can write. |
 | `--min-occurrences`, `--min-sessions`, `--min-high-pain` | 5, 3, 2 | The thresholds below. |
 | `--json` | off | Print the contract document instead of the summary. |
 
-Exit codes: 0 ran (including a dry run and too little history), 1 failed, 2 usage or
-configuration (no model set up, a corrupt ledger, or transcripts with no message origin).
+Exit codes: 0 ran (including a dry run and too little history), 1 failed (including a ledger
+another writer holds, or one whose decisions changed during the run), 2 usage or configuration
+(no model set up, not in a repository, a corrupt or committable ledger, an unusable rules file,
+or transcripts with no message origin).
 
 ## What it does
 
 ```
-transcripts -> user messages whose origin is human -> drop continuation pings
+transcripts of this repository -> user messages whose origin is human -> drop continuation pings
   -> classify (model) -> keep general corrections, nudges and frustration
-  -> cluster into themes (model) -> threshold
-  -> enforcement rung + conflict check (model) -> proposals
-  -> measure ratified proposals -> ledger + Survey review items
+  -> cluster into themes (model) -> measure ratified proposals
+  -> per theme: its history decides what may be proposed, and from when occurrences count
+  -> threshold -> conflict check (model) -> proposals
+  -> under the ledger lock: re-read, merge, write the review queue, then the ledger
 ```
 
-Every model call happens before the first write. A failed or malformed model answer fails
-the run and leaves the ledger as it was.
+Every model call happens before the lock is taken and before the first write. A malformed
+model answer is asked for once more; a second one fails the run, which then writes nothing.
+Transcript text and rule-file lines reach the model as JSON strings, so a message that
+contains markup or something shaped like another message stays inside its own string.
 
 ### Only your own words count
 
@@ -98,7 +136,22 @@ its effect.
 A theme becomes a proposal when either:
 
 - it recurred at least **5** times across at least **3** sessions, or
-- at least **2** of its occurrences were high pain (pain 3).
+- at least **2** of its occurrences were high pain (pain 3), in at least **2** sessions.
+
+A new theme that narrows an existing one records it as its `parent`. Measurement and history
+follow parents to the root theme, so a theme the model splits differently in a later run still
+counts against the proposal that was ratified for it.
+
+### What a theme's history allows
+
+Only occurrences that the ledger's decisions have not already answered are counted:
+
+| The theme's history (same repository) | What the run does |
+| --- | --- |
+| An open proposal (`proposed` or `deferred`) | Proposes nothing new. A theme never has two pending proposals; the open one is reported. |
+| No decision yet | Counts every occurrence; may propose a prose rule. |
+| Latest decision **rejected** | Counts only occurrences since the rejection. If they cross the threshold again, proposes again at the same rung under a new id. |
+| Latest decision **ratified** | Counts only occurrences since the ratification. Proposes the next rung only when the ratified proposal has been **measured** as `worsened` or `unchanged`. Until then (no measurement, too little data, or `improved`) it proposes nothing. |
 
 A window with fewer than 3 sessions containing human turns is reported as `insufficient-data`
 and spends no model call.
@@ -110,9 +163,12 @@ Each proposal recommends one rung of a ladder, and its target kind is that rung:
 | Rung | `target.kind` | When |
 | --- | --- | --- |
 | 0 | `agents-md` | First proposal for a theme: add the rule to the rule file. |
-| 1 | `skill` | The rule file already says it and the correction recurs anyway, or a ratified prose rule did not reduce the recurrence. |
-| 2 | `hook` | A ratified skill did not reduce it. |
-| 3 | `veritas-check` | A ratified hook did not reduce it: propose an executable check for the repository's Veritas config. |
+| 1 | `skill` | A ratified prose rule was measured not to reduce the recurrence. |
+| 2 | `hook` | A ratified skill was measured not to reduce it. |
+| 3 | `veritas-check` | A ratified hook was measured not to reduce it: propose an executable check for the repository's Veritas config. |
+
+Only a measurement climbs the ladder. A rule file that already says the same thing is reported
+(`covered_by`) but is not, by itself, a reason to escalate.
 
 `enforcement.reason` says why, and `enforcement.prior_proposal_ids` names the earlier proposals
 for the theme.
@@ -124,8 +180,11 @@ line, and the loop checks that line exists and has text before accepting the ans
 
 - `conflict`: the line tells the agent something incompatible. The proposal says so, and its
   review item puts the written line and the learned rule side by side.
-- `covered_by`: the line already says the same thing. The correction still recurs, so the
-  proposal starts at `skill`.
+- `covered_by`: the line already says the same thing. The proposal says so; whether the written
+  rule needs strengthening is for you to decide.
+
+Lines are numbered after the whole file is scrubbed. A multi-line secret (a private key block)
+becomes one `<SECRET>` line, so line numbers after one can differ from the file's.
 
 On a real corpus, 2 of the 5 strongest learned rules contradicted rules already written down.
 Neither is a reason to drop the proposal; both are for you to decide.
@@ -148,11 +207,31 @@ your follow-up work.
 
 ### Did it work?
 
-On each run, a ratified proposal is measured once the scanned window reaches back to its
-ratification and at least 14 days have passed since it. `effect_observed` compares the
-theme's recurrence per week since ratification with the rate that triggered the proposal.
-Zero recurrences is a measurement (`improved`), not a gap. A proposal that did not reduce the
-recurrence moves the theme's next proposal one rung up the ladder.
+A ratified proposal is measured on each run whose window reaches back to its ratification,
+once at least 14 days have passed since it. The measurement asks how many recurrences the
+rate that triggered the proposal would predict for that period:
+`expected = rate_per_week x days / 7`.
+
+- Fewer than **3** expected: `insufficient-data`. A count that small cannot tell an improvement
+  from chance.
+- Observed at most `expected x 0.7`: `improved`. At least `expected x 1.3`: `worsened`. In
+  between: `unchanged`.
+
+This is a heuristic tolerance band, not a significance test. Zero recurrences is a measurement,
+not a gap. The measurement is repeated on later runs as more time passes; the previous one moves
+to `effect_history`, so one early sample is never final. A run with the same count over the same
+whole number of days changes nothing.
+
+### Writers take turns
+
+`flow-agents learn`, `learning-review-proposals.sh` and `learning-review-decide.sh` take the same
+exclusive lock (`<ledger>.lock`, the dream run's lock protocol) around their read-modify-write,
+and wait up to `LEARNING_REVIEW_LOCK_TIMEOUT_MS` (default 10 s) for it. The learn loop does its
+model work first and takes the lock only to write: it re-reads the ledger, and if any
+correction-recurrence decision changed since it started (for example, you ratified a
+proposal meanwhile), it refuses with `LEARN_LEDGER_CHANGED` and writes nothing. Run it again.
+Lines from other producers are kept exactly as they are at that moment. The review queue is
+written before the ledger.
 
 ## Privacy
 
@@ -206,3 +285,12 @@ in that list, so it also measures the filter.
 - **Review is a file and a script.** The review items are Survey `ReviewItem`s, but they are
   not yet served through `flow-agents kit review`; decisions are recorded with
   `learning-review-decide.sh`.
+- **Effect statistics are coarse.** The tolerance band and the 3-expected minimum are fixed
+  heuristics. Rates are per week over the whole period, so a burst and a steady trickle look
+  alike.
+- **Theme lineage depends on the model.** A split is followed only when the clustering model
+  names the parent theme. A split it does not name starts a new theme with no history.
+- **Themes in non-Latin scripts get opaque ids** (`theme-<hash>`). They are stable, but not
+  readable.
+- **Removed worktrees outside the repository's paths are not attributed** (see Which sessions
+  count).
