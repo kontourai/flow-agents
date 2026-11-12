@@ -122,6 +122,8 @@ test('createRequire and require.resolve shapes esbuild does not report still fai
       'lib/named.js': 'import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nexport const where = req.resolve("right-pad/package.json");\n',
       'lib/shadow.js': 'import { createRequire } from "node:module";\nconst require = createRequire(import.meta.url);\nexport const c = require("center-pad");\n',
       'lib/resolve.cjs': 'module.exports = require.resolve("other-pad");\n',
+      'lib/alias.js': 'import { createRequire as cr } from "node:module";\nconst load = cr(import.meta.url);\nexport const x = [cr(import.meta.url)("alias-pad"), load("alias-named-pad")];\n',
+      'lib/member.cjs': 'const mod = require("node:module");\nmodule.exports = mod.createRequire(__filename)("member-pad");\n',
     },
   });
   const { status, output } = runGuard(root);
@@ -130,6 +132,9 @@ test('createRequire and require.resolve shapes esbuild does not report still fai
   assert.match(output, /lib\/named\.js: created-require-resolve "right-pad\/package\.json"/);
   assert.match(output, /lib\/shadow\.js: created-require-call "center-pad"/);
   assert.match(output, /lib\/resolve\.cjs: require-resolve "other-pad"/);
+  assert.match(output, /lib\/alias\.js: created-require-call "alias-pad"/);
+  assert.match(output, /lib\/alias\.js: created-require-call "alias-named-pad"/);
+  assert.match(output, /lib\/member\.cjs: created-require-call "member-pad"/);
 });
 
 test('path.resolve, commented resolve calls and declared created-require targets pass', (t) => {

@@ -196,8 +196,13 @@ export async function collectResolveEdges(root, files) {
       if (!specifier.includes("${")) edges.push({ file, specifier, kind });
     };
     for (const m of code.matchAll(new RegExp(String.raw`\brequire\.resolve\(${STRING}`, "g"))) add("require-resolve", m.groups.spec);
-    for (const m of code.matchAll(new RegExp(String.raw`\bcreateRequire\([^()]*(?:\([^()]*\)[^()]*)*\)(?<res>\.resolve)?\(${STRING}`, "g"))) add(m.groups.res ? "created-require-resolve" : "created-require-call", m.groups.spec);
-    const names = [...code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[\w$]+\.)?createRequire\s*\(/g)].map((m) => m[1]);
+    // createRequire under its own name or an alias (`import { createRequire as cr }`,
+    // `const { createRequire: cr } = …`).
+    const factories = new Set(["createRequire"]);
+    for (const m of code.matchAll(/\bcreateRequire\s*(?:as\s+|:\s*)([A-Za-z_$][\w$]*)/g)) factories.add(m[1]);
+    const factory = String.raw`(?<![\w$])(?:[\w$]+\.)?(?:${[...factories].map((name) => name.replace(/\$/g, "\\$")).join("|")})`;
+    for (const m of code.matchAll(new RegExp(String.raw`${factory}\([^()]*(?:\([^()]*\)[^()]*)*\)(?<res>\.resolve)?\(${STRING}`, "g"))) add(m.groups.res ? "created-require-resolve" : "created-require-call", m.groups.spec);
+    const names = [...code.matchAll(new RegExp(String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*${factory}\s*\(`, "g"))].map((m) => m[1]);
     for (const name of new Set(names)) {
       if (name === "require") continue; // handled below
       const escaped = name.replace(/\$/g, "\\$");
