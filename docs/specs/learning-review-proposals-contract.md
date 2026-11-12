@@ -1,7 +1,7 @@
-# `kontour.learning-review-proposals` — kit/gate tuning proposal contract (v0.1)
+# `kontour.learning-review-proposals` — advisory learning proposal contract (v0.2)
 
 **Status:** ratified (flow-agents #352). **Kind:** `kontour.learning-review-proposals`.
-**Version:** `0.1`.
+**Version:** `0.2` (additive over `0.1`: [v0.2: the correction-recurrence source family](#v02-the-correction-recurrence-source-family)).
 
 ## Purpose
 
@@ -13,8 +13,9 @@ window of `economics.jsonl`, joins each record's kit/gate identity from already-
 sidecar shapes, computes aggregates, and emits proposals into a durable, idempotent ledger. A
 companion script, `scripts/telemetry/learning-review-decide.sh`, records the human
 ratify/reject/defer decision against a proposal id. Nothing here is ever auto-applied:
-`learning-review` step 2b (see `kits/builder/skills/learning-review/SKILL.md`) surfaces the
-output for review; a human decides.
+an operator reads the output and the ledger and a human decides. (The `learning-review`
+skill's former step 2b, which surfaced this output, was removed in #552; no skill reads the
+ledger today.)
 
 This is a pure **consumer**: it makes zero edits to `economics-record.sh`,
 `economics-record.schema.json`, or `gate-review`'s `InquiryRecord` output (ADR 0008/0010
@@ -297,7 +298,8 @@ an unratified proposal). All other ledger lines are left byte-identical.
 ## Effect-fill pass (AC5)
 
 On every `learning-review-proposals.sh` invocation, AFTER computing and ledgering the current
-window's proposals: scan the ledger for entries where `decision.status == "ratified"` AND
+window's proposals: scan the ledger for `kit` and `gate` entries (other target kinds belong to
+another source family's producer and pass through unchanged) where `decision.status == "ratified"` AND
 `effect_observed == null` AND the entry's `window.until` (epoch-ms) is chronologically before
 the CURRENT invocation's effective `window.since` (epoch-ms) — i.e. the ratified proposal's
 own window has fully elapsed before this new window begins. For each match, recompute the
@@ -315,7 +317,8 @@ for the exact same `target`:
 
 If no `by_kit`/`by_gate` entry exists for that target in the current window (e.g. the kit/gate
 had zero runs this window), or the current metric is `null` (including a kit's newest half
-having no priced records), `effect_observed` is left `null` this pass. It is retried on the
+having no priced records), `effect_observed` is left `null` this pass, and the entry, with its
+recorded decision, is kept unchanged. It is retried on the
 next invocation with a measurable metric. A real numeric $0 can fill an effect measurement;
 an unknown cost cannot claim improvement.
 
@@ -358,4 +361,160 @@ non-zero move when `direction == "maintain"`).
 Same architecture, same input stream (`economics.jsonl`), same guardrails — generalized from
 per-`(role,model)` delegation efficiency to per-kit/per-gate review efficiency. Both are purely
 manual/skill-invoked (no scheduler/cron primitive exists in this repo for either); both are
-wired into `learning-review`'s closeout step (2a for routing, 2b for this contract).
+invoked by an operator; neither is read by a skill today (see Purpose).
+
+## v0.2: the correction-recurrence source family
+
+v0.2 is additive. Every v0.1 document and ledger line is still valid, the two scripts above
+are unchanged in behaviour for `kit` and `gate` proposals (apart from the ledger lock below),
+and a document's `version` is `"0.1"` or `"0.2"`. A `"0.1"` document may not carry
+`source_family`, the `origin-unavailable` outcome or a correction-recurrence proposal, and each
+v0.1 pattern targets its own kind (`kit-review-cost-inflation` a `kit`, the gate patterns a
+`gate`). v0.2 adds a second **source family**, `correction-recurrence`, produced by
+`flow-agents learn` (`kits/knowledge/learn/`, guide: `kits/knowledge/docs/learn.md`). It mines
+a developer's coding-agent transcripts for corrections they keep repeating and proposes agent
+rules, skills, hooks or executable checks. Its proposals share the v0.1 ledger, the decision
+script and the advisory-only guardrails.
+
+### Additions to the document
+
+| Field | Meaning |
+| --- | --- |
+| `source_family` | `"correction-recurrence"` on a learn document; absent on a v0.1 document. |
+| `outcome` | Adds `"origin-unavailable"`: a dry run whose transcripts carry no message origin, so no turn can be counted as human. |
+| `aggregates.by_theme[]` | One row per theme: `theme_id`, `label`, `occurrences`, `sessions`, `by_kind`, `mean_pain`, `high_pain`, `first_at`, `last_at`, `qualifies`. `by_kit` and `by_gate` are present and empty. |
+| `records_considered` | The human turns sent for classification (after continuation pings are dropped). |
+| `report` | Read counts: transcripts seen/read/skipped by reason, user messages by `origin.kind`, unknown origins by Ferry's evidence string, human turns, model calls. Output only. |
+
+### A correction-recurrence proposal
+
+```json
+{
+  "proposal_id": "correction-recurrence-<target.kind>-<theme.id>[-after-<decision time>]-<all | r<8 hex>>",
+  "source": { "family": "correction-recurrence", "producer": "knowledge.learn", "contract_version": "0.2", "classifier_version": "1" },
+  "scope": { "kind": "repo", "repo": "~/dev/<repository main worktree>" },
+  "authority": "human | inferred",
+  "target": { "kind": "agents-md | skill | hook | veritas-check", "id": "<rule file name, or the theme id>" },
+  "pattern": "correction-recurrence",
+  "theme": { "id": "<stable slug>", "label": "<the rule, at most 15 words>" },
+  "rule": "<the rule, at most 15 words>",
+  "proposed_change": "<human-readable recommendation for the target kind>",
+  "severity": "advisory",
+  "evidence": {
+    "cost": { "occurrences": 0, "sessions": 0, "high_pain": 0, "high_pain_sessions": 0, "human_occurrences": 0, "human_sessions": 0, "inferred_occurrences": 0, "mean_pain": 0, "by_kind": { "correction": 0, "nudge": 0, "frustration": 0 },
+              "first_at": "<ISO>", "last_at": "<ISO>", "counted_since": "<ISO|null>", "window_days": 0, "rate_per_week": 0 },
+    "defect": { "rule": "...", "general": true, "citations_total": 0,
+                "citations": [ { "thread_id": "claude-code:<session>", "message_id": "<id>", "harness": "claude-code", "at": "<ISO>", "kind": "correction", "pain": 0, "excerpt": "<scrubbed, <= 200 bytes>" } ] }
+  },
+  "enforcement": { "recommended": "agents-md", "rung": 0, "ladder": ["agents-md", "skill", "hook", "veritas-check"], "reason": "...", "prior_proposal_ids": [] },
+  "conflict": null,
+  "covered_by": null,
+  "conflict_check": { "status": "checked | skipped", "file": "AGENTS.md" },
+  "expected_effect": { "metric": "recurrence_per_week", "direction": "decrease", "description": "..." },
+  "decision": { "status": "proposed", "decided_by": null, "decided_at": null, "rationale": null },
+  "follow_on_ref": null,
+  "effect_observed": null,
+  "window": { "since": "<epoch-ms|null>", "until": "<epoch-ms>" }
+}
+```
+
+- **Goodhart pairing.** `evidence.cost` is what the recurrence costs the developer (how often,
+  in how many sessions, how painful); `evidence.defect` is what the agent keeps getting wrong,
+  with citations. Both stay co-required.
+- **Citations, not transcripts.** Each citation is a Thread locator (`thread_id` =
+  `<harness>:<session id>`, `message_id`) with a scrubbed excerpt of at most 200 bytes. At most 8
+  are kept (highest pain first, then most recent); `citations_total` is the full count. The
+  schema requires at least one.
+- **Human turns, unless inference is opted into.** An occurrence is a user message whose Thread
+  `origin.kind` is `"human"` (Ferry 0.8.0 or later) and that is not wholly an envelope
+  (`origin.envelope`). Agent briefs and every other origin, including `unknown` and an absent
+  origin, never count. Under `--infer-human` (off by default), `unknown`-origin turns (no
+  envelope, no sidechain, not a Codex `exec` or `mcp` session) that a conservative model author
+  classifier judges human also count,
+  marked `authority: "inferred"` on the citation. A proposal is `authority: "inferred"` when any
+  citation is, and `evidence.cost` carries `human_occurrences` and `inferred_occurrences`. A theme
+  carried only by inferred turns needs them in at least 2 sessions.
+- **Ids carry the scope.** The id ends in `all` (all-projects) or `r` plus 8 hex of a hash of
+  `scope.repo`, so proposals of several scopes can share one ledger.
+- **Scope.** `scope` is the repository the sessions were read from (`{kind: "repo", repo}`, the
+  main worktree path with the home directory as `~`), or `{kind: "all-projects"}`. Theme history
+  and effect measurement use only entries of the run's own scope.
+- **Theme history.** Per theme, followed through `theme.parent` to its lineage root, among
+  entries of the same scope: an open proposal (`proposed` or `deferred`) blocks any new one; after
+  a rejection only later occurrences count, and crossing the threshold again proposes the same
+  rung under an id suffixed `-after-<decision time>`; after a ratification only later
+  occurrences count, and only an `effect_observed.moved` of `worsened` or `unchanged` allows a
+  proposal, one rung higher. `evidence.cost.counted_since` is that decision time.
+- **Enforcement.** `target.kind` is `enforcement.recommended`: `agents-md` first, then one rung
+  per ratified rung measured not to work. A `covered_by` finding is reported, never a reason to
+  escalate.
+- **Conflict.** `conflict` is `null`, or `{file, line, text, explanation, judge: "model"}` when a
+  model judge found a line in the target rule file that contradicts the rule. `covered_by` has
+  the same shape for a line that already says it. The cited line must exist and hold text, or
+  the judge's answer is refused. `conflict_check.status` is `skipped` when no rule file was found.
+- **Thresholds.** A theme is proposed when it recurred at least 5 times across at least 3
+  sessions, or at least 2 occurrences had pain 3 in at least 2 sessions. A window with fewer than 3 sessions holding
+  human turns is `insufficient-data` and proposes nothing.
+- **Idempotence.** The same `proposal_id` is never appended twice; a later run marks it
+  `already_proposed:true`. A run that changes nothing leaves the ledger byte-identical, and
+  other producers' lines always keep their bytes. A ledger line that does not parse stops the
+  run before anything is written.
+
+### Effect: does the correction stop recurring?
+
+Each learn run measures ratified correction-recurrence proposals of its scope whose
+ratification it can see: the run's window starts at or before `decision.decided_at`, and at
+least 14 days have passed since. The basis (`measured_on`) is human-origin turns when the
+proposal's `human_occurrences` and `human_sessions` alone met the proposal threshold
+(`minOccurrences`, `minSessions`), or when it has no inferred occurrences: `before` is then the
+human-origin rate (`human_occurrences x 7 / max(7, window_days)`) and `after` the lineage root's
+human-origin recurrences per week since the decision, the same with or without
+`--infer-human`. Otherwise the basis is inferred turns (`inferred_occurrences` and inferred
+recurrences), measured only by a run that infers.
+
+The basis is decided at the first measurement and frozen on the entry:
+`"measurement_basis": { "measured_on": "human | inferred", "thresholds": { "min_occurrences": 5, "min_sessions": 3 }, "decided_at": "<ISO>" }`.
+Every later measurement reuses it, whatever thresholds the later run was given. A stored
+`measurement_basis` must have exactly this shape (`measured_on` `human` or `inferred`;
+positive-integer `min_occurrences` and `min_sessions`; an ISO-8601 `decided_at`). Any other
+value is treated as absent: re-decided, rewritten whole at the next measurement (even if the
+sample is unchanged), and named in the run's `notes`. For an entry
+without `evidence.cost.human_sessions`, the human session count is taken from
+`evidence.defect.citations`: exactly when `citations_total` equals the number of citations and
+every human citation names a `thread_id`, or as a lower bound that already meets `min_sessions`.
+A citation without a `thread_id` is never counted as a session. If neither settles it, the entry is left
+unmeasured and the run's `notes` name it. With
+`expected = before x days / 7`: fewer than 3 expected is `insufficient-data`; an observed count
+at most `expected x 0.7` is `improved`, at least `expected x 1.3` is `worsened`, otherwise
+`unchanged`. This is a heuristic band, not a significance test. Zero recurrences is a
+measurement. Later runs measure again; the previous measurement moves to `effect_history`
+(at most 12 kept), and a run with the same count over the same whole number of days writes
+nothing.
+
+```json
+"effect_observed": { "measured_at": "<ISO>", "metric": "recurrence_per_week", "before": 0.0, "after": 0.0,
+                     "moved": "improved | worsened | unchanged | insufficient-data", "measured_on": "human | inferred",
+                     "after_occurrences": 0, "after_days": 0.0,
+                     "expected_occurrences": 0.0, "tolerance": 0.3, "min_expected": 3 }
+```
+
+`learning-review-proposals.sh` never fills these entries, and keeps them unchanged.
+
+### Ledger lock
+
+Every writer of the ledger (`flow-agents learn`, `learning-review-proposals.sh` and
+`learning-review-decide.sh`, the scripts through `scripts/telemetry/ledger-lock.mjs`) takes the
+same exclusive lock, `<ledger>.lock` (the dream run's epoch lock), around its
+read-modify-write, waiting up to `LEARNING_REVIEW_LOCK_TIMEOUT_MS` (default 10000) and then
+refusing with nothing written. The learn loop re-reads the ledger under the lock and refuses
+(`LEARN_LEDGER_CHANGED`) when any correction-recurrence entry was added, removed or had its
+decision changed since it started; other producers' lines are kept exactly as they are then.
+
+### Review
+
+Each learn run also writes, before the ledger, the open queue (every correction-recurrence proposal whose
+decision is still `proposed`) as Survey `ReviewItem`s to
+`correction-recurrence.review-items.json` beside the ledger. A proposal with a `conflict` is a
+current/proposed pair (the written line and the learned rule); any other proposal is a single
+proposed candidate. Decisions are recorded with `learning-review-decide.sh`, exactly as for v0.1.
+

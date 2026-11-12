@@ -14,6 +14,7 @@ import { main as livenessFleet } from "./cli/liveness-fleet.js";
 import { main as consoleTrustProjection } from "./cli/console-trust-projection.js";
 import { main as dream } from "./cli/dream.js";
 import { main as kit } from "./cli/kit.js";
+import { main as learn } from "./cli/learn.js";
 import { main as codexGovernanceHook } from "./cli/codex-governance-hook.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
 import { main as init } from "./cli/init.js";
@@ -56,6 +57,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
+  ["learn", learn],
   ["codex-governance-hook", codexGovernanceHook],
   ["liveness-fleet", livenessFleet],
   ["narrative-render", narrativeRender],

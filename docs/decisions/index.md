@@ -16,6 +16,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [console-record-delivery](./console-record-delivery.md) | current | Console record delivery |
 | [context-lifecycle](./context-lifecycle.md) | needs-decision | Context lifecycle |
 | [core-domain-kit-boundary](./core-domain-kit-boundary.md) | needs-decision | Core vs domain kit boundary |
+| [correction-recurrence-learning](./correction-recurrence-learning.md) | current | Correction-recurrence learning |
 | [decision-records](./decision-records.md) | current | Decision records |
 | [embeddable-engine](./embeddable-engine.md) | needs-decision | Embeddable engine and adapter model |
 | [flow-flow-agents-boundary](./flow-flow-agents-boundary.md) | needs-decision | Flow / Flow Agents boundary |

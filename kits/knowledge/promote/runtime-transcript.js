@@ -287,22 +287,20 @@ function requireSessionId(id) {
 }
 
 /**
- * Read a runtime transcript into canonical conversation messages.
+ * Import a runtime transcript as a canonical Thread, with the drift checks every
+ * reader of runtime transcripts shares. `thread` is null when the transcript
+ * holds no conversation (or is a Codex sidechain, reported as `sidechain`).
  *
- * @param {"claude-code" | "codex"} harness  the runtime telemetry says wrote it
+ * @param {"claude-code" | "codex"} harness  the runtime the transcript claims to be
  * @param {Buffer} content  the whole transcript file
- * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
- *   gitBranch: string | null, partialTail: boolean, unterminatedMemory: boolean,
- *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}>,
- *   droppedUserTurns: Record<string, number> }}
+ * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null, gitBranch: string | null,
+ *   partialTail: boolean, thread: object | null, shimDropped: Record<string, number> }}
+ *   `shimDropped` counts, by kind, user records the line shims removed before import (see runtime-ferry-shims.js).
  * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
-export function readConversation(harness, content) {
+export function importRuntimeThread(harness, content) {
   const { lines, partialTail } = completeLines(content);
-  const empty = {
-    sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, unterminatedMemory: false, messages: [],
-    droppedUserTurns: {},
-  };
+  const empty = { sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, thread: null, shimDropped: {} };
   if (lines.length === 0) return empty;
 
   const detected = detectFormat(lines.slice(0, 200).join("\n"));
@@ -323,22 +321,22 @@ export function readConversation(harness, content) {
     }
     const thread = importThread(createClaudeCodeImporter, kept);
     // A record removed for a non-human raw origin is a user turn a person did not write; its kind is Ferry's to name.
+    // It never reaches the Thread, so it is returned beside it for every reader to count.
     const shimDropped = unattributed ? { unknown: unattributed } : {};
-    if (!thread) return { ...empty, droppedUserTurns: shimDropped };
+    if (!thread) return { ...empty, shimDropped };
     if (thread.id === FERRY_CLAUDE_FALLBACK_ID) throw drift("claude-code: no record carries a sessionId");
     // A subagent's own transcript (Ferry 0.8 imports it, under the id `<parent>:agent-<id>`) is a sidechain,
     // as a Codex subagent rollout is: its "user" is the parent agent.
     const subagent = thread.metadata?.custom?.claudeSubagent;
     if (subagent) return { ...empty, sessionId: requireSessionId(subagent.parentSessionId), sidechain: true };
-    const conversation = conversationFromThread(thread);
-    for (const [kind, count] of Object.entries(shimDropped)) conversation.droppedUserTurns[kind] = (conversation.droppedUserTurns[kind] ?? 0) + count;
     return {
       sessionId: requireSessionId(thread.id),
       sidechain: false,
       cwd: thread.metadata?.cwd ?? null,
       gitBranch: thread.metadata?.git?.branch ?? null,
       partialTail,
-      ...conversation,
+      thread,
+      shimDropped,
     };
   }
 
@@ -356,14 +354,59 @@ export function readConversation(harness, content) {
   }
   const thread = importThread(createCodexImporter, kept);
   if (!thread) return { ...empty, sessionId, gitBranch: meta.gitBranch };
-  return {
-    sessionId,
-    sidechain: false,
-    cwd: thread.metadata?.cwd ?? null,
-    gitBranch: meta.gitBranch,
-    partialTail,
-    ...conversationFromThread(thread),
-  };
+  return { sessionId, sidechain: false, cwd: thread.metadata?.cwd ?? null, gitBranch: meta.gitBranch, partialTail, thread, shimDropped: {} };
+}
+
+/**
+ * Read a runtime transcript into canonical conversation messages.
+ *
+ * @param {"claude-code" | "codex"} harness  the runtime telemetry says wrote it
+ * @param {Buffer} content  the whole transcript file
+ * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
+ *   gitBranch: string | null, partialTail: boolean, unterminatedMemory: boolean,
+ *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}>,
+ *   droppedUserTurns: Record<string, number> }}
+ * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
+ */
+export function readConversation(harness, content) {
+  const { thread, shimDropped, ...meta } = importRuntimeThread(harness, content);
+  if (!thread) return { ...meta, unterminatedMemory: false, messages: [], droppedUserTurns: { ...shimDropped } };
+  const conversation = conversationFromThread(thread);
+  for (const [kind, count] of Object.entries(shimDropped)) conversation.droppedUserTurns[kind] = (conversation.droppedUserTurns[kind] ?? 0) + count;
+  return { ...meta, ...conversation };
+}
+
+/**
+ * The canonical user and assistant messages of a runtime transcript, one per
+ * Thread message (never merged), each with its Thread message id and the
+ * `origin` the importer derived (`undefined` when the importer derives none).
+ * Text has injected memory and harness tags removed, as in `readConversation`;
+ * it is NOT scrubbed, so a caller that sends or stores it must scrub it first.
+ * A message whose text is empty after stripping is still returned, so a reader
+ * can count it by origin.
+ *
+ * @param {"claude-code" | "codex"} harness
+ * @param {Buffer} content
+ * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null, gitBranch: string | null,
+ *   partialTail: boolean, shimDropped: Record<string, number>, messages: Array<{id: string, role: "user"|"assistant",
+ *   origin: object | undefined, text: string, timestampMs: number, sidechain: boolean}> }}
+ *   `shimDropped` is user records removed before import, by kind: they have no text here, only a count.
+ */
+export function readRuntimeMessages(harness, content) {
+  const { thread, ...meta } = importRuntimeThread(harness, content);
+  const messages = [];
+  for (const message of thread?.messages ?? []) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    messages.push({
+      id: message.id,
+      role: message.role,
+      origin: message.origin,
+      text: messageText(message).text,
+      timestampMs: message.timestamp,
+      sidechain: message.metadata?.sidechain === true,
+    });
+  }
+  return { ...meta, messages };
 }
 
 /**

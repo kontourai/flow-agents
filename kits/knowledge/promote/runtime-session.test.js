@@ -195,6 +195,23 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
     assert.deepEqual(report.dropped_user_turns, { unknown: 4 }, "two transcripts with two each");
   });
 
+  test("a transcript whose only user record is removed before import is skipped as NO_CONVERSATION and still counted", () => {
+    const box = sandbox();
+    const lone = "5b1f2c3d-0000-4000-8000-00000000c1a2";
+    const file = path.join(path.dirname(box.claudeTranscript), `${lone}.jsonl`);
+    // Synthetic, in the line shape Claude Code writes: a typed prompt whose raw origin Ferry 0.8 would read as human.
+    fs.writeFileSync(file, `${JSON.stringify({
+      parentUuid: null, isSidechain: false, promptId: "p-lone", message: { role: "user", content: "a brief" }, permissionMode: "default",
+      type: "user", uuid: "00000000-0000-4000-8000-0000000000a1", timestamp: "2026-10-30T09:00:01.000Z", cwd: "/Users/fixture-user/dev/widget-service",
+      sessionId: lone, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "cli", promptSource: "typed", origin: { kind: "unclassified" },
+    })}\n`);
+    appendTelemetry(box, event("claude-code", file));
+    const { residues, report } = run(box);
+    assert.deepEqual(residues, []);
+    assert.deepEqual(report.skipped.map((entry) => entry.reason), ["NO_CONVERSATION"]);
+    assert.deepEqual(report.dropped_user_turns, { unknown: 1 }, "the no-thread path keeps the shim's count");
+  });
+
   test("Claude Code project JSONL yields user/assistant text sittings with provenance", () => {
     const box = sandbox();
     appendTelemetry(box, event("claude-code", box.claudeTranscript));
