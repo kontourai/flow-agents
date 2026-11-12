@@ -222,3 +222,19 @@ test('a dream config that fails the run\'s own checks serves nothing, rather tha
  assert.doesNotMatch(await f.sessionStart(), /violet kestrel/);
  delete process.env.FLOW_AGENTS_DREAM_CONFIG;
 });
+
+test('a dreamDir another user can write, or a briefs directory reached through a symlink, serves nothing', async t => {
+ const f = dreamFixture(t);
+ f.write(f.dir, 'global.json', ['configured amber heron']);
+ process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
+ assert.match(await f.sessionStart(), /configured amber heron/, 'baseline: a private dreamDir is read');
+ fs.chmodSync(f.dir, 0o777);
+ assert.doesNotMatch(await f.sessionStart(), /configured amber heron/, 'a world-writable dreamDir is refused');
+ fs.chmodSync(f.dir, 0o700);
+ // Another user's briefs, reached through a symlink in place of the briefs directory.
+ const elsewhere = path.join(f.temp, 'planted'); f.write(elsewhere, 'global.json', ['planted rook entry']);
+ fs.renameSync(path.join(f.dir, 'briefs'), path.join(f.temp, 'moved-briefs'));
+ fs.symlinkSync(path.join(elsewhere, 'briefs'), path.join(f.dir, 'briefs'));
+ assert.doesNotMatch(await f.sessionStart(), /planted rook entry/, 'a symlinked briefs directory is refused');
+ delete process.env.FLOW_AGENTS_DREAM_CONFIG;
+});

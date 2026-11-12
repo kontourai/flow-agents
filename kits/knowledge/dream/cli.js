@@ -28,8 +28,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { DEFAULT_ROLE, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
-import { createCliRuntime, createRoleRuntime, extractForRuntime } from "./model.js";
+import { DEFAULT_ROLE, assertOwnerControlledDir, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
+import { createCliRuntime, createRoleRuntime, extractForRuntime, modelSetupHelp } from "./model.js";
 import { defaultDreamDir, runDream } from "./run.js";
 import { dreamError } from "./util.js";
 
@@ -49,6 +49,20 @@ function storeForMissingRoot(root) {
     async listProposals() { return []; },
     async proposeCreate() { throw dreamError("DREAM_DRY_RUN", "a dry run proposes nothing"); },
   };
+}
+
+/** The runtime, reporting into `refused` when a call fails authentication (Relay's AUTHENTICATION_FAILED). */
+function watchAuthentication(runtime, refused) {
+  const watched = Object.create(runtime);
+  watched.invoke = async (...args) => {
+    try {
+      return await runtime.invoke(...args);
+    } catch (error) {
+      if (error?.code === "AUTHENTICATION_FAILED") refused.error = error;
+      throw error;
+    }
+  };
+  return watched;
 }
 
 export function parseArgs(argv) {
@@ -83,6 +97,11 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     return 2;
   }
   try {
+    // The run keeps its cursor, lock, reports and briefs here, and the SessionStart hook injects the briefs as the
+    // user's memory, so another user must not be able to write, or redirect, either directory.
+    const dreamDir = config.dreamDir ?? defaultDreamDir();
+    assertOwnerControlledDir(dreamDir, "dreamDir");
+    assertOwnerControlledDir(path.join(dreamDir, "briefs"), "dreamDir/briefs");
     let host;
     try {
       const module = await import(pathToFileURL(assertOwnerControlledFile(config.host, "host")).href);
@@ -95,12 +114,13 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);
     }
     if (args.dryRun && host.store == null) host.store = storeForMissingRoot(host.root);
+    const refused = {};
     if (!host.extract && !args.dryRun) {
       const runtime = host.runtime
         ?? (config.runtime
-          ? await createCliRuntime({ ...config.runtime, workDir: path.join(config.dreamDir ?? defaultDreamDir(), "claude-session") })
+          ? await createCliRuntime(config.runtime)
           : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
-      host.extract = await extractForRuntime(runtime);
+      host.extract = await extractForRuntime(watchAuthentication(runtime, refused));
     }
     const report = await runDream(host, {
       enabled: config.enabled,
@@ -110,6 +130,10 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       transcriptRoots: config.transcriptRoots,
       ...(config.dreamDir ? { dreamDir: config.dreamDir } : {}),
       ...Object.fromEntries(["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs", "proposerId", "visibility"].filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
+    }).catch((error) => {
+      // Every pass failing because the runtime refused its credentials is a setup problem, not a failed run.
+      if (error?.code !== "DREAM_DISTILL_FAILED" || !refused.error) throw error;
+      throw dreamError("DREAM_MODEL_UNAVAILABLE", `the model runtime refused its credentials (${refused.error.message}); for the Claude Code CLI, run claude and sign in with /login; for a Datum role, check its key`, { help: modelSetupHelp(config.role ?? DEFAULT_ROLE), report: error.report });
     });
     stdout.write(`${JSON.stringify(report)}\n`);
     return report.status === "blocked" ? 3 : 0;

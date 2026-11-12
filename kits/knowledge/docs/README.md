@@ -1186,25 +1186,18 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
    ```
 
    The default runtime factory supports `anthropic-compatible` providers.
-2. **The Claude Code CLI**, for a Claude subscription without an API key. Add this to the dream config instead of `role`:
+2. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
 
-   ```json
-   "runtime": { "kind": "claude-code", "model": "sonnet", "executable": "/abs/path/to/claude" }
-   ```
+The Claude Code CLI (a Claude subscription without an API key) is **not available yet**. The config accepts
+`"runtime": { "kind": "claude-code", "model": "sonnet" }`, but a real run with it exits 2 with `DREAM_MODEL_UNSUPPORTED`
+and starts nothing. Relay's Claude Code runtime would start `claude` with this process's whole environment, including
+provider keys, gateway URLs and other services' tokens. It would also start a full session that loads your hooks, MCP
+servers and `CLAUDE.md`, and any of those would see the transcript excerpt. The option opens when Relay can restrict
+both ([relay#84](https://github.com/kontourai/relay/issues/84)). Until then, a host that wants the CLI builds that
+runtime itself and owns those risks.
 
-   `executable` is optional; without it, the run uses `claude` from `PATH`. The run uses `@kontourai/relay/claude-code`
-   to start `claude --print` with no tools and no session persistence, then passes the scrubbed sitting on stdin.
-   Each extraction pass is one CLI call under a Dispatch token budget. Relay counts input and output tokens but not
-   cached prompt tokens, so the budget understates what the CLI actually uses.
-
-   The `claude` process is a full Claude Code session that loads your user-level settings, hooks and `CLAUDE.md`.
-   Any hook you have installed that logs prompts sees the scrubbed sitting. The run starts that session in
-   `<dreamDir>/claude-session`, a private 0700 directory, so no project settings load and no other user can plant
-   any there. Claude Code also reads `CLAUDE.md` from every directory above that one, so keep `dreamDir` outside any
-project checkout and out of shared directories such as `/tmp`; the default under your home directory is both. The run also sets `FLOW_AGENTS_DREAM_TRIGGER=0` and adds
-   `profile-memory` to `SA_DISABLED_HOOKS`. These settings stop the session from starting another dream run or
-   injecting existing briefs into the extraction prompt.
-3. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
+A run's token budget counts input and output tokens. Relay does not count cached prompt tokens, so the budget can
+understate what a provider charges.
 
 **Dry runs and a new memory root.** `--dry-run` creates nothing. Constructing a Corpus store over a memory root
 that does not exist yet creates that root, because Corpus binds a root to a stable identity at construction. So when
@@ -1213,9 +1206,16 @@ root as empty. Over an existing root, open the store as usual. When the root exi
 an empty answer would hide the proposals already in the root. Keep the store's coordination directory outside the root,
 because the store's constructor creates it.
 
-If none of these runtimes is configured, the run exits 2 with `DREAM_MODEL_UNCONFIGURED`. The error names the missing
-role and prints all three ways to set up a model. A missing credential (`DREAM_MODEL_UNAVAILABLE`) or an unsupported
-provider kind (`DREAM_MODEL_UNSUPPORTED`) also exits 2.
+If neither is configured, the run exits 2 with `DREAM_MODEL_UNCONFIGURED`. The error names the missing role and prints
+how to set up a model. A missing credential or a runtime that refuses its credentials (`DREAM_MODEL_UNAVAILABLE`, for
+example a 401 from the provider), and an unsupported provider or runtime (`DREAM_MODEL_UNSUPPORTED`), also exit 2.
+
+**The dream directory is yours alone.** `dreamDir` holds the cursor, lock, reports and the briefs that the
+SessionStart hook injects as your memory. The run, the hook trigger and the hook refuse a `dreamDir` or
+`dreamDir/briefs` that has a symlink anywhere on its path, is not owned by you, or is group or world writable. They
+also refuse one under a directory that another user owns, or that is group or world writable without the sticky bit.
+The run exits 2 and the hook injects nothing. A `dreamDir` that does not exist yet passes when the directories above
+it pass, and the run creates it 0700.
 
 **Where the briefs are read.** At `SessionStart`, the profile-memory hook reads briefs from the dream's `dreamDir`.
 If the hook's environment sets `FLOW_AGENTS_DREAM_CONFIG` (the same variable the hook trigger reads), the hook loads
@@ -1228,5 +1228,9 @@ Set `FLOW_AGENTS_DREAM_CONFIG` in your user-level environment. Do not let a proj
 names chooses the briefs that the hook injects as your memory. A project that can set a hook's environment can already
 run code in every Node hook (for example through `NODE_OPTIONS`), so the hook trusts this variable as much as the rest of
 that environment.
-A project ID is only a directory name, so two checkouts with the same final directory name share one project brief.
-That brief contains no claims beyond those already eligible for the global brief, which includes every project's claims.
+**Known limitation: a project ID is only a directory name.** The run and the hook derive the ID from the last
+segment of the working directory, lowercased, with other characters replaced by `-`. So `/a/api` and `/b/api` share
+one `project-api.json`, and a session in either checkout gets both checkouts' project claims. That brief contains no
+claims beyond those already eligible for the global brief, which includes every project's claims, but it does rank
+the other checkout's claims as this project's. A worktree whose directory name differs from its main checkout gets no
+project brief. A stable project identity is a follow-up.

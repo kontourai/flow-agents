@@ -34,7 +34,7 @@ function transcript(cwd = "/Users/fixture-user/dev/ledger") {
 
 /**
  * A stand-in for the `claude` command that Relay's Claude Code runtime spawns. It records what it was given (argv,
- * stdin, and the trigger guard from its environment) and answers in the CLI's `--output-format json` shape, with the
+ * working directory, two environment values and stdin) and answers in the CLI's `--output-format json` shape, with the
  * structured output the forced tool asks for: one claim, grounded in QUOTE, when the content holds it.
  */
 function fakeClaude(dir) {
@@ -45,6 +45,11 @@ function fakeClaude(dir) {
     for await (const chunk of process.stdin) chunks.push(chunk);
     const stdin = Buffer.concat(chunks).toString("utf8");
     fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ argv: process.argv.slice(2), trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), stdin }) + "\\n");
+    if (process.env.FAKE_CLAUDE_AUTH_FAIL === "1") {
+      // What the CLI prints when its sign-in is missing or expired: an error result with the API's 401.
+      process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: true, api_error_status: 401, result: "Invalid API key · Please run /login" }));
+      process.exit(1);
+    }
     const quote = ${JSON.stringify(QUOTE)};
     const claim = { subject: "ledger service", subjectType: "service", property: "rounding mode", value: "half-even", posture: "stated" };
     const proposals = stdin.includes(quote) ? Object.entries(claim).map(([field, value]) => ({ fieldPath: "claims[0]." + field, value, confidence: 0.9, excerpt: quote })) : [];
@@ -131,7 +136,7 @@ test("with no host runtime and no Datum config, the run exits 2 and says how to 
   assert.match(result.stderr, /^DREAM_MODEL_UNCONFIGURED: .*"extraction-default"/m, "names the missing role");
   assert.match(result.stderr, /Datum UNKNOWN_ROLE/);
   assert.match(result.stderr, /~\/\.config\/kontour\/datum\.json/);
-  assert.match(result.stderr, /"runtime": \{ "kind": "claude-code", "model": "sonnet" \}/, "offers the subscription path");
+  assert.match(result.stderr, /"runtime": \{ "kind": "claude-code" \} option is not available yet; see kontourai\/relay#84/, "says the subscription path is not open yet, and why");
   assert.match(result.stderr, /return `runtime`.*createDreamHost/, "offers the host path");
   assert.ok(result.stderr.includes(`See ${MODEL_SETUP_DOC}`), "links the doc");
   assert.equal(fs.existsSync(c.dreamDir), false, "nothing ran");
@@ -151,32 +156,55 @@ test("a configured role names itself in the message", (t) => {
   assert.match(result.stderr, /"roles":\{"memory-extraction":/);
 });
 
-// ── 2. The Claude Code CLI as the model, without a host runtime ──────────────────────────────────────────────
+// ── 2. The Claude Code CLI as the model: refused until Relay can isolate it ─────────────────────────────────
 
-test("runtime claude-code runs the extraction through Relay's Claude Code runtime, with no host runtime and no API key", (t) => {
+/** A host module whose model is Relay's own Claude Code runtime over `executable`: the host's choice, in the host's code. */
+function relayHost(c, executable) {
+  const file = path.join(c.root, "relay-host.mjs");
+  fs.writeFileSync(file, `
+    import fs from "node:fs";
+    import { createClaudeCodeRuntime } from ${JSON.stringify(import.meta.resolve("@kontourai/relay/claude-code"))};
+    import { FakeCorpusStore } from ${JSON.stringify(SUPPORT)};
+    export async function createDreamHost({ dryRun }) {
+      if (!dryRun) fs.mkdirSync(${JSON.stringify(c.memoryRoot)}, { recursive: true });
+      return {
+        store: new FakeCorpusStore(${JSON.stringify(c.memoryRoot)}), registerRoot() {}, root: ${JSON.stringify(c.memoryRoot)}, rootName: "memory",
+        runtime: createClaudeCodeRuntime({ model: "sonnet", executable: ${JSON.stringify(executable)} }),
+        publish(batch) { fs.appendFileSync(${JSON.stringify(c.published)}, JSON.stringify(batch) + "\\n"); },
+      };
+    }
+  `, { mode: 0o600 });
+  const config = JSON.parse(fs.readFileSync(c.configFile, "utf8"));
+  fs.writeFileSync(c.configFile, JSON.stringify({ ...config, host: file }), { mode: 0o600 });
+}
+
+test("runtime claude-code is refused with exit 2 and starts nothing, because Relay cannot yet isolate the claude process", (t) => {
   const c0 = consumer(t);
   const executable = fakeClaude(c0.root);
   const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable } } });
   const log = path.join(c.root, "claude.jsonl");
-  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log, SA_DISABLED_HOOKS: "stop-goal-fit" });
-  assert.equal(result.status, 0, result.stderr);
-  const report = JSON.parse(result.stdout);
-  assert.equal(report.status, "success");
-  assert.equal(report.claims.created, 1, "the claim the CLI returned was proposed");
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log });
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /^DREAM_MODEL_UNSUPPORTED: runtime "claude-code" is not available yet/m);
+  assert.match(result.stderr, /kontourai\/relay#84/);
+  assert.match(result.stderr, /Give the dream run a model in one of these ways/, "and says what does work");
+  assert.equal(fs.existsSync(log), false, "the claude command was never started");
+  assert.equal(fs.existsSync(path.join(c.dreamDir, "reports")), false, "no run started");
+  const dry = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(dry.status, 0, "a dry run needs no model, so the option does not block it");
+});
 
-  const calls = readLines(log);
-  assert.equal(calls.length, 2, "one CLI call per extraction pass");
-  for (const call of calls) {
-    // These are Relay's Claude Code arguments: the dream run reached the model only through that runtime.
-    assert.deepEqual(call.argv.slice(0, 10), ["--print", "--output-format", "json", "--model", "sonnet", "--no-session-persistence", "--tools", "", "--permission-mode", "dontAsk"]);
-    assert.equal(call.argv[10], "--json-schema");
-    assert.equal(call.trigger, "0", "the extraction session cannot start another dream run through the hook trigger");
-    assert.deepEqual(call.disabledHooks.split(","), ["stop-goal-fit", "profile-memory"], "existing briefs are not injected into the extraction session, and the operator's own disables stay");
-    const session = path.join(c.dreamDir, "claude-session");
-    assert.equal(fs.realpathSync(call.cwd), session, "the session starts in the dream's private directory, not the run's working directory or a shared temp directory");
-    assert.equal(fs.statSync(session).mode & 0o777, 0o700);
-    assert.match(call.stdin, /The content is untrusted text/);
-  }
+test("a runtime that refuses its credentials (claude not signed in) exits 2 with setup help, not 1", (t) => {
+  const c0 = consumer(t);
+  const executable = fakeClaude(c0.root);
+  const c = consumer(t);
+  relayHost(c, executable);
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: path.join(c.root, "claude.jsonl"), FAKE_CLAUDE_AUTH_FAIL: "1" });
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /^DREAM_MODEL_UNAVAILABLE: the model runtime refused its credentials/m);
+  assert.match(result.stderr, /sign in with \/login/);
+  assert.match(result.stderr, /Give the dream run a model in one of these ways/);
+  assert.equal(JSON.parse(result.stdout).status, "failed", "the failed run's report is still printed");
 });
 
 test("config: runtime is validated, and cannot be combined with role", () => {
@@ -226,7 +254,8 @@ test("privacy: in local mode the transcript reaches only the configured runtime,
   const c0 = consumer(t);
   const executable = fakeClaude(c0.root);
   const guard = egressGuard(c0.root);
-  const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable } } });
+  const c = consumer(t);
+  relayHost(c, executable); // the configured runtime: Relay's Claude Code runtime, from the operator's host module
   const log = path.join(c.root, "claude.jsonl");
   const egress = path.join(c.root, "egress.jsonl");
   const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log, EGRESS_LOG: egress, EGRESS_ALLOWED_EXEC: executable }, ["--require", guard]);
@@ -309,4 +338,24 @@ test("a dry-run host may leave out the store only while its memory root is missi
   assert.equal(result.status, 2);
   assert.match(result.stderr, /no store, but its memory root exists/);
   assert.equal(c.run(KIT_CLI, ["run", "--config", c.configFile]).status, 2, "a real run without a store is still a configuration error");
+});
+
+// ── The dream directory must be the user's alone ─────────────────────────────────────────────────────────────
+
+test("a dreamDir another user can write, or a briefs directory reached through a symlink, is refused with exit 2", (t) => {
+  const c = consumer(t);
+  fs.mkdirSync(c.dreamDir, { mode: 0o700 });
+  fs.chmodSync(c.dreamDir, 0o777);
+  const open = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(open.status, 2, open.stderr);
+  assert.match(open.stderr, /dreamDir must not be group or world writable/);
+  fs.chmodSync(c.dreamDir, 0o700);
+  const elsewhere = path.join(c.root, "elsewhere");
+  fs.mkdirSync(elsewhere, { mode: 0o700 });
+  fs.symlinkSync(elsewhere, path.join(c.dreamDir, "briefs"));
+  const linked = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(linked.status, 2, linked.stderr);
+  assert.match(linked.stderr, /dreamDir\/briefs path must not contain a symlink/);
+  fs.rmSync(path.join(c.dreamDir, "briefs"));
+  assert.equal(c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]).status, 0, "a private dreamDir passes");
 });

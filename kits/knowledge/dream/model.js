@@ -15,8 +15,6 @@
  * @module dream/model
  */
 
-import * as fs from "node:fs";
-import * as path from "node:path";
 
 import { ModelInvocationError } from "@kontourai/relay";
 
@@ -116,9 +114,8 @@ export function modelSetupHelp(role) {
     "Give the dream run a model in one of these ways:",
     `  1. A Datum role named "${role}" in ~/.config/kontour/datum.json (or .datum/config.json in the directory the run starts in), for example:`,
     `       ${JSON.stringify(datum)}`,
-    "  2. The Claude Code CLI on this machine (a subscription, no API key): add this to the dream config",
-    '       "runtime": { "kind": "claude-code", "model": "sonnet" }',
-    "  3. A host runtime: return `runtime` (a Relay ModelRuntime) or `extract` from your host module's createDreamHost.",
+    "  2. A host runtime: return `runtime` (a Relay ModelRuntime) or `extract` from your host module's createDreamHost.",
+    '  (The "runtime": { "kind": "claude-code" } option is not available yet; see kontourai/relay#84.)',
     `See ${MODEL_SETUP_DOC}`,
   ].join("\n");
 }
@@ -191,41 +188,30 @@ export async function createRoleRuntime({ role, resolveOptions = {}, maxTotalTok
 export const RUNTIME_KINDS = Object.freeze(["claude-code"]);
 
 /**
- * A Relay `ModelRuntime` over the Claude Code CLI (`@kontourai/relay/claude-code`), routed through Dispatch: the
- * dream run's model for a machine whose Claude access is a subscription signed in to the `claude` command rather than
- * an API key. Relay runs `claude --print` with no tools and no session persistence and hands it the prompt on stdin;
- * nothing here calls a provider.
+ * `runtime: { kind: "claude-code" }`: the Claude Code CLI, for a machine whose Claude access is a subscription signed
+ * in to the `claude` command rather than an API key. Not available yet: the config is accepted and validated, and the
+ * run refuses it (exit 2) rather than start it unsafely.
  *
- * The `claude` process is still a full harness session, with the user's own settings and hooks. Three things keep the
- * dream out of its own way: `FLOW_AGENTS_DREAM_TRIGGER=0`, so a dream hook trigger does not start another run when the
- * session ends; `profile-memory` added to `SA_DISABLED_HOOKS`, so existing briefs are not injected into the prompt
- * that distils new ones; and `workDir`, a private (0700) directory the caller owns, as its working directory. Claude
- * Code loads `.claude/settings.json` (hooks included) from its working directory and reads CLAUDE.md files above it,
- * so neither the scheduler's directory nor a shared one such as /tmp, which another user can write, is safe there.
+ * Relay's Claude Code runtime (`@kontourai/relay/claude-code`, 0.7.x) starts `claude` with this process's whole
+ * environment merged under whatever it is given (provider keys, gateway URLs, tokens for other services), as a full
+ * harness session that loads the user's hooks, MCP servers and CLAUDE.md. Any of those would see the transcript
+ * excerpt, and Relay offers no option to prevent it.
  *
- * @param {{ kind: "claude-code", model: string, workDir: string, executable?: string, maxTotalTokens?: number, onReceipt?: (receipt: object) => void }} options
+ * TODO(relay#84): when Relay's Claude Code runtime takes an environment allowlist and an isolation option, bump Relay
+ * and build the runtime here: `createClaudeCodeRuntime({ model, executable, cwd, environment, ...isolation })` with
+ * - the allowlist: PATH and HOME, plus the names the config lists in a new `runtime.passEnv` (for example a user's
+ *   ANTHROPIC_BASE_URL gateway), and FLOW_AGENTS_DREAM_TRIGGER=0 so the session cannot start another run;
+ * - isolation on, so no user hooks, MCP servers or CLAUDE.md load;
+ * - `cwd` a private 0700 directory under dreamDir, never a shared one such as /tmp;
+ * - `executable` checked to exist and be executable, and a directory or auth failure reported as configuration
+ *   (exit 2), not a failed run;
+ * then wrap it with `dispatchOver`, as `createRoleRuntime` does, and test it against a dirty parent environment.
  */
-export async function createCliRuntime({ kind, model, workDir, executable, maxTotalTokens = 64_000, onReceipt }) {
+export async function createCliRuntime({ kind }) {
   if (kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", `runtime.kind must be one of: ${RUNTIME_KINDS.join(", ")}`);
-  if (typeof workDir !== "string" || !path.isAbsolute(workDir)) throw dreamError("DREAM_CONFIG_INVALID", "the Claude Code runtime needs an absolute private working directory");
-  fs.mkdirSync(workDir, { recursive: true, mode: 0o700 });
-  const stat = fs.lstatSync(workDir);
-  const uid = typeof process.getuid === "function" ? process.getuid() : null;
-  if (!stat.isDirectory() || (uid !== null && stat.uid !== uid)) throw dreamError("DREAM_CONFIG_INVALID", `the Claude Code working directory must be a directory you own: ${workDir}`);
-  fs.chmodSync(workDir, 0o700);
-  const { createClaudeCodeRuntime } = await import("@kontourai/relay/claude-code");
-  const disabled = [...new Set([...String(process.env.SA_DISABLED_HOOKS ?? "").split(",").map((id) => id.trim()).filter(Boolean), "profile-memory"])].join(",");
-  const runtime = createClaudeCodeRuntime({
-    model,
-    ...(executable ? { executable } : {}),
-    cwd: workDir,
-    environment: { FLOW_AGENTS_DREAM_TRIGGER: "0", SA_DISABLED_HOOKS: disabled },
-  });
-  const candidate = {
-    id: runtime.id,
-    runtimeId: runtime.id,
-    evidence: { level: "declared", capabilities: ["structured-tools"], structuredToolsFidelity: "native", source: "knowledge.dream" },
-    worstCaseUsage: { maxTokens: maxTotalTokens },
-  };
-  return dispatchOver({ id: `dream:${runtime.id}`, role: runtime.id, candidate, runtime, maxTotalTokens, onReceipt });
+  throw dreamError(
+    "DREAM_MODEL_UNSUPPORTED",
+    'runtime "claude-code" is not available yet: Relay cannot yet start the claude command with a restricted environment and without the user\'s hooks, MCP servers and CLAUDE.md (kontourai/relay#84), so the transcript excerpt could reach them',
+    { help: modelSetupHelp("extraction-default") },
+  );
 }

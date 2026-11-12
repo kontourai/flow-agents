@@ -283,7 +283,12 @@ shape, for a project. The reader derives `<id>` from the session's working direc
 using the dream kit's own rule (`projectFromCwd`, the directory name), reads that
 brief first, and then appends global entries that it has not already added. Each
 brief is validated and purge-gated independently. A brief that fails a check is
-skipped, and the other brief can still be read. The hook cannot
+skipped, and the other brief can still be read. Before reading, the reader requires
+`dreamDir` and `dreamDir/briefs` to have no symlink anywhere on their path, to be owned by the
+current user and not group or world writable, and to have only ancestors owned by the user or root
+that are group or world writable only when sticky. If either directory fails, nothing is injected.
+The project ID is only the directory name, so two checkouts whose last directory segment is the
+same share one project brief. The hook cannot
 verify these producer obligations from display text alone. The reader
 accepts at most 32768 bytes on disk, rejects malformed UTF-8, malformed schema,
 control characters and embedded marker delimiters, and reads only a regular

@@ -85,6 +85,46 @@ function validateRuntime(runtime, role) {
 const trustedOwner = (stat, uid) => uid === null || stat.uid === uid || stat.uid === 0;
 
 /**
+ * Refuse a directory the run keeps private state in (`dreamDir`, its `briefs/`) unless only this user can change it:
+ * no symlink anywhere on the path, the directory itself owned by the current user and not group or world writable
+ * (sticky or not: anyone could create the files inside it), and every directory above it held to the same rule as
+ * `assertOwnerControlledFile` (owned by this user or root; group or world writable only when sticky, as /tmp is). A
+ * directory that does not exist yet is allowed when its existing ancestors pass, because the run creates it 0700.
+ * The SessionStart reader applies the same rule (context-contributors/profile-memory.js).
+ */
+export function assertOwnerControlledDir(dir, label) {
+  assertAbsolute(dir, label);
+  const resolved = path.resolve(dir);
+  let existing = resolved;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    existing = parent;
+  }
+  let real;
+  try {
+    real = fs.realpathSync(existing);
+  } catch {
+    throw dreamError("DREAM_CONFIG_INVALID", `${label} cannot be resolved: ${resolved}`);
+  }
+  if (real !== existing) throw dreamError("DREAM_CONFIG_INVALID", `${label} path must not contain a symlink: ${existing} resolves to ${real}`);
+  const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  if (existing === resolved) {
+    const stat = fs.lstatSync(resolved);
+    if (!stat.isDirectory()) throw dreamError("DREAM_CONFIG_INVALID", `${label} must be a directory: ${resolved}`);
+    if (uid !== null && stat.uid !== uid) throw dreamError("DREAM_CONFIG_INVALID", `${label} must be owned by the current user: ${resolved}`);
+    if ((stat.mode & 0o022) !== 0) throw dreamError("DREAM_CONFIG_INVALID", `${label} must not be group or world writable: ${resolved}`);
+  }
+  for (let current = existing === resolved ? path.dirname(resolved) : existing; ; current = path.dirname(current)) {
+    const stat = fs.lstatSync(current);
+    if (!trustedOwner(stat, uid)) throw dreamError("DREAM_CONFIG_INVALID", `${label} is under a directory owned by another user: ${current}`);
+    if ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0) throw dreamError("DREAM_CONFIG_INVALID", `${label} is under a group or world writable directory: ${current}`);
+    if (path.dirname(current) === current) break;
+  }
+  return resolved;
+}
+
+/**
  * Refuse a file, or a directory above it, that another user could have changed: any symlink on the path, an owner
  * other than the current user (or root), or a group- or world-writable mode (a sticky directory is exempt, as for
  * /tmp). Imported code and the config that enables the run must both pass.
