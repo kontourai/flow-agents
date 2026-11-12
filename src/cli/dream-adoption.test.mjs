@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -155,7 +156,24 @@ function filesUnder(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { recursive: true }).map((name) => path.join(dir, name)).filter((file) => fs.statSync(file).isFile());
 }
-const readLines = (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
+// Tests poll logs a fake process is still appending to, so only lines already
+// ended by a newline are complete; a trailing partial line is read next time.
+const readLines = (file) => {
+  if (!fs.existsSync(file)) return [];
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  lines.pop();
+  return lines.filter(Boolean).map((line) => JSON.parse(line));
+};
+
+test("readLines skips a line a writer has not finished", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dream-readlines-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "log.jsonl");
+  fs.writeFileSync(file, `${JSON.stringify({ n: 1 })}\n{"n": 2, "partial`);
+  assert.deepEqual(readLines(file), [{ n: 1 }]);
+  fs.appendFileSync(file, `": true}\n`);
+  assert.deepEqual(readLines(file), [{ n: 1 }, { n: 2, partial: true }]);
+});
 
 // ── 1. No model set up is a configuration error ─────────────────────────────────────────────────────────────
 
