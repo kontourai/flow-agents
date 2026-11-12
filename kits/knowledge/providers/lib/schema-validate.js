@@ -103,10 +103,12 @@ function validateNode(value, schema, root, pathStr, errors) {
   }
 
   if (typeof value === "string") {
-    if (typeof schema.minLength === "number" && value.length < schema.minLength) {
+    // JSON Schema lengths count code points (as Ajv does), not UTF-16 units: an emoji is one character, not two.
+    const length = [...value].length;
+    if (typeof schema.minLength === "number" && length < schema.minLength) {
       errors.push(`${pathStr}: string shorter than minLength ${schema.minLength}`);
     }
-    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) {
+    if (typeof schema.maxLength === "number" && length > schema.maxLength) {
       errors.push(`${pathStr}: string longer than maxLength ${schema.maxLength}`);
     }
     if (typeof schema.pattern === "string" && !(new RegExp(schema.pattern).test(value))) {

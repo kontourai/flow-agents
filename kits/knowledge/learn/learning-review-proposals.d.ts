@@ -119,7 +119,7 @@ export type LearningReviewProposal = CorrectionRecurrenceProposal | KitGatePropo
 /** Why a ledger line is not an entry. `line` is 1-based. */
 export interface LedgerGap {
   line: number;
-  code: "invalid-json" | "not-an-object" | "schema";
+  code: "invalid-json" | "not-an-object" | "schema" | "oversized";
   message: string;
   /** Present when the line parsed and named one. */
   proposal_id?: string;
@@ -138,6 +138,10 @@ export const ledgerDocumentSchema: Readonly<Record<string, unknown>>;
 export const ledgerLineSchema: Readonly<Record<string, unknown>>;
 /** Absolute path of the shipped document schema file. */
 export const LEDGER_SCHEMA_PATH: string;
+/** A ledger file larger than this (64 MiB) is refused with `code: "LEARN_LEDGER_TOO_LARGE"`, never read whole. */
+export const MAX_LEDGER_FILE_BYTES: number;
+/** A line longer than this (1 MiB, UTF-8) is an `oversized` gap and is not parsed. */
+export const MAX_LEDGER_LINE_BYTES: number;
 
 /** Validate one parsed ledger line against `ledgerLineSchema` (Flow Agents' own dependency-free validator). */
 export function validateLedgerLine(value: unknown): { valid: boolean; errors: string[] };
@@ -162,8 +166,13 @@ export function resolveLearningReviewLedger(options?: {
 /**
  * Read a ledger without the lock: valid lines are entries, the rest are gaps (BOM and CRLF tolerated). With `scope`,
  * only that scope's correction-recurrence entries are kept; kit and gate entries carry no scope and are always kept.
+ * Throws `LEARN_LEDGER_TOO_LARGE` for a file over `maxFileBytes`, and `LEARN_CONFIG_INVALID` for a malformed scope or
+ * a limit that is not a positive integer.
  */
-export function readLearningReviewLedger(path: string, options?: { scope?: LearningReviewScope }): LearningReviewLedger;
+export function readLearningReviewLedger(
+  path: string,
+  options?: { scope?: LearningReviewScope; maxFileBytes?: number; maxLineBytes?: number },
+): LearningReviewLedger;
 
 /** The scope's identity in comparisons: `repo:<path>`, `all-projects`, or null for anything else. */
 export function scopeKey(scope: unknown): string | null;

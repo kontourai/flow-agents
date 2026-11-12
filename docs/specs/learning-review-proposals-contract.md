@@ -36,7 +36,7 @@ scripts/telemetry/learning-review-proposals.sh --since 2026-07-01 --until 2026-0
 | `--since VAL` | unbounded | date-only (`2026-07-01`), full ISO-8601 with `Z` (`2026-07-01T00:00:00Z`), full ISO-8601 with a `+00:00` UTC offset, or epoch-ms; lower bound on each record's `.at` |
 | `--until VAL` | unbounded | same accepted formats; upper bound on each record's `.at` |
 | `--sessions-root DIR` | `.kontourai/flow-agents` | where per-session `<task_slug>/trust.bundle` and `<task_slug>/gate-review.inquiries.json` are looked up for the kit/gate join |
-| `--ledger PATH` | `.kontourai/telemetry/learning-review-proposals.jsonl` (override via `LEARNING_REVIEW_PROPOSALS_LEDGER` env, mirrors `TELEMETRY_ECONOMICS_LOG_FILE`) | the durable, idempotent proposal ledger |
+| `--ledger PATH` | the ledger `flow-agents learn --print-ledger-path` resolves in the current directory: `<main checkout>/.kontourai/telemetry/learning-review-proposals.jsonl`, overridden by `LEARNING_REVIEW_PROPOSALS_LEDGER` or `TELEMETRY_DATA_DIR` (relative values against the main checkout); outside a repository, the current directory. Resolved by `scripts/telemetry/ledger-path.mjs` through the shared resolver. (Before this, the default was `<TELEMETRY_DATA_DIR or the Flow Agents package root>/.kontourai/telemetry/…`, and relative overrides resolved against the current directory.) | the durable, idempotent proposal ledger |
 | `-h`/`--help` | — | usage |
 
 Positional args and stdin follow the exact `routing-efficiency.sh` convention: explicit file
@@ -523,12 +523,20 @@ the learn kit's internals is not. It holds no lock and writes nothing.
   values resolved against that directory. Outside a repository, without `allProjects`, it throws
   with `code: "LEARN_NOT_A_REPOSITORY"`. `flow-agents learn --print-ledger-path` prints the same
   path.
-- `readLearningReviewLedger(path, { scope })` returns `{ exists, entries, gaps }`. Every
-  non-empty line (BOM and CRLF tolerated) becomes either an entry, which validates against the
-  per-line schema, or a gap `{ line, code: "invalid-json" | "not-an-object" | "schema", message,
-  proposal_id? }`. A line is never dropped silently. With `scope`, only that scope's
-  correction-recurrence entries are kept (by `scopeKey`). v0.1 kit and gate entries carry no
-  scope and are always kept.
+- `readLearningReviewLedger(path, { scope, maxFileBytes, maxLineBytes })` returns
+  `{ exists, entries, gaps }`. Every non-empty line (BOM and CRLF tolerated) becomes either an
+  entry, which validates against the per-line schema, or a gap `{ line, code: "invalid-json" |
+  "not-an-object" | "schema" | "oversized", message, proposal_id? }`. A line is never dropped
+  silently. With `scope`, only that scope's correction-recurrence entries are kept (by
+  `scopeKey`). v0.1 kit and gate entries carry no scope and are always kept.
+  - **Bounds.** A line over `MAX_LEDGER_LINE_BYTES` (1 MiB, UTF-8) is an `oversized` gap and is
+    not parsed. A file over `MAX_LEDGER_FILE_BYTES` (64 MiB) is refused with
+    `LEARN_LEDGER_TOO_LARGE` before it is read.
+  - **Refusals.** A malformed scope (a repo scope without a non-empty string `repo`) is refused
+    with `LEARN_CONFIG_INVALID` rather than matching nothing.
+- The line schema checks every field the declarations type: `effect_observed`,
+  `effect_history`, `window`, `measurement_basis` and `theme.parent`. String lengths count code
+  points, as Ajv does. The exported schemas are deeply frozen.
 - `ledgerLineSchema` is `#/$defs/proposal` rooted so its references resolve, and
   `validateLedgerLine` checks one parsed line against it. The document schema is
   `ledgerDocumentSchema`, also exported as the file

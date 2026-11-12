@@ -24,12 +24,25 @@ import { repoScope, scopeKey, scopeRecord, scopeTag } from "./scope.js";
 
 export { scopeKey, scopeRecord, scopeTag };
 
+/** Freeze every object and array in `value`, so no consumer can weaken validation for the whole process. */
+function deepFreeze(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
 /** The document schema, as shipped (and exported as `@kontourai/flow-agents/schemas/learning-review-proposals.schema.json`). */
 export const LEDGER_SCHEMA_PATH = fileURLToPath(new URL("../../../scripts/telemetry/learning-review-proposals.schema.json", import.meta.url));
-export const ledgerDocumentSchema = Object.freeze(JSON.parse(fs.readFileSync(LEDGER_SCHEMA_PATH, "utf8")));
+export const ledgerDocumentSchema = deepFreeze(JSON.parse(fs.readFileSync(LEDGER_SCHEMA_PATH, "utf8")));
 
 /** One ledger line: the document schema's `#/$defs/proposal`, rooted so its `#/$defs/*` references resolve. */
-export const ledgerLineSchema = Object.freeze({ ...ledgerDocumentSchema.$defs.proposal, $defs: ledgerDocumentSchema.$defs });
+export const ledgerLineSchema = deepFreeze({ ...ledgerDocumentSchema.$defs.proposal, $defs: ledgerDocumentSchema.$defs });
+
+/** The reader's bounds. A file over `MAX_LEDGER_FILE_BYTES` is refused; a line over `MAX_LEDGER_LINE_BYTES` is a gap. */
+export const MAX_LEDGER_FILE_BYTES = 64 * 1024 * 1024;
+export const MAX_LEDGER_LINE_BYTES = 1024 * 1024;
 
 /** @returns {{ valid: boolean, errors: string[] }} */
 export function validateLedgerLine(value) {
@@ -71,6 +84,37 @@ export function resolveLearningReviewLedger(options = {}) {
   const { ledgerPath, scope } = resolveLedgerTarget(options);
   return { ledgerPath, scope: scopeRecord(scope) };
 }
+
+/**
+ * Read at most `maxBytes + 1` bytes of `file` through one descriptor: a file larger than `maxBytes` (when opened, or
+ * grown while read) is refused with `LEARN_LEDGER_TOO_LARGE`, never read whole. Returns null when it does not exist.
+ */
+function readBounded(file, maxBytes) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const tooLarge = (bytes) => learnError("LEARN_LEDGER_TOO_LARGE", `${file} is ${bytes} bytes, over the reader's limit of ${maxBytes}`);
+    const { size } = fs.fstatSync(fd);
+    if (size > maxBytes) throw tooLarge(size);
+    const buffer = Buffer.alloc(Math.min(size, maxBytes) + 1);
+    let read = 0;
+    for (let n; read < buffer.length && (n = fs.readSync(fd, buffer, read, buffer.length - read, read)) > 0;) read += n;
+    if (read > maxBytes) throw tooLarge(`more than ${maxBytes}`);
+    return buffer.subarray(0, read).toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+const positiveLimit = (value, name) => {
+  if (!Number.isSafeInteger(value) || value <= 0) throw learnError("LEARN_CONFIG_INVALID", `${name} must be a positive integer`);
+  return value;
+};
 
 /** Non-empty lines of a ledger file's text. A byte-order mark and CRLF line ends are accepted. */
 export function ledgerLines(text) {
@@ -121,17 +165,27 @@ const MAX_GAP_ERRORS = 5;
  * 1-based line number. `scope` keeps only that repository's correction-recurrence entries (by `scopeKey`); kit and gate
  * entries carry no scope and are always returned. Takes no lock and writes nothing.
  *
+ * Bounded: a file over `maxFileBytes` throws `LEARN_LEDGER_TOO_LARGE` before it is read; a line over `maxLineBytes`
+ * (UTF-8) becomes an `oversized` gap and is not parsed. A malformed `scope` throws `LEARN_CONFIG_INVALID`.
+ *
  * @param {string} file
- * @param {{ scope?: { kind: "repo", repo: string } | { kind: "all-projects" } }} [options]
+ * @param {{ scope?: { kind: "repo", repo: string } | { kind: "all-projects" }, maxFileBytes?: number, maxLineBytes?: number }} [options]
  */
-export function readLearningReviewLedger(file, { scope } = {}) {
-  const text = readText(file);
-  if (text === null) return { exists: false, entries: [], gaps: [] };
+export function readLearningReviewLedger(file, { scope, maxFileBytes = MAX_LEDGER_FILE_BYTES, maxLineBytes = MAX_LEDGER_LINE_BYTES } = {}) {
+  positiveLimit(maxFileBytes, "maxFileBytes");
+  positiveLimit(maxLineBytes, "maxLineBytes");
   const wanted = scope === undefined ? null : scopeKey(scope);
-  if (scope !== undefined && wanted === null) throw learnError("LEARN_CONFIG_INVALID", "scope must be { kind: \"repo\", repo } or { kind: \"all-projects\" }");
+  if (scope !== undefined && wanted === null) throw learnError("LEARN_CONFIG_INVALID", "scope must be { kind: \"repo\", repo: <non-empty string> } or { kind: \"all-projects\" }");
+  const text = readBounded(file, maxFileBytes);
+  if (text === null) return { exists: false, entries: [], gaps: [] };
   const entries = [];
   const gaps = [];
   for (const { text: line, number } of ledgerLines(text)) {
+    const bytes = Buffer.byteLength(line);
+    if (bytes > maxLineBytes) {
+      gaps.push({ line: number, code: "oversized", message: `line ${number} is ${bytes} bytes, over the limit of ${maxLineBytes}; not parsed` });
+      continue;
+    }
     let value;
     try {
       value = JSON.parse(line);

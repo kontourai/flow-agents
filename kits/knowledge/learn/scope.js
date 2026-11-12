@@ -89,7 +89,8 @@ export function scopeTag(scope) {
   return scope?.kind === "repo" ? `r${createHash("sha256").update(String(scope.repo)).digest("hex").slice(0, 8)}` : "all";
 }
 
-export const scopeKey = (record) => (record?.kind === "repo" ? `repo:${record.repo}` : record?.kind === "all-projects" ? "all-projects" : null);
+/** `repo:<path>` or `all-projects`; null for anything else, including a repo scope without a non-empty string `repo`. */
+export const scopeKey = (record) => (record?.kind === "repo" && typeof record.repo === "string" && record.repo !== "" ? `repo:${record.repo}` : record?.kind === "all-projects" ? "all-projects" : null);
 
 /**
  * Refuse to write `file` where Git would track it. A path outside any work tree is fine; a path inside one must be

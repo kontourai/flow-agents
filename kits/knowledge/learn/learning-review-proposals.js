@@ -9,6 +9,8 @@
 
 export {
   LEDGER_SCHEMA_PATH,
+  MAX_LEDGER_FILE_BYTES,
+  MAX_LEDGER_LINE_BYTES,
   defaultLedger,
   ledgerDocumentSchema,
   ledgerLineSchema,

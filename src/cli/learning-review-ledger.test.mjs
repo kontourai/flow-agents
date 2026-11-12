@@ -194,3 +194,95 @@ test("the shipped validator applies allOf, if/then/else and not, as the document
   const ifElse = { if: { type: "string" }, then: { minLength: 2 }, else: { minimum: 5 } };
   assert.deepEqual([validate("ab", ifElse).valid, validate("a", ifElse).valid, validate(7, ifElse).valid, validate(3, ifElse).valid], [true, false, true, false]);
 });
+
+// ── hardening (review of 0e332320) ───────────────────────────────────────────────────────────────────────────────
+
+const kitLine = (extra = {}) => ({ proposal_id: "all_all_kit-builder_kit-review-cost-inflation", target: { kind: "kit", id: "builder" }, pattern: "kit-review-cost-inflation", proposed_change: "x", severity: "advisory", evidence: { cost: {}, defect: {} }, expected_effect: { metric: "avg_cost_usd", direction: "decrease", description: "x" }, decision: { status: "proposed", decided_by: null, decided_at: null, rationale: null }, window: { since: null, until: null }, ...extra });
+/** A JSON line of exactly `bytes` UTF-8 bytes (padded through an extra field). */
+function lineOfBytes(bytes) {
+  const base = JSON.stringify(kitLine({ pad: "" }));
+  const line = JSON.stringify(kitLine({ pad: "a".repeat(bytes - Buffer.byteLength(base)) }));
+  assert.equal(Buffer.byteLength(line), bytes);
+  return line;
+}
+const scratch = (name) => path.join(fs.realpathSync(makeFixtureDir("ledger-bound-")), name);
+
+test("the reader's bounds: a line at the limit is read, one byte over is an oversized gap; a file one byte over is refused", () => {
+  assert.equal(published.MAX_LEDGER_FILE_BYTES, 64 * 1024 * 1024);
+  assert.equal(published.MAX_LEDGER_LINE_BYTES, 1024 * 1024);
+  const file = scratch("lines.jsonl");
+  fs.writeFileSync(file, `${lineOfBytes(500)}\n${lineOfBytes(501)}\n`);
+  const { entries, gaps } = published.readLearningReviewLedger(file, { maxLineBytes: 500 });
+  assert.equal(entries.length, 1, "exactly at the limit: an entry");
+  assert.deepEqual(gaps.map((gap) => [gap.line, gap.code]), [[2, "oversized"]]);
+  const size = fs.statSync(file).size;
+  assert.equal(published.readLearningReviewLedger(file, { maxFileBytes: size }).entries.length, 2, "a file exactly at the limit is read");
+  assert.throws(() => published.readLearningReviewLedger(file, { maxFileBytes: size - 1 }), { code: "LEARN_LEDGER_TOO_LARGE" });
+  for (const bad of [0, -1, 1.5, "10"]) assert.throws(() => published.readLearningReviewLedger(file, { maxLineBytes: bad }), { code: "LEARN_CONFIG_INVALID" }, String(bad));
+});
+
+test("the default line limit applies without options: a line over 1 MiB is a gap, not parsed", () => {
+  const file = scratch("big.jsonl");
+  fs.writeFileSync(file, `${lineOfBytes(published.MAX_LEDGER_LINE_BYTES)}\n${lineOfBytes(published.MAX_LEDGER_LINE_BYTES + 1)}\n`);
+  const { entries, gaps } = published.readLearningReviewLedger(file);
+  assert.deepEqual([entries.length, gaps.map((gap) => gap.code)], [1, ["oversized"]]);
+});
+
+test("string lengths count code points, as Ajv does: 200 emoji fit a 200-character excerpt, 201 do not", () => {
+  const emoji = (n) => "\u{1F600}".repeat(n);
+  assert.equal(validate(emoji(100), { type: "string", maxLength: 100 }).valid, true);
+  assert.equal(validate(emoji(101), { type: "string", maxLength: 100 }).valid, false);
+  assert.equal(validate(emoji(2), { type: "string", minLength: 3 }).valid, false, "minLength too: two emoji are two characters, not four");
+});
+
+test("a malformed repo scope is refused, not read as matching nothing", () => {
+  const file = scratch("scope.jsonl");
+  fs.writeFileSync(file, `${JSON.stringify(kitLine())}\n`);
+  for (const bad of [{ kind: "repo" }, { kind: "repo", repo: 123 }, { kind: "repo", repo: "" }, null, "repo"]) {
+    assert.equal(published.scopeKey(bad), null, JSON.stringify(bad));
+    assert.throws(() => published.readLearningReviewLedger(file, { scope: bad }), { code: "LEARN_CONFIG_INVALID" }, JSON.stringify(bad));
+  }
+});
+
+test("the exported schemas are deeply frozen: a consumer cannot weaken validation for the whole process", () => {
+  const citations = published.ledgerLineSchema.$defs.correctionRecurrence.then.properties.evidence.properties.defect.properties.citations;
+  assert.throws(() => { citations.minItems = 0; }, TypeError);
+  assert.throws(() => { published.ledgerDocumentSchema.$defs.proposal.required.length = 0; }, TypeError);
+  assert.throws(() => { delete published.ledgerLineSchema.required; }, TypeError);
+  assert.equal(published.validateLedgerLine(kitLine({ proposal_id: undefined })).valid, false, "still enforced");
+});
+
+test("the line schema checks what the declarations promise: effect_history, window, measurement_basis, theme.parent", () => {
+  assert.equal(published.validateLedgerLine(kitLine()).valid, true);
+  for (const extra of [{ effect_history: "x" }, { effect_history: [{ metric: "m" }] }, { window: 5 }, { window: { since: null } }, { measurement_basis: { measured_on: "bogus" } }, { effect_observed: { metric: "m" } }]) {
+    assert.equal(published.validateLedgerLine(kitLine(extra)).valid, false, JSON.stringify(extra));
+  }
+});
+
+test("learning-review-proposals.sh with no --ledger writes where the shared resolver says, from a subdirectory or a worktree", () => {
+  const main = repo();
+  const worktree = path.join(fs.realpathSync(makeFixtureDir("ledger-wt-")), "lane");
+  git(main, "worktree", "add", "-q", worktree);
+  const pp = path.join(ROOT, "evals", "fixtures", "learning-review-proposals", "pattern-present");
+  const analyze = (cwd, env = {}) => {
+    const run = spawnSync("bash", [ANALYZER, "--sessions-root", path.join(pp, "sessions"), path.join(pp, "economics.jsonl")], { cwd, env: { ...CLEAN_ENV, ...env }, encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+  };
+  const cases = [
+    [path.join(main, "pkg", "sub"), {}],
+    [worktree, {}],
+    [path.join(main, "pkg"), { LEARNING_REVIEW_PROPOSALS_LEDGER: "rel/shell.jsonl" }],
+    [worktree, { TELEMETRY_DATA_DIR: "data" }],
+  ];
+  for (const [cwd, env] of cases) {
+    const { ledgerPath } = published.resolveLearningReviewLedger({ cwd, env });
+    assert.equal(ledgerPath, cliLedger(cwd, env).path, "the learn CLI agrees");
+    analyze(cwd, env);
+    assert.ok(fs.existsSync(ledgerPath), `${JSON.stringify(env)} from ${path.relative(main, cwd) || "."}: written at ${ledgerPath}`);
+    assert.ok(published.readLearningReviewLedger(ledgerPath).entries.some((entry) => entry.pattern === "kit-review-cost-inflation"));
+  }
+  assert.ok(!fs.existsSync(path.join(worktree, LEDGER_FILE)), "never a ledger in the worktree");
+  const plain = fs.realpathSync(makeFixtureDir("ledger-plain-"));
+  analyze(plain);
+  assert.ok(fs.existsSync(path.join(plain, LEDGER_FILE)), "outside a repository: the current directory");
+});
