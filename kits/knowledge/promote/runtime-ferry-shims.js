@@ -9,6 +9,11 @@
  * The caller removes flagged lines before Ferry imports the rest, so there is
  * no join on ids, text or time to get wrong.
  *
+ * Thread 0.7 / Ferry 0.8 ship #76's `origin.kind` and #78's `developer` -> `system`
+ * import, and runtime-transcript.js keeps only `human` user messages on the
+ * Thread. The #76 and #78 line shims still run as a second layer (#76 also
+ * removes transcript-only entries, which the Thread does not mark).
+ *
  * `unrecognizedConversation` is not a Ferry gap: it is the drift sentinel for a
  * record that looks like a conversation turn but that Ferry will not import.
  *

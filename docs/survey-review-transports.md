@@ -70,7 +70,7 @@ lifecycle. Do not point the commands at a caller-created approval document.
 For a producer-created session at an absolute path:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.4.0 survey-review-console \
+npx --yes --package=@kontourai/survey@9.0.0 survey-review-console \
   --session /absolute/path/review-session.json --port 4243
 ```
 
@@ -80,7 +80,7 @@ arguments do not configure a workflow application callback.
 An MCP-capable host can launch the same session through stdio:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.4.0 survey-review-mcp \
+npx --yes --package=@kontourai/survey@9.0.0 survey-review-mcp \
   --session /absolute/path/review-session.json
 ```
 

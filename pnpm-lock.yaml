@@ -9,23 +9,23 @@ importers:
   .:
     dependencies:
       '@kontourai/conduit':
-        specifier: 0.7.1
-        version: 0.7.1
+        specifier: 0.8.0
+        version: 0.8.0
       '@kontourai/datum':
         specifier: 0.8.1
         version: 0.8.1(playwright@1.61.0)
       '@kontourai/dispatch':
-        specifier: 0.8.0
-        version: 0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.1(playwright@1.61.0))
+        specifier: 0.8.1
+        version: 0.8.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.1(playwright@1.61.0))
       '@kontourai/ferry':
-        specifier: 0.6.0
-        version: 0.6.0
+        specifier: 0.8.0
+        version: 0.8.0
       '@kontourai/flow':
         specifier: 5.4.0
         version: 5.4.0
       '@kontourai/relay':
-        specifier: 0.7.1
-        version: 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))
+        specifier: 0.8.0
+        version: 0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))
       '@kontourai/surface':
         specifier: 5.0.0
         version: 5.0.0
@@ -33,30 +33,30 @@ importers:
         specifier: npm:@kontourai/surface@6.3.0
         version: '@kontourai/surface@6.3.0'
       '@kontourai/survey':
-        specifier: 8.4.0
-        version: 8.4.0(typescript@7.0.2)
+        specifier: 9.0.0
+        version: 9.0.0(typescript@7.0.2)
       '@kontourai/thread':
-        specifier: 0.5.0
-        version: 0.5.0
+        specifier: 0.7.0
+        version: 0.7.0
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
     devDependencies:
       '@kontourai/corpus-store':
-        specifier: 0.1.0-next.0
-        version: 0.1.0-next.0
+        specifier: 0.1.0-next.5
+        version: 0.1.0-next.5
       '@kontourai/forage':
         specifier: 1.0.2
         version: 1.0.2(playwright@1.61.0)
       '@kontourai/lookout':
         specifier: 0.8.9
-        version: 0.8.9(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
+        version: 0.8.9(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/traverse':
         specifier: 5.0.3
-        version: 5.0.3(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
+        version: 5.0.3(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/veritas':
         specifier: 1.12.1
-        version: 1.12.1(@kontourai/survey@8.4.0(typescript@7.0.2))(zod@4.6.7)
+        version: 1.12.1(@kontourai/survey@9.0.0(typescript@7.0.2))(zod@4.6.7)
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
@@ -1056,12 +1056,12 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/conduit@0.7.1':
-    resolution: {integrity: sha512-EiAd0KYVnysVy6I1lvW6vHoGTocLmG81HotMDsqJTIcqhMBImFAyojMs1qPqXrBnH/HpjrLI+yBlUSOzKtJwjw==}
+  '@kontourai/conduit@0.8.0':
+    resolution: {integrity: sha512-cn9AJ+oBvbYUqTEI2blRqLws9po22d2EKuPUkaxFA23Q1CgxQYTwblx0+K/1WOfBv5cgNspQiF8YvkLxfwf3CQ==}
     engines: {node: '>=22'}
 
-  '@kontourai/corpus-store@0.1.0-next.0':
-    resolution: {integrity: sha512-P81cVVEKjaxc5B3lopikvMCUeXjvRIiiUHnWRn45M/kW4ver66r94o45t78LUbj/GvCaWn7PfCa8hPWenQVT+A==}
+  '@kontourai/corpus-store@0.1.0-next.5':
+    resolution: {integrity: sha512-d9S5M0CG8+xeg8zi6GGvu77ImeB8ygfQmaU0aFZDQdZXFxfa0wLgvLiezmXClnGNU0KOBocYYVO6B1jtTbxlnA==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1075,13 +1075,13 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/dispatch@0.8.0':
-    resolution: {integrity: sha512-c/G78FZ1kQMi7OxpWCOtMhmvTqSgAMBlsWSOJyv1lJpG/5AgghPgOj9K3Mg78U8HOs373v+0EE94i8NQv/goLA==}
+  '@kontourai/dispatch@0.8.1':
+    resolution: {integrity: sha512-2zSRPCmgIXICEjJlqPH8nZ5zvVohgUBWW78+3xD0+Z8vfeicVM3Kl3lWpfH7NJF5BSAkYMSrIxoM/xfbJKdmQg==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
       '@ai-sdk/provider': '>=3.0.0'
-      '@kontourai/bearing': ^0.2.0
+      '@kontourai/bearing': ^0.2.0 || ^0.4.0
       '@kontourai/datum': ^0.7.0 || ^0.8.0
     peerDependenciesMeta:
       '@ai-sdk/provider':
@@ -1091,8 +1091,8 @@ packages:
       '@kontourai/datum':
         optional: true
 
-  '@kontourai/ferry@0.6.0':
-    resolution: {integrity: sha512-es7LSrxpKGHCMWBIwj+5RYE6Bx7FQymPgty1xktsleeb2nqBZ6u0UrNeP/4jyPtG2FjDvjQPxZbPmdkzHiZEZQ==}
+  '@kontourai/ferry@0.8.0':
+    resolution: {integrity: sha512-2Ti4TNbf1V/q3jH2+dX8qgEb/kUCSMygPSZO6/qOZDAG3BXCTut4oqjhAREnJt81qOwUVaw7GYODLwnI/TT9Sw==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1148,6 +1148,16 @@ packages:
       '@anthropic-ai/sdk':
         optional: true
 
+  '@kontourai/relay@0.8.0':
+    resolution: {integrity: sha512-jyrRsiXVj1r4onM9O1AJBEAuvLzsVbwfpa9oHiS8w1vceecbd+t0GB5JcaNsd8zktvx3wwDhrJ5pT8Tebjd7gg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@ai-sdk/provider': '>=3.0.0'
+      '@anthropic-ai/sdk': '>=0.40.0'
+    peerDependenciesMeta:
+      '@anthropic-ai/sdk':
+        optional: true
+
   '@kontourai/surface@2.14.0':
     resolution: {integrity: sha512-OiSOUHStjZvfWJe1nXXm3vfbgUvkc3Dc3THqTXbMK70wjKAHfDgz06TwBLeRp3oNJKEIh9xNDYCFT+TqQ7EYrQ==}
     engines: {node: '>=22'}
@@ -1168,8 +1178,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/survey@8.4.0':
-    resolution: {integrity: sha512-ziY5IbQGw1TSLiLqv7GTxDTdd8PdssKZOQW/iHBLLnTJwSYi9gXuOq3No9hs+e1uOU37ZI+fnZtswXYUDS0HIQ==}
+  '@kontourai/survey@9.0.0':
+    resolution: {integrity: sha512-Ao3wgabAhxfEcdjE+/FcmN+Y2w7OIA8+EZOh5s188ajVaFDwEExLzNhhEOtS9lIuJzY2+k5efTk0AHBh5sSyNQ==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -1178,8 +1188,8 @@ packages:
       typescript:
         optional: true
 
-  '@kontourai/thread@0.5.0':
-    resolution: {integrity: sha512-MhHKngKoKAWIEkvANx4YMrdYgBH5pRAGU3ocMiKRW1qcw6eluUyDB659vEgxFFcYy+FUXUrWb2EGt/7cI0WgIg==}
+  '@kontourai/thread@0.7.0':
+    resolution: {integrity: sha512-AZ9yrgZVxxEHMYn/G4HAGgk/05I3riApWlipJDcEE1RElnCJ3TQ8z7SMJZpFYHEeEEWyVJ+yHz7OpIzrvv5MLg==}
     engines: {node: '>=22'}
 
   '@kontourai/traverse@5.0.1':
@@ -1300,8 +1310,8 @@ packages:
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
 
-  '@modelcontextprotocol/core@2.0.0':
-    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+  '@modelcontextprotocol/core@2.4.0':
+    resolution: {integrity: sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q==}
     engines: {node: '>=20'}
 
   '@modelcontextprotocol/sdk@1.32.1':
@@ -1319,8 +1329,8 @@ packages:
     deprecated: 'Date-based versions are no longer published. This package has resumed semantic versioning at 1.0.0: install the latest version.'
     hasBin: true
 
-  '@modelcontextprotocol/server@2.0.0':
-    resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
+  '@modelcontextprotocol/server@2.4.0':
+    resolution: {integrity: sha512-rgR9yxSaAJ+bcsi/XroT/S2AfPiIWloXAnrdfYSCms9ivVju0ishu/wW0J21Ho6+ZOR1r7RyeRbjiRuF87ix5Q==}
     engines: {node: '>=20'}
 
   '@mongodb-js/saslprep@1.6.1':
@@ -1703,7 +1713,9 @@ packages:
   '@smithy/core@3.36.0':
     resolution: {integrity: sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g==}
     engines: {node: '>=18.0.0'}
-    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -2197,10 +2209,6 @@ packages:
     resolution: {integrity: sha512-o8vI5RE5A6EVVOd9o41jKp41aJom+QTEO/Bx8MYNjexMo/Bv2WOjUfZr+aL0WnYSgymUy6zeguqLTsIhV0gMvQ==}
     engines: {node: '>= 0.8.0'}
 
-  content-disposition@1.1.0:
-    resolution: {integrity: sha512-5jRCH9Z/+DRP7rkvY83B+yGIGX96OYdJmzngqnw2SBSxqCFPd0w2km3s5iawpGX8krnwSGmF0FW5Nhr0Hfai3g==}
-    engines: {node: '>=18'}
-
   content-disposition@2.0.1:
     resolution: {integrity: sha512-e+H0ZXHSWYrENhQzw1LPuP4oF5MzVKmDU6d3hxlvaPEYLLg62MxtQNPRx4SYSuYJSBUgnQIG4HIN2tEtNv7Dog==}
     engines: {node: '>=18'}
@@ -2613,10 +2621,6 @@ packages:
     engines: {node: '>= 16'}
     peerDependencies:
       express: '>= 4.11'
-
-  express@5.2.1:
-    resolution: {integrity: sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==}
-    engines: {node: '>= 18'}
 
   express@5.3.0:
     resolution: {integrity: sha512-qCqy1xSoaugxOD4IVHb1ZWdkvCF2W3aE2okKouWj8VwJ+ztskSiXoBnCSJqfKT+cVPJhuJqe9YLbY425+Zh00g==}
@@ -4104,11 +4108,6 @@ packages:
   yallist@4.0.0:
     resolution: {integrity: sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A==}
 
-  yaml@2.9.0:
-    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
-    engines: {node: '>= 14.6'}
-    hasBin: true
-
   yaml@2.9.1:
     resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
     engines: {node: '>= 14.6'}
@@ -4122,9 +4121,6 @@ packages:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
     peerDependencies:
       zod: ^3.25.28 || ^4
-
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
@@ -4209,7 +4205,7 @@ snapshots:
   '@apidevtools/json-schema-ref-parser@16.0.5(@types/json-schema@7.0.15)':
     dependencies:
       '@types/json-schema': 7.0.15
-      js-yaml: 5.4.2
+      js-yaml: 5.4.3
 
   '@aws-crypto/crc32@5.2.0':
     dependencies:
@@ -5263,13 +5259,13 @@ snapshots:
       csv-parse: 7.0.3
       jsonc-parser: 3.3.1
       parse5: 8.0.1
-      yaml: 2.9.0
+      yaml: 2.9.1
     transitivePeerDependencies:
       - playwright
 
-  '@kontourai/conduit@0.7.1': {}
+  '@kontourai/conduit@0.8.0': {}
 
-  '@kontourai/corpus-store@0.1.0-next.0':
+  '@kontourai/corpus-store@0.1.0-next.5':
     dependencies:
       js-yaml: 5.4.2
 
@@ -5285,7 +5281,7 @@ snapshots:
     transitivePeerDependencies:
       - playwright
 
-  '@kontourai/dispatch@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.1(playwright@1.61.0))':
+  '@kontourai/dispatch@0.8.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.1(playwright@1.61.0))':
     dependencies:
       '@kontourai/relay': 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))
     optionalDependencies:
@@ -5295,11 +5291,11 @@ snapshots:
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
 
-  '@kontourai/ferry@0.6.0':
+  '@kontourai/ferry@0.8.0':
     dependencies:
-      '@kontourai/thread': 0.5.0
+      '@kontourai/thread': 0.7.0
       commander: 15.0.0
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@kontourai/flow@5.4.0':
     dependencies:
@@ -5323,11 +5319,11 @@ snapshots:
     optionalDependencies:
       playwright: 1.61.0
 
-  '@kontourai/lookout@0.8.9(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)':
+  '@kontourai/lookout@0.8.9(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)':
     dependencies:
       '@kontourai/datum': 0.8.0(playwright@1.61.0)
       '@kontourai/forage': 1.0.1(playwright@1.61.0)
-      '@kontourai/traverse': 5.0.1(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
+      '@kontourai/traverse': 5.0.1(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
       - '@google/genai'
@@ -5340,6 +5336,12 @@ snapshots:
   '@kontourai/plumb@0.2.0': {}
 
   '@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))':
+    dependencies:
+      '@ai-sdk/provider': 3.0.19
+    optionalDependencies:
+      '@anthropic-ai/sdk': 1.4.0(zod@4.6.7)
+
+  '@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))':
     dependencies:
       '@ai-sdk/provider': 3.0.19
     optionalDependencies:
@@ -5379,50 +5381,50 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/survey@8.4.0(typescript@7.0.2)':
+  '@kontourai/survey@9.0.0(typescript@7.0.2)':
     dependencies:
-      '@kontourai/surface': 2.17.0
-      '@modelcontextprotocol/server': 2.0.0
-      zod: 4.4.3
+      '@kontourai/surface': 5.0.0
+      '@modelcontextprotocol/server': 2.4.0
+      zod: 4.6.7
     optionalDependencies:
       typescript: 7.0.2
     transitivePeerDependencies:
       - kerberos
       - supports-color
 
-  '@kontourai/thread@0.5.0':
+  '@kontourai/thread@0.7.0':
     dependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
-  '@kontourai/traverse@5.0.1(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)':
+  '@kontourai/traverse@5.0.1(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)':
     dependencies:
       '@kontourai/forage': 1.0.1(playwright@1.61.0)
       linkedom: 0.18.13
       turndown: 7.2.4
     optionalDependencies:
       '@anthropic-ai/sdk': 1.4.0(zod@4.6.7)
-      '@kontourai/relay': 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))
+      '@kontourai/relay': 0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))
       openai: 7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7)
       typescript: 7.0.2
     transitivePeerDependencies:
       - canvas
       - playwright
 
-  '@kontourai/traverse@5.0.3(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)':
+  '@kontourai/traverse@5.0.3(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)':
     dependencies:
       '@kontourai/forage': 1.0.2(playwright@1.61.0)
       linkedom: 0.18.13
       turndown: 7.2.4
     optionalDependencies:
       '@anthropic-ai/sdk': 1.4.0(zod@4.6.7)
-      '@kontourai/relay': 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))
+      '@kontourai/relay': 0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7))
       openai: 7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7)
       typescript: 7.0.2
     transitivePeerDependencies:
       - canvas
       - playwright
 
-  '@kontourai/veritas@1.12.1(@kontourai/survey@8.4.0(typescript@7.0.2))(zod@4.6.7)':
+  '@kontourai/veritas@1.12.1(@kontourai/survey@9.0.0(typescript@7.0.2))(zod@4.6.7)':
     dependencies:
       '@kontourai/plumb': 0.2.0
       '@kontourai/surface': 2.17.0
@@ -5433,7 +5435,7 @@ snapshots:
       hachure: 0.15.0
       picomatch: 4.0.7
     optionalDependencies:
-      '@kontourai/survey': 8.4.0(typescript@7.0.2)
+      '@kontourai/survey': 9.0.0(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - kerberos
@@ -5508,9 +5510,9 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
-  '@modelcontextprotocol/core@2.0.0':
+  '@modelcontextprotocol/core@2.4.0':
     dependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@modelcontextprotocol/sdk@1.32.1(zod@4.6.7)':
     dependencies:
@@ -5522,8 +5524,8 @@ snapshots:
       cross-spawn: 7.0.6
       eventsource: 3.0.7
       eventsource-parser: 3.1.0
-      express: 5.2.1
-      express-rate-limit: 8.5.2(express@5.2.1)
+      express: 5.3.0
+      express-rate-limit: 8.5.2(express@5.3.0)
       hono: 4.13.13
       jose: 6.2.3
       json-schema-typed: 8.0.2
@@ -5546,10 +5548,10 @@ snapshots:
       - zod
     optional: true
 
-  '@modelcontextprotocol/server@2.0.0':
+  '@modelcontextprotocol/server@2.4.0':
     dependencies:
-      '@modelcontextprotocol/core': 2.0.0
-      zod: 4.4.3
+      '@modelcontextprotocol/core': 2.4.0
+      zod: 4.6.7
 
   '@mongodb-js/saslprep@1.6.1':
     dependencies:
@@ -5922,7 +5924,7 @@ snapshots:
 
   '@slack/logger@4.0.1':
     dependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.6
     optional: true
 
   '@slack/types@2.21.1':
@@ -5932,7 +5934,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.21.1
-      '@types/node': 26.1.1
+      '@types/node': 26.6.6
       '@types/retry': 0.12.0
       axios: 1.18.0(debug@4.3.4)
       eventemitter3: 5.0.4
@@ -6103,7 +6105,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.6
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -6441,8 +6443,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  content-disposition@1.1.0: {}
-
   content-disposition@2.0.1: {}
 
   content-type@1.0.5: {}
@@ -6754,43 +6754,10 @@ snapshots:
     dependencies:
       eventsource-parser: 3.1.0
 
-  express-rate-limit@8.5.2(express@5.2.1):
+  express-rate-limit@8.5.2(express@5.3.0):
     dependencies:
-      express: 5.2.1
+      express: 5.3.0
       ip-address: 10.7.4
-
-  express@5.2.1:
-    dependencies:
-      accepts: 2.0.0
-      body-parser: 2.3.0
-      content-disposition: 1.1.0
-      content-type: 1.0.5
-      cookie: 0.7.2
-      cookie-signature: 1.2.2
-      debug: 4.4.3
-      depd: 2.0.0
-      encodeurl: 2.0.0
-      escape-html: 1.0.3
-      etag: 1.8.1
-      finalhandler: 2.1.1
-      fresh: 2.0.0
-      http-errors: 2.0.1
-      merge-descriptors: 2.0.0
-      mime-types: 3.0.2
-      on-finished: 2.4.1
-      once: 1.4.0
-      parseurl: 1.3.3
-      proxy-addr: 2.0.8
-      qs: 6.16.1
-      range-parser: 1.2.1
-      router: 2.2.0
-      send: 1.2.1
-      serve-static: 2.2.1
-      statuses: 2.0.2
-      type-is: 2.1.0
-      vary: 1.1.2
-    transitivePeerDependencies:
-      - supports-color
 
   express@5.3.0:
     dependencies:
@@ -8063,7 +8030,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.1
-      '@types/node': 26.1.1
+      '@types/node': 26.6.6
       long: 5.3.2
     optional: true
 
@@ -8689,8 +8656,6 @@ snapshots:
   yallist@4.0.0:
     optional: true
 
-  yaml@2.9.0: {}
-
   yaml@2.9.1: {}
 
   yoctocolors@2.1.2: {}
@@ -8698,7 +8663,5 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
       zod: 4.6.7
-
-  zod@4.4.3: {}
 
   zod@4.6.7: {}

@@ -167,6 +167,8 @@ function pruneReports(dir) {
  * @param {{kind: "public"}|{kind: "restricted", audiences: string[]}} [options.visibility]  who the sittings' claims may be shown to,
  *   in Surface's visibility lattice (#1571). Absent reads as sealed, the narrowest, so omission never widens access.
  * @param {string} [options.trigger]  who started it (recorded in the report)
+ * @param {{kind: string, results: number, execution: object[]}} [options.runtimeEvidence]  the model runtime's content-free
+ *   execution evidence (cli.js), recorded in the report as `runtime`
  * @param {(stage: string) => void | Promise<void>} [options.onStage]  called at each stage boundary; tests inject faults here
  */
 export async function runDream(host, options = {}) {
@@ -220,6 +222,8 @@ export async function runDream(host, options = {}) {
   let cursorCommitted = false;
   const release = dryRun ? () => {} : acquireDreamLock(path.join(dreamDir, "dream.lock"));
   const writeReport = () => writePrivateAtomic(path.join(reportsDir, `${runId}.json`), `${JSON.stringify(report, null, 2)}\n`);
+  // Filled in by the caller as model calls return, and written with the report each time it is written.
+  if (options.runtimeEvidence) report.runtime = options.runtimeEvidence;
 
   try {
     const cursor = readRuntimeCursor(cursorFile);
