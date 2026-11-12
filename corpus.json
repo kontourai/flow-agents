@@ -51,6 +51,11 @@
       "product": "thread",
       "via": "@kontourai/thread",
       "for": "Canonical conversation schema that runtime-session residue is read from."
+    },
+    {
+      "product": "traverse",
+      "via": "@kontourai/traverse",
+      "for": "Run schema-guided memory-claim extraction in the Knowledge kit's dream run."
     }
   ],
   "product": "flow-agents",

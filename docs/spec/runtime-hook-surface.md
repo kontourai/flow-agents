@@ -931,6 +931,8 @@ See `packaging/conformance/README.md` for the full fixture inventory and declara
 
 Kit flow activation for Strands workspaces is implemented as a new runtime adapter id (`strands-local`) in `src/runtime-adapters.ts`, not as kit-flow loading inside `FlowAgentsHooks`. This keeps the `FlowAgentsHooks` class free of catalog-layout knowledge and reuses the `readKitInventory` + `safeSegment` helpers from the `codex-local` path.
 
+`src/runtime-adapters.ts` exports `ASSET_CLASSES`, the kit.json asset classes `readKitInventory` reads. The packaging check `scripts/check-shipped-dependencies.mjs` imports the compiled list so that it and kit installation agree on which declared assets the published package must contain.
+
 The CLI command is:
 
 ```bash

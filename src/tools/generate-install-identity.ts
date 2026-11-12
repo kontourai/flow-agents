@@ -70,17 +70,30 @@ function packageManifest(): { name: string; version: string } {
 }
 
 /**
- * A `files` negation this generator understands. Exactly three narrow forms are supported — this
+ * A `files` negation this generator understands. Exactly four narrow forms are supported — this
  * is deliberately NOT an implementation of npm's full `files` glob semantics.
  *
  *   path    "build/src/cli/workflow.test-support.js"  a single relative file
  *   segment "**\/.DS_Store" / "**\/node_modules/"     a name at any depth (file or directory)
+ *   suffix  "**\/*.test.js"                           a file name ending at any depth
  *   prefix  "evals/results/"                          a directory and everything under it
  */
 type FilesNegation =
   | { kind: "path"; value: string }
   | { kind: "segment"; value: string }
+  | { kind: "suffix"; value: string }
   | { kind: "prefix"; value: string };
+
+/** One ordered `files` rule: a negation (include false) or a directory listed after one. */
+type FilesRule = FilesNegation & { include: boolean };
+
+/** The `files` rules the fingerprint applies; see filesRules(). */
+export interface FilesRules {
+  /** Plain file paths, which npm ships wherever they appear in `files`. */
+  explicit: Set<string>;
+  /** Negations and post-negation directories, in order; the last match decides. */
+  ordered: FilesRule[];
+}
 
 /**
  * Parses ONE `!`-prefixed package.json `files` entry, or THROWS.
@@ -98,10 +111,16 @@ export function parseFilesNegation(entry: string): FilesNegation {
     throw new Error(
       `package.json files entry '${entry}' uses an exclusion form generate-install-identity.ts does not support. ` +
         "Supported forms: a plain relative path, '**/<name>' or '**/<name>/' (a name at any depth), " +
+        "'**/*<suffix>' (a file name suffix at any depth), " +
         "and '<dir>/' (a directory prefix). Extend parseFilesNegation() rather than letting the content " +
         "fingerprint cover files the published tarball excludes.",
     );
   };
+  if (candidate.startsWith("**/*") && !candidate.endsWith("/")) {
+    const suffix = candidate.slice(4);
+    if (!suffix || suffix.includes("*") || suffix.includes("/")) unsupported();
+    return { kind: "suffix", value: suffix };
+  }
   if (candidate.startsWith("**/")) {
     const name = candidate.slice(3).replace(/\/$/, "");
     if (!name || name.includes("*") || name.includes("/")) unsupported();
@@ -114,31 +133,67 @@ export function parseFilesNegation(entry: string): FilesNegation {
 }
 
 /**
- * Every negation in package.json's `files`, parsed. Reading the exclusions from the packaging
- * manifest instead of hardcoding them keeps "what the fingerprint covers" and "what ships" from
- * drifting apart — e.g. `build/src/cli/workflow.test-support.js`, which
- * `scripts/build-test-support.mjs` writes during `npm run test:unit`, is excluded from the tarball
- * and so must not perturb the digest of an otherwise identical build.
+ * package.json's `files`, parsed into the rules npm 11 applies (each probed with
+ * `npm pack --dry-run`). Reading the exclusions from the packaging manifest instead of hardcoding
+ * them keeps "what the fingerprint covers" and "what ships" from drifting apart — e.g.
+ * `build/src/cli/workflow.test-support.js`, which `scripts/build-test-support.mjs` writes during
+ * `npm run test:unit`, is excluded from the tarball and so must not perturb the digest of an
+ * otherwise identical build.
+ *
+ *   - A plain file path ships wherever it appears, even BEFORE a negation that matches it. This is
+ *     how the declared kit evals named *.test.js survive the `!**\/*.test.js` exclusion.
+ *   - A directory listed AFTER a negation re-includes what the negation excluded under it, so it
+ *     is an ordered include rule; the last matching ordered rule decides. A directory listed
+ *     before every negation adds nothing the covered roots do not already contain.
+ *   - A wildcard listed after a negation would also re-include its matches. That is not modeled,
+ *     so it THROWS rather than letting the digest silently miss shipped files.
  */
-function filesNegations(): FilesNegation[] {
-  const pkg = loadJson<{ files?: unknown }>(path.join(root, "package.json"));
-  const negations: FilesNegation[] = [];
-  for (const entry of Array.isArray(pkg.files) ? pkg.files : []) {
-    if (typeof entry !== "string" || !entry.startsWith("!")) continue;
-    negations.push(parseFilesNegation(entry));
+export function filesRules(files: unknown): FilesRules {
+  const explicit = new Set<string>();
+  const ordered: FilesRule[] = [];
+  let negated = false;
+  for (const entry of Array.isArray(files) ? files : []) {
+    if (typeof entry !== "string") continue;
+    if (entry.startsWith("!")) {
+      ordered.push({ ...parseFilesNegation(entry), include: false });
+      negated = true;
+    } else if (entry.includes("*")) {
+      if (negated) {
+        throw new Error(
+          `package.json files entry '${entry}' is a wildcard listed after a negation; npm would re-include ` +
+            "its matches, which generate-install-identity.ts does not model. List each file by plain path instead.",
+        );
+      }
+    } else if (entry.endsWith("/")) {
+      if (negated) ordered.push({ kind: "prefix", value: entry.replace(/^\.\//, ""), include: true });
+    } else {
+      explicit.add(entry.replace(/^\.\//, ""));
+    }
   }
-  return negations;
+  return { explicit, ordered };
 }
 
-function isExcluded(relative: string, negations: FilesNegation[]): boolean {
+function filesNegations(): FilesRules {
+  const pkg = loadJson<{ files?: unknown }>(path.join(root, "package.json"));
+  return filesRules(pkg.files);
+}
+
+export function isExcluded(relative: string, rules: FilesRules): boolean {
+  if (rules.explicit.has(relative)) return false;
   const segments = relative.split("/");
-  return negations.some((negation) => {
-    switch (negation.kind) {
-      case "path": return relative === negation.value;
-      case "segment": return segments.includes(negation.value);
-      case "prefix": return relative.startsWith(negation.value);
-    }
-  });
+  let excluded = false;
+  for (const rule of rules.ordered) {
+    const matches = (() => {
+      switch (rule.kind) {
+        case "path": return relative === rule.value;
+        case "segment": return segments.includes(rule.value);
+        case "suffix": return segments[segments.length - 1].endsWith(rule.value);
+        case "prefix": return relative.startsWith(rule.value);
+      }
+    })();
+    if (matches) excluded = !rule.include;
+  }
+  return excluded;
 }
 
 /** Sorted `<relpath>\0sha256:<hex>` lines over the covered surfaces (deterministic for a tree). */

@@ -90,6 +90,11 @@ preload. The existing lane finalizer still determines success from its recorded
 checks; `continue-on-error` on an individual step does not turn a failed check
 into passing lane evidence.
 
+The shipped runtime dependencies check is also a step in Source and Static,
+registered as `shipped-runtime-dependencies`. It builds the package, then fails
+when a published file imports a package the manifest does not declare for
+consumers, and runs that guard's rejection-path tests.
+
 The security scan, docs gate and Pages callees are pinned to shared-workflow
 commit `fd058ed6fcc780d60cc22e26d8c327281a197932`. Full Veritas readiness retains
 its existing `ea4c99c803a565f56cd18abbf9041f3467d1ee93` pin. Exact downloaded
