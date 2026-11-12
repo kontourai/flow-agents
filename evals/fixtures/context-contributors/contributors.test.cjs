@@ -238,3 +238,20 @@ test('a dreamDir another user can write, or a briefs directory reached through a
  assert.doesNotMatch(await f.sessionStart(), /planted rook entry/, 'a symlinked briefs directory is refused');
  delete process.env.FLOW_AGENTS_DREAM_CONFIG;
 });
+
+test('each directory check stands on its own: a world-writable briefs directory, and a dreamDir that is a symlink', async t => {
+ const f = dreamFixture(t);
+ f.write(f.dir, 'global.json', ['configured amber heron']);
+ process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
+ // Only the mode check on the briefs directory itself can catch this: dreamDir above it is private.
+ fs.chmodSync(path.join(f.dir, 'briefs'), 0o777);
+ assert.doesNotMatch(await f.sessionStart(), /configured amber heron/, 'a world-writable briefs directory is refused');
+ fs.chmodSync(path.join(f.dir, 'briefs'), 0o700);
+ assert.match(await f.sessionStart(), /configured amber heron/);
+ // Only the realpath check can catch this: every directory reached through the link is private and owned by the user.
+ const linked = path.join(f.temp, 'linked-dream');
+ fs.symlinkSync(f.dir, linked);
+ fs.writeFileSync(f.config, JSON.stringify({ ...JSON.parse(fs.readFileSync(f.config, 'utf8')), dreamDir: linked }), { mode: 0o600 });
+ assert.doesNotMatch(await f.sessionStart(), /configured amber heron/, 'a dreamDir reached through a symlink is refused');
+ delete process.env.FLOW_AGENTS_DREAM_CONFIG;
+});

@@ -359,3 +359,19 @@ test("a dreamDir another user can write, or a briefs directory reached through a
   fs.rmSync(path.join(c.dreamDir, "briefs"));
   assert.equal(c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]).status, 0, "a private dreamDir passes");
 });
+
+test("each run-side directory check stands on its own: a world-writable briefs directory, and a dreamDir that is a symlink", (t) => {
+  const c = consumer(t);
+  fs.mkdirSync(path.join(c.dreamDir, "briefs"), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.join(c.dreamDir, "briefs"), 0o777);
+  const open = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(open.status, 2, open.stderr);
+  assert.match(open.stderr, /dreamDir\/briefs must not be group or world writable/);
+  fs.chmodSync(path.join(c.dreamDir, "briefs"), 0o700);
+  const linked = path.join(c.root, "linked-dream");
+  fs.symlinkSync(c.dreamDir, linked);
+  fs.writeFileSync(c.configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(c.configFile, "utf8")), dreamDir: linked }), { mode: 0o600 });
+  const viaLink = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(viaLink.status, 2, viaLink.stderr);
+  assert.match(viaLink.stderr, /^DREAM_CONFIG_INVALID: dreamDir path must not contain a symlink/m);
+});
