@@ -1224,7 +1224,9 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
      shell or interpreter run code the run did not choose: `NODE_OPTIONS`, `NODE_PATH`, `NODE_REPL_EXTERNAL_MODULE`,
      `BASH_ENV`, `ENV`, `BASHOPTS`, `SHELLOPTS`, `PROMPT_COMMAND`, `PS4`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
      `LD_AUDIT`, any `DYLD_*`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`,
-     `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS` and `JDK_JAVA_OPTIONS` (without regard to case).
+     `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`, `GIT_CONFIG` and any
+     `GIT_CONFIG_*`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_EXEC_PATH`, `GIT_ASKPASS`, `SSH_ASKPASS` and `GCONV_PATH`
+     (without regard to case). `ANTHROPIC_*`, `CLAUDE_CODE_USE_*` and `CLAUDE_CONFIG_DIR` may be named.
      A name may be at most 128 characters.
    - **Isolation.** It runs with `--safe-mode --setting-sources ""`, so it loads none of your hooks, MCP servers,
      `CLAUDE.md` files, skills, plugins, or user, project and local settings files. That includes a settings file's
@@ -1254,6 +1256,10 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
 
 A run's token budget counts input and output tokens. Relay does not count cached prompt tokens, so the budget can
 understate what a provider charges.
+
+**`publish` must be idempotent.** The host's `publish` delivers routed-review items. A run that is interrupted or
+crashes after it publishes does not commit its cursor, so the next run publishes the same batch again. Deliver it so
+that a repeat changes nothing, for example keyed by claim id (the next run has a new run id).
 
 **Dry runs and a new memory root.** `--dry-run` creates nothing. Constructing a Corpus store over a memory root
 that does not exist yet creates that root, because Corpus binds a root to a stable identity at construction. So when

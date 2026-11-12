@@ -84,7 +84,7 @@ function fakeClaude(dir, { log, statuses, hang = false, hangFrom = null, wrapper
   `, { mode: 0o600 });
   const executable = path.join(dir, "claude");
   const body = wrapper
-    ? `#!/bin/sh\nFAKE_WRAPPER_PID=$ ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\nexit $?\n`
+    ? `#!/bin/sh\nFAKE_WRAPPER_PID=$$ ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\nexit $?\n`
     : `#!${process.execPath}\nimport(${JSON.stringify(pathToFileURL(script).href)});\n`;
   fs.writeFileSync(executable, body, { mode: 0o700 });
   return executable;
@@ -224,6 +224,12 @@ const PLATFORM_ADDED = new Set(process.platform === "darwin" ? ["__CF_USER_TEXT_
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 /** Every process a fake claude logged: the fake and, for a wrapper, the shell that started it (never its parent run). */
 const loggedPids = (log) => readLines(log).flatMap((call) => [call.pid, call.wrapperPid]).filter(Number.isInteger);
+/** A wrapper fake records its shell's pid; without it the wrapper could survive unseen. */
+const assertWrapperRecorded = (log) => {
+  const calls = readLines(log);
+  assert.ok(calls.length > 0, "claude was started");
+  for (const call of calls) assert.ok(Number.isInteger(call.wrapperPid) && call.wrapperPid > 0, `the wrapper shell's pid was recorded (got ${call.wrapperPid})`);
+};
 
 /**
  * A consumer whose config names the claude-code runtime over a fake claude, which logs to `log`. The log lives in its
@@ -349,6 +355,7 @@ test("runtime claude-code: a claude that never answers is stopped at runtime.tim
   assert.match(result.stderr, /^DREAM_DISTILL_FAILED/m);
   assert.ok(Date.now() - started < 30_000, "both passes were stopped, not left to the test's 60 s limit");
   assert.equal(readLines(log).length, 2, "each pass started claude");
+  assertWrapperRecorded(log);
   for (const pid of pids()) assert.equal(alive(pid), false, `claude process ${pid} (wrapper or its child) is still running`);
   assert.equal(fs.existsSync(path.join(c.dreamDir, "cursors", "runtime-session.cursor.json")), false, "the cursor is held");
 });
@@ -360,6 +367,7 @@ test("runtime claude-code: SIGINT to the run (a terminal's Ctrl-C) stops claude,
   const { c, log } = claudeConsumer(t, { fake: { hang: true, wrapper: true } });
   const run = startDream(t, c);
   assert.ok(await until(() => readLines(log).length === 1), "claude started and is hanging");
+  assertWrapperRecorded(log);
   const started = Date.now();
   run.child.kill("SIGINT");
   assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
@@ -417,12 +425,14 @@ test("a second SIGINT within Relay's grace period still kills claude's SIGTERM-i
   const { c, log } = claudeConsumer(t, { fake: { hang: true, wrapper: true } });
   const run = startDream(t, c);
   assert.ok(await until(() => readLines(log).length === 1), "claude started and is hanging");
+  assertWrapperRecorded(log);
   run.child.kill("SIGINT");
   // The first SIGINT sends the group SIGTERM: the wrapper exits, its child ignores it and keeps the pipes, so the run
   // waits on Relay's 2 s SIGKILL. A second signal inside that window must not let this process die before it.
   await new Promise((resolve) => setTimeout(resolve, 300));
   run.child.kill("SIGINT");
   assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.match(run.out.stderr, /^dream: interrupted twice; stopping claude processes$/m, "the second signal says what it does");
   assert.ok(await until(() => loggedPids(log).every((pid) => !alive(pid)), 1_000), `a claude process survived: ${loggedPids(log).filter(alive)}`);
 });
 
@@ -474,7 +484,10 @@ test("config: runtime.passEnv and runtime.timeoutMs are bounded, and refused pas
   assert.deepEqual(validateDreamConfig(runtime({ passEnv: names(MAX_PASS_ENV) })).runtime.passEnv, names(MAX_PASS_ENV));
   assert.equal(validateDreamConfig(runtime({ timeoutMs: MAX_RUNTIME_TIMEOUT_MS })).runtime.timeoutMs, MAX_RUNTIME_TIMEOUT_MS);
   assert.equal(validateDreamConfig(runtime({ passEnv: ["A".repeat(MAX_ENV_NAME_LENGTH)] })).runtime.passEnv[0].length, MAX_ENV_NAME_LENGTH);
-  for (const name of [...PASS_ENV_REFUSED, "DYLD_INSERT_LIBRARIES", "dyld_library_path", "node_options", "Path"]) {
+  const allowed = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CONFIG_DIR"];
+  assert.deepEqual(validateDreamConfig(runtime({ passEnv: allowed })).runtime.passEnv, allowed, "the gateway, provider and config-dir names stay allowed");
+  for (const name of [...PASS_ENV_REFUSED, "DYLD_INSERT_LIBRARIES", "dyld_library_path", "node_options", "Path",
+    "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_PARAMETERS", "git_ssh_command"]) {
     assert.throws(() => validateDreamConfig(runtime({ passEnv: ["ANTHROPIC_BASE_URL", name] })), (error) => error.code === "DREAM_CONFIG_INVALID" && /may not name/.test(error.message), name);
   }
   for (const extra of [
@@ -521,6 +534,15 @@ test("config: runtime is validated, and cannot be combined with role", () => {
     assert.throws(() => validateDreamConfig({ ...base, runtime }), (error) => error.code === "DREAM_CONFIG_INVALID", JSON.stringify(runtime));
   }
   assert.throws(() => validateDreamConfig({ ...base, role: "r", runtime: { kind: "claude-code", model: "sonnet" } }), /role or runtime, not both/);
+});
+
+test("the dream command run through a symlinked path still runs (it compares real paths)", (t) => {
+  const c = consumer(t);
+  const link = path.join(c.root, "linked-dream-cli.js");
+  fs.symlinkSync(KIT_CLI, link);
+  const result = c.run(link, ["run", "--config", c.configFile]);
+  assert.equal(result.status, 2, `the command did not run: status ${result.status}, stderr ${result.stderr}`);
+  assert.match(result.stderr, /^DREAM_MODEL_UNCONFIGURED/m);
 });
 
 // ── 3. A symlinked config path names the path to use ─────────────────────────────────────────────────────────
