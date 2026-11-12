@@ -98,13 +98,13 @@ function readBounded(file, maxBytes) {
     throw error;
   }
   try {
-    const tooLarge = (bytes) => learnError("LEARN_LEDGER_TOO_LARGE", `${file} is ${bytes} bytes, over the reader's limit of ${maxBytes}`);
+    // One guard for both cases: read at most one byte past the limit, so a file that is too large, or that grows past
+    // the limit while it is read, is refused without allocating or reading more than `maxBytes + 1`.
     const { size } = fs.fstatSync(fd);
-    if (size > maxBytes) throw tooLarge(size);
     const buffer = Buffer.alloc(Math.min(size, maxBytes) + 1);
     let read = 0;
     for (let n; read < buffer.length && (n = fs.readSync(fd, buffer, read, buffer.length - read, read)) > 0;) read += n;
-    if (read > maxBytes) throw tooLarge(`more than ${maxBytes}`);
+    if (read > maxBytes) throw learnError("LEARN_LEDGER_TOO_LARGE", `${file} is more than ${maxBytes} bytes, the reader's limit; it was not read`);
     return buffer.subarray(0, read).toString("utf8");
   } finally {
     fs.closeSync(fd);
