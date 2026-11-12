@@ -1168,6 +1168,15 @@ enables it, it consumes the residue, claim, routing and proposal contracts above
 than defining its own, it only proposes, and it commits its cursor last. It is exposed
 through the declared `knowledge.dream-runner` adapter and the `knowledge.dream` flow.
 
+## Learn loop
+
+[The learn loop](learn.md) (`flow-agents learn`) mines your existing Claude Code and Codex
+transcripts for corrections you keep typing, counting only messages whose Thread origin is
+`human`, and proposes agent rules, skills, hooks or executable checks as
+`kontour.learning-review-proposals` v0.2 `correction-recurrence` proposals. It reuses the dream
+run's transcript reader, scrub and model setup, needs no Flow run or telemetry file, and only
+proposes.
+
 ### Dream run model setup
 
 An installed package runs the dream with `flow-agents dream run --config /abs/dream.config.json [--dry-run] [--trigger NAME]`.

@@ -146,6 +146,9 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, readMess
     sessions_read: 0,
     user_messages: 0,
     user_messages_by_origin: {},
+    // Ferry's evidence string for each `unknown` origin (e.g. `claude-code:promptSource=sdk`): says which host
+    // channel could not be attributed, never any message text.
+    unknown_origin_by_evidence: {},
     human_turns_in_window: 0,
     human_turns_duplicate: 0,
   };
@@ -192,6 +195,7 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, readMess
         if (message.role !== "user") continue;
         report.user_messages += 1;
         bump(report.user_messages_by_origin, message.origin?.kind ?? "absent");
+        if (message.origin?.kind === "unknown") bump(report.unknown_origin_by_evidence, typeof message.origin.evidence === "string" ? message.origin.evidence.slice(0, 80) : "unstated");
         if (!isHumanTurn(message) || !message.text) continue;
         if (sinceMs !== null && message.timestampMs < sinceMs) continue;
         if (untilMs !== null && message.timestampMs > untilMs) continue;

@@ -97,6 +97,7 @@ export function readMessagesWithFixtureOrigin(harness, content) {
     const mapped = MAP[event.origin?.kind];
     const trusted = source === undefined || source === "typed" || source === "queued";
     if (mapped && (mapped !== "human" || trusted)) return { kind: mapped };
+    if (mapped === "human" && source === "sdk") return { kind: "unknown", evidence: "claude-code:origin.kind=human,promptSource=sdk" };
     if (/^\s*<system-reminder>[\s\S]*<\/system-reminder>\s*$/.test(text)) return { kind: "harness" };
     if (source === "typed" || source === "queued") return { kind: "human" };
     if (event.isSidechain === true) return { kind: "agent" };

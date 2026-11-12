@@ -96,6 +96,11 @@ export async function runLearn(options) {
     }
     throw learnError("LEARN_ORIGIN_UNAVAILABLE", "no user message carries an origin: the installed @kontourai/ferry predates origin (needs >= 0.8.0), so no turn can be counted as human");
   }
+  const unknown = read.user_messages_by_origin.unknown ?? 0;
+  if (unknown > 0 && unknown >= (read.user_messages_by_origin.human ?? 0)) {
+    const top = Object.entries(read.unknown_origin_by_evidence).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 3).map(([evidence, n]) => `${evidence} (${n})`).join(", ");
+    document.notes.push(`${unknown} user message(s) have origin "unknown" (${top}): typically prompts submitted through an SDK or IDE host, which the importer cannot tell apart from agent briefs, so they are not counted. A host that records who typed a prompt would let them count.`);
+  }
   if (read.human_sessions_in_window < minWindowSessions) {
     document.outcome = "insufficient-data";
     document.aggregates.partial = true;

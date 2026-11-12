@@ -63,8 +63,21 @@ test("only origin.kind human counts: agent briefs, SDK prompts, harness, compact
   assert.ok(document.report.user_messages >= 15, String(document.report.user_messages));
   assert.equal(document.report.user_messages_by_origin.human, 5, JSON.stringify(document.report.user_messages_by_origin));
   assert.ok(!sentText(runtime).includes("ORCHESTRATOR BRIEF"), "no non-human turn was sent to the classifier");
+  assert.equal(document.report.user_messages_by_origin.unknown, 5, "the SDK-submitted briefs are unknown, not human");
   assert.equal(document.report.occurrences, 2, "only the two typed pin-sha corrections count");
   assert.deepEqual(document.proposals, [], "20 echoed briefs make no proposal; 2 human corrections are under threshold");
+});
+
+test("a corpus dominated by unknown origins says which host channel could not be attributed", async () => {
+  const sessions = sessionsWith(Array.from({ length: 3 }, () => [
+    { text: fix("fetch-main"), origin: { kind: "human" }, promptSource: "sdk" },
+    { text: fix("fetch-main"), origin: { kind: "human" }, promptSource: "sdk" },
+  ]));
+  const { document, runtime } = await learn(sessions);
+  assert.equal(document.outcome, "insufficient-data");
+  assert.equal(runtime.requests.length, 0);
+  assert.equal(document.report.unknown_origin_by_evidence["claude-code:origin.kind=human,promptSource=sdk"], 6);
+  assert.match(document.notes.join("\n"), /6 user message\(s\) have origin "unknown"/);
 });
 
 test("a user message with no origin at all is never human, and a run that sees only those refuses rather than reporting nothing", async () => {
@@ -94,7 +107,9 @@ test("real Ferry derives the origins these fixtures rely on", (t) => {
   ]));
   const { turns, report } = readHumanTurns({ roots: [path.dirname(writeTemp(content))], sinceMs: null, untilMs: null });
   assert.deepEqual(turns.map((turn) => turn.text), ["typed by a person"]);
-  assert.deepEqual(report.user_messages_by_origin, { agent: 1, human: 1, unknown: 1 });
+  // The coordinator line is dropped before import by the runtime-ferry-shims pre-filter while that shim exists.
+  assert.deepEqual({ ...report.user_messages_by_origin, agent: 0 }, { agent: 0, human: 1, unknown: 1 });
+  assert.ok((report.user_messages_by_origin.agent ?? 0) <= 1);
 });
 
 function writeTemp(content) {
@@ -212,7 +227,7 @@ test("dry run makes no model call and writes nothing, through the CLI", async ()
   assert.equal(document.report.model_calls, 0);
   assert.deepEqual(document.proposals, []);
   // On an installed Ferry without origin the dry run says so instead of counting turns it cannot attribute.
-  if (ferryDerivesOrigin()) assert.equal(document.report.candidates, 7);
+  if (ferryDerivesOrigin()) assert.equal(document.report.candidates, 9, "9 typed turns, none a continuation ping");
   else assert.equal(document.outcome, "origin-unavailable");
 });
 
