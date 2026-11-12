@@ -3,15 +3,18 @@
  *
  * Parsing is `@kontourai/ferry`'s: its Claude Code and Codex importers turn a
  * runtime transcript into a canonical `@kontourai/thread` Thread. This module
- * only works over those canonical messages: it keeps user and assistant TEXT,
- * drops harness-injected tags and any block wrapped in the injected-memory
- * marker, and splits the result into sittings.
+ * only works over those canonical messages: it keeps assistant TEXT and the
+ * TEXT of user messages a person wrote (`origin.kind` `human`, see
+ * `isHumanUserMessage`), drops harness-injected tags and any block wrapped in
+ * the injected-memory marker, and splits the result into sittings.
  *
  * Ferry already drops tool results/calls (separate `tool` messages and
- * non-text parts), thinking, Claude `isMeta` entries and Claude sidechains.
- * What it does not yet expose is handled by the marked shims in
- * runtime-ferry-shims.js (kontourai/thread#76, #77, #78) and by the tag list
- * below (#78).
+ * non-text parts), thinking, Claude `isMeta` entries and inline Claude
+ * sidechain records, and imports Codex `developer` items as `system` messages.
+ * A Claude subagent's own transcript, which Ferry imports, is skipped here as a
+ * sidechain. What the Thread still does not carry is handled by the line-level
+ * shims in runtime-ferry-shims.js (kontourai/thread#76, #77, #79); the tag list
+ * below strips wrapper blocks inside text that is kept.
  *
  * Drift: a transcript that is not the format its telemetry runtime claims, is
  * not valid UTF-8, has no UUID session id, has a conversation record with no
@@ -35,8 +38,9 @@ export { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE };
 
 /**
  * Harness-injected tags removed (with their content) from user/assistant text.
- * Names observed in real transcripts. SHIM until kontourai/thread#78 marks
- * harness-injected messages on the Thread.
+ * Names observed in real transcripts. Thread 0.7 marks a message that is
+ * entirely harness text with its `origin`; this list still strips such a block
+ * from a message that also holds the person's own words.
  */
 export const HARNESS_TAGS = Object.freeze([
   // Claude Code
@@ -232,17 +236,49 @@ function messageText(message) {
   return { text: stripHarnessTags(kept), unterminated: filter.open() };
 }
 
-function conversationFromThread(thread) {
+/**
+ * Which user messages are a person speaking. A kept `user` turn becomes the
+ * speaker of the claims distilled from it, so it carries the person's
+ * authority. Thread 0.7 records who authored each user message in
+ * `origin.kind`, and only `human` is kept:
+ *  - `agent` (a subagent brief, a peer or coordinator message, a Codex
+ *    `agent_message`), `harness`, `hook`, `compaction` and `task-notification`
+ *    were not written by the person;
+ *  - `unknown` means the importer looked and the source cannot tell (an SDK or
+ *    IDE client may relay a person or an orchestrator, and a Claude record from
+ *    before Claude Code wrote `origin`/`promptSource` carries neither). It is
+ *    dropped, never read as human;
+ *  - no `origin` at all means the importer did not derive one. Ferry 0.8's
+ *    Claude Code and Codex importers always do, so that is drift.
+ */
+function isHumanUserMessage(message) {
+  const kind = message.origin?.kind;
+  if (kind === undefined) throw drift("a user message carries no origin");
+  return kind === "human";
+}
+
+/**
+ * The kept conversation of a canonical Thread. Exported for the origin contract tests; callers use `readConversation`.
+ * `droppedUserTurns` counts, by `origin.kind`, the user messages with text that were not kept because a person did
+ * not write them, so a report can say why a sitting holds only the assistant's side.
+ */
+export function conversationFromThread(thread) {
   const messages = [];
+  const droppedUserTurns = {};
   let unterminatedMemory = false;
   for (const message of thread.messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
     if (message.metadata?.sidechain === true) continue;
+    const human = message.role !== "user" || isHumanUserMessage(message);
     const { text, unterminated } = messageText(message);
+    if (!human) {
+      if (text) droppedUserTurns[message.origin.kind] = (droppedUserTurns[message.origin.kind] ?? 0) + 1;
+      continue;
+    }
     unterminatedMemory ||= unterminated;
     if (text) messages.push({ role: message.role, text, timestampMs: message.timestamp });
   }
-  return { messages, unterminatedMemory };
+  return { messages, unterminatedMemory, droppedUserTurns };
 }
 
 function requireSessionId(id) {
@@ -257,13 +293,15 @@ function requireSessionId(id) {
  * @param {Buffer} content  the whole transcript file
  * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
  *   gitBranch: string | null, partialTail: boolean, unterminatedMemory: boolean,
- *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}> }}
+ *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}>,
+ *   droppedUserTurns: Record<string, number> }}
  * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
 export function readConversation(harness, content) {
   const { lines, partialTail } = completeLines(content);
   const empty = {
     sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, unterminatedMemory: false, messages: [],
+    droppedUserTurns: {},
   };
   if (lines.length === 0) return empty;
 
@@ -274,23 +312,33 @@ export function readConversation(harness, content) {
 
   if (harness === "claude-code") {
     const kept = [];
+    let unattributed = 0;
     for (const line of lines) {
       const facts = claudeLineFacts(line);
+      if (facts.nonHumanOrigin) unattributed += 1;
       if (facts.harnessEntry) continue; // excluded lines are never imported, so their shape does not matter
       if (facts.unrecognizedConversation) throw drift("claude-code: a conversation-shaped record has an unrecognized type");
       if (facts.missingTime) throw drift("claude-code: a conversation record has no source timestamp");
       kept.push(line);
     }
     const thread = importThread(createClaudeCodeImporter, kept);
-    if (!thread) return empty;
+    // A record removed for a non-human raw origin is a user turn a person did not write; its kind is Ferry's to name.
+    const shimDropped = unattributed ? { unknown: unattributed } : {};
+    if (!thread) return { ...empty, droppedUserTurns: shimDropped };
     if (thread.id === FERRY_CLAUDE_FALLBACK_ID) throw drift("claude-code: no record carries a sessionId");
+    // A subagent's own transcript (Ferry 0.8 imports it, under the id `<parent>:agent-<id>`) is a sidechain,
+    // as a Codex subagent rollout is: its "user" is the parent agent.
+    const subagent = thread.metadata?.custom?.claudeSubagent;
+    if (subagent) return { ...empty, sessionId: requireSessionId(subagent.parentSessionId), sidechain: true };
+    const conversation = conversationFromThread(thread);
+    for (const [kind, count] of Object.entries(shimDropped)) conversation.droppedUserTurns[kind] = (conversation.droppedUserTurns[kind] ?? 0) + count;
     return {
       sessionId: requireSessionId(thread.id),
       sidechain: false,
       cwd: thread.metadata?.cwd ?? null,
       gitBranch: thread.metadata?.git?.branch ?? null,
       partialTail,
-      ...conversationFromThread(thread),
+      ...conversation,
     };
   }
 

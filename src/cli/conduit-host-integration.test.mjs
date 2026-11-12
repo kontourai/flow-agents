@@ -88,12 +88,25 @@ test("conformance evidence derives limitations from executable declarations and 
 
   assert.deepEqual(generated.report.adapters.map((entry) => entry.adapterId), ["claude-code", "strands"]);
   assert.equal(generated.report.adapters.every((entry) => entry.results.every((result) => result.status === "pass")), true);
-  assert.equal(generated.report.schemaVersion, "2");
+  assert.equal(generated.report.schemaVersion, "3");
+  assert.deepEqual(generated.report.adapters.map((entry) => entry.installEvidence), ["inert", "inert"]);
+  assert.ok(generated.report.adapters.every((entry) => entry.limitations.includes("probe.install-io=not-exercised")), "the report says the host install I/O was not exercised");
   assert.ok(generated.report.adapters[0].limitations.includes("capability.install.context=static-only"));
   assert.ok(generated.report.adapters[0].limitations.includes("capability.lifecycle.before-model=approximated"));
   assert.ok(generated.report.adapters[1].limitations.includes("capability.install.agent=approximated"));
   assert.match(generated.json, /flow-agents-local-harness-binding/);
   assert.match(generated.matrix, /claude-code/);
+});
+
+test("generating conformance evidence never installs through the host's own adapter (Conduit 0.8)", async () => {
+  const { adapter: local, writes } = localHarness();
+  const { adapter: embedded, installed } = inProcessFramework();
+  await generateHostConformanceEvidence([
+    { adapter: local, evidenceScope: "adapter-contract", adapterVersion: "0.8.0", hostId: "flow-agents-local-harness-binding", hostVersion: "public-config-binding-v1" },
+    { adapter: embedded, evidenceScope: "adapter-contract", adapterVersion: "0.8.0", hostId: "flow-agents-in-process-binding", hostVersion: "caller-bound-hooks-v1" },
+  ]);
+  assert.equal(writes.size, 0, "the local harness write callback was not called");
+  assert.deepEqual(installed, [], "the in-process framework install callback was not called");
 });
 
 test("limitation projection reports failed probes without runtime-specific prose", () => {

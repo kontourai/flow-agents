@@ -9,15 +9,27 @@
  * The caller removes flagged lines before Ferry imports the rest, so there is
  * no join on ids, text or time to get wrong.
  *
+ * Thread 0.7 / Ferry 0.8 shipped most of #76 and #78: user messages carry
+ * `origin.kind` (compact summaries read as `compaction`), Codex `developer`
+ * items import as `system` messages, and runtime-transcript.js keeps only
+ * `human` user messages, counting the rest by kind. The #76 shim still removes
+ * transcript-only entries, which the Thread does not mark, and any record whose
+ * raw `origin` is present but is not `{ kind: "human" }`: Ferry 0.8 derives
+ * `human` for an unmapped `origin.kind` (a future kind, `"unclassified"`) or a
+ * non-object `origin` when `promptSource` is `typed` or `queued`, so only this
+ * check keeps such a record out of a sitting. The #78
+ * shim's `developerMessage` removal is redundant (a `system` message is never a
+ * user turn) and kept until the shims are retired together.
+ *
  * `unrecognizedConversation` is not a Ferry gap: it is the drift sentinel for a
  * record that looks like a conversation turn but that Ferry will not import.
  *
- *   - kontourai/thread#76  Claude Code `origin.kind`, `isCompactSummary` and
- *                          `isVisibleInTranscriptOnly` are dropped.
+ *   - kontourai/thread#76  Claude Code `isVisibleInTranscriptOnly` is dropped, and an
+ *                          unmapped or non-object `origin` can still derive `human`.
  *   - kontourai/thread#77  Codex `session_meta` `git.branch` and the subagent
  *                          marker (`source.subagent`, `thread_source`) are dropped.
- *   - kontourai/thread#78  Codex `developer`-role items are imported as `user`
- *                          messages, and harness-injected context carries no marker.
+ *   - kontourai/thread#78  Shipped in Thread 0.7: Codex `developer` items import as
+ *                          `system`, and harness-injected context carries `origin`.
  *   - kontourai/thread#79  A record with no source timestamp is stamped with
  *                          `Date.now()`, so identical input imports differently.
  *
@@ -45,22 +57,25 @@ function hasSourceTime(value) {
 // conversation (17k+ in a local corpus). A new such type reads as drift until added.
 const CLAUDE_NON_CONVERSATION_TYPES = new Set(["api-request-blob"]);
 
-const CLAUDE_FLAG_PRECHECK = /"origin"|"isCompactSummary"|"isVisibleInTranscriptOnly"/;
+const CLAUDE_FLAG_PRECHECK = /"origin"|"isVisibleInTranscriptOnly"/;
 
 /**
  * Facts about one raw Claude Code line.
- *  - `harnessEntry` (thread#76): a `user` record the harness, not the human,
- *    wrote: a compact summary, a transcript-only entry, or an `origin` whose
- *    `kind` is anything but `human` (observed: `task-notification`, `peer`,
- *    `auto-continuation`). A record with no `origin` is an ordinary prompt.
+ *  - `harnessEntry` (thread#76): a `user` record that is transcript-only
+ *    (`isVisibleInTranscriptOnly`) or whose raw `origin` is present but is not
+ *    `{ kind: "human" }` (`nonHumanOrigin`). A record with no `origin` is left
+ *    to Ferry, which derives one (a compact summary reads as `compaction`).
+ *  - `nonHumanOrigin`: the second case, on a record Ferry would otherwise
+ *    import (not `isMeta`, not a sidechain). The caller counts it as an
+ *    `unknown` dropped user turn, since only Ferry's mapping could name its kind.
  *  - `missingTime` (thread#79): a user/assistant record with no source time.
  *  - `unrecognizedConversation`: a record with a user/assistant `message.role`
  *    whose `type` is neither of those nor a known non-conversation type.
  * @param {string} line
- * @returns {{ harnessEntry: boolean, missingTime: boolean, unrecognizedConversation: boolean }}
+ * @returns {{ harnessEntry: boolean, nonHumanOrigin: boolean, missingTime: boolean, unrecognizedConversation: boolean }}
  */
 export function claudeLineFacts(line) {
-  const facts = { harnessEntry: false, missingTime: false, unrecognizedConversation: false };
+  const facts = { harnessEntry: false, nonHumanOrigin: false, missingTime: false, unrecognizedConversation: false };
   const record = parseObject(line);
   if (!record) return facts;
   const conversation = record.type === "user" || record.type === "assistant";
@@ -71,12 +86,15 @@ export function claudeLineFacts(line) {
   if ((role === "user" || role === "assistant") && !conversation && !CLAUDE_NON_CONVERSATION_TYPES.has(record.type)) {
     facts.unrecognizedConversation = true;
   }
+  // Removing a line changes which record Ferry sees first, and Ferry decides that a transcript is a subagent's own
+  // from its first record (a sidechain record carrying `agentId`). Every record of a subagent transcript is such a
+  // record, so removing the first leaves another to mark it; if none is left, Ferry skips sidechain records and the
+  // transcript reads as empty (NO_CONVERSATION). Either way no subagent text reaches a sitting.
   if (record.type === "user" && CLAUDE_FLAG_PRECHECK.test(line)) {
     const origin = record.origin;
-    const nonHumanOrigin =
-      origin !== undefined && origin !== null && !(typeof origin === "object" && origin.kind === "human");
-    facts.harnessEntry =
-      nonHumanOrigin || record.isCompactSummary === true || record.isVisibleInTranscriptOnly === true;
+    const rawNonHuman = origin !== undefined && origin !== null && !(typeof origin === "object" && origin.kind === "human");
+    facts.harnessEntry = rawNonHuman || record.isVisibleInTranscriptOnly === true;
+    facts.nonHumanOrigin = rawNonHuman && importedByFerry;
   }
   return facts;
 }

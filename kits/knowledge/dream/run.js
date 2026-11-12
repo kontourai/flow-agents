@@ -167,6 +167,10 @@ function pruneReports(dir) {
  * @param {{kind: "public"}|{kind: "restricted", audiences: string[]}} [options.visibility]  who the sittings' claims may be shown to,
  *   in Surface's visibility lattice (#1571). Absent reads as sealed, the narrowest, so omission never widens access.
  * @param {string} [options.trigger]  who started it (recorded in the report)
+ * @param {AbortSignal} [options.signal]  aborted on SIGINT/SIGTERM (cli.js): the run throws DREAM_INTERRUPTED at the next
+ *   stage boundary and commits nothing after it
+ * @param {{kind: string, results: number, execution: object[]}} [options.runtimeEvidence]  the model runtime's content-free
+ *   execution evidence (cli.js), recorded in the report as `runtime`
  * @param {(stage: string) => void | Promise<void>} [options.onStage]  called at each stage boundary; tests inject faults here
  */
 export async function runDream(host, options = {}) {
@@ -175,7 +179,12 @@ export async function runDream(host, options = {}) {
     throw dreamError("DREAM_DISABLED", "the dream run is disabled; pass enabled: true to run it, or dryRun: true to preview");
   }
   const now = options.now ?? (() => new Date().toISOString());
-  const stage = async (name) => options.onStage?.(name);
+  // An interrupted run stops at the next boundary, before it proposes, publishes, writes briefs or commits the cursor
+  // ("cursor" is checked immediately before the commit). A sitting whose pass was interrupted never reaches "route".
+  const stage = async (name) => {
+    if (options.signal?.aborted) throw dreamError("DREAM_INTERRUPTED", `interrupted before ${name}`);
+    return options.onStage?.(name);
+  };
   const dreamDir = assertAbsolute(options.dreamDir ?? defaultDreamDir(), "dreamDir");
   assertAbsolute(options.telemetryFile, "telemetryFile");
   if (!Array.isArray(options.transcriptRoots) || options.transcriptRoots.length === 0) {
@@ -220,6 +229,8 @@ export async function runDream(host, options = {}) {
   let cursorCommitted = false;
   const release = dryRun ? () => {} : acquireDreamLock(path.join(dreamDir, "dream.lock"));
   const writeReport = () => writePrivateAtomic(path.join(reportsDir, `${runId}.json`), `${JSON.stringify(report, null, 2)}\n`);
+  // Filled in by the caller as model calls return, and written with the report each time it is written.
+  if (options.runtimeEvidence) report.runtime = options.runtimeEvidence;
 
   try {
     const cursor = readRuntimeCursor(cursorFile);
@@ -242,6 +253,8 @@ export async function runDream(host, options = {}) {
     report.sittings.seen = ingest.residues.length;
     report.redaction_hits = redactionHits(ingest.residues);
 
+    // Why a sitting may hold only the assistant's side: user turns a person did not write, by origin kind.
+    report.ingest.dropped_user_turns = { ...(ingest.report.dropped_user_turns ?? {}) };
     // A rotated or unreadable telemetry file cannot make progress until an operator resets the cursor.
     if (ingest.report.blocked.some((entry) => BLOCKING.has(entry.reason))) {
       report.status = "blocked";

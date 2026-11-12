@@ -30,12 +30,15 @@ assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && 
 // surface: 2.17.0 -> 5.0.0 with kontourai/flow-agents#1422. One break reaches this workflow:
 // Surface 4.0 binds the published claim value to the reviewed candidate and refuses a grounding
 // decision made without claims, so run.mjs now supplies the claim it would publish.
-// Survey 8.4.0 supplies the reviewed public producer/session contracts.
+// Survey 9.0.0 supplies the reviewed public producer/session contracts. survey: 8.4.0 -> 9.0.0:
+// Survey 9 changes the Trust Bundle projection (buildSurveyTrustBundle emits the review-outcome
+// policy and attestation evidence); this workflow imports only importExtractionEnvelope and
+// buildReviewDecision, and every assertion above holds unchanged.
 // Knowledge uses isolated Surface 6.3.0; the shared workflow retains Surface 5.0.0.
 // Lookout 0.8.9 requires acquisition's exact snapshot store and the recorder's
 // last extracted reference. The reference now uses Forage's real in-memory
 // store/ref builder/resolver and Lookout's extractedSnapshotRef contract.
-assert(Object.values(deterministic.revisions).join(",") === "1.0.2,5.0.3,8.4.0,0.8.9,5.0.0", "public revisions are not pinned");
+assert(Object.values(deterministic.revisions).join(",") === "1.0.2,5.0.3,9.0.0,0.8.9,5.0.0", "public revisions are not pinned");
 assert(!deterministic.action.afterReview.gaps.some((gap) => gap.kind === "claims-not-supplied" || gap.kind === "value-mismatch"), "the reviewed claim value is not bound to the decision");
 assert(deterministic.failures.valueMismatch.outcome === "refused" && deterministic.failures.valueMismatch.gaps.some((gap) => gap.kind === "value-mismatch"), "a claim publishing a value other than the reviewed one was not refused with value-mismatch");
 assert(live.liveTelemetry.provider === "reference-provider-adapter" && live.liveTelemetry.model === "reference-provider-model" && live.liveTelemetry.taskDigest === deterministic.extraction.taskDigest && live.liveTelemetry.usageTokens === 42 && live.liveTelemetry.latencyMs >= 0 && live.liveTelemetry.fixtureRevision === "reviewed-grounding-fixture/v1", "optional live execution telemetry is incomplete or unbound");

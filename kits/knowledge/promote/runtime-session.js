@@ -272,6 +272,9 @@ export function ingestRuntimeSessions(options = {}) {
     skipped: [],
     blocked: [],
     notes: [],
+    // User turns with text left out of sittings because a person did not write them, by Thread `origin.kind`, summed
+    // over the transcripts this run read (a transcript read again in a later run counts again).
+    dropped_user_turns: {},
     cursor_held: false,
   };
   const unchangedCursor = () => ({ residues: [], report: { ...report, cursor_held: true }, candidateCursor: cursor });
@@ -350,7 +353,7 @@ export function ingestRuntimeSessions(options = {}) {
         if (parsed.sidechain) {
           outcome = { kind: "skip", reason: "SIDECHAIN_TRANSCRIPT" };
         } else if (parsed.messages.length === 0 && !parsed.partialTail) {
-          outcome = { kind: "skip", reason: "NO_CONVERSATION", unterminatedMemory: parsed.unterminatedMemory };
+          outcome = { kind: "skip", reason: "NO_CONVERSATION", unterminatedMemory: parsed.unterminatedMemory, droppedUserTurns: parsed.droppedUserTurns };
         } else {
           outcome = {
             kind: "ok",
@@ -358,6 +361,7 @@ export function ingestRuntimeSessions(options = {}) {
             // A write in progress: emit what is complete, but do not move past the line.
             hold: parsed.partialTail,
             unterminatedMemory: parsed.unterminatedMemory,
+            droppedUserTurns: parsed.droppedUserTurns,
           };
         }
       } catch (error) {
@@ -370,6 +374,9 @@ export function ingestRuntimeSessions(options = {}) {
       }
       outcome.stamp = stampOf;
       transcriptOutcomes.set(key, outcome);
+      for (const [kind, count] of Object.entries(outcome.droppedUserTurns ?? {})) {
+        report.dropped_user_turns[kind] = (report.dropped_user_turns[kind] ?? 0) + count;
+      }
       if (outcome.kind === "ok") {
         for (const residue of outcome.residues) {
           if (sittings[residue.sittingId] === residue.contentHash) {
