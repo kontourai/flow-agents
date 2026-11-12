@@ -138,7 +138,13 @@ function abortOnSignals() {
   for (const name of Object.keys(SIGNAL_EXIT)) {
     handlers[name] = () => {
       if (received) {
-        fs.writeSync(2, "dream: interrupted twice; stopping claude processes\n");
+        // Best effort: a closed stderr (EPIPE) must not skip the exit that runs
+        // Relay's hook stopping the claude process groups.
+        try {
+          fs.writeSync(2, "dream: interrupted twice; stopping claude processes\n");
+        } catch {
+          // stderr is gone; exit anyway.
+        }
         process.exit(SIGNAL_EXIT[name]);
       }
       received = name;
