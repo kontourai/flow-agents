@@ -281,7 +281,8 @@ Recall's current, contested and superseded labels use the brief's local rules. T
 A host that runs the dream as a command instead of calling `runDream` uses `flow-agents dream run --config <abs>`.
 `src/cli/dream.ts` forwards that command to `kits/knowledge/dream/cli.js`, so the arguments, report and exit codes stay
 in the kit. [Dream run model setup](../kits/knowledge/docs/README.md#dream-run-model-setup) lists the model runtimes
-the command accepts.
+the command accepts. `src/cli/dream-adoption.test.mjs` drives that command against fake `claude` executables and polls
+their JSON-lines logs while they are still appending, so it reads only lines already ended by a newline.
 
 `flow-agents learn` forwards the same way, from `src/cli/learn.ts` to `kits/knowledge/learn/cli.js`; see
 [the learn loop](../kits/knowledge/docs/learn.md).
