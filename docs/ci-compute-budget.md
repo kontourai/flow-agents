@@ -25,8 +25,8 @@ shared group left is the Pages callee's own deployment group, which belongs to
 the pinned callee and not to this policy.
 
 Action version updates preserve this admission model: CI uploads use
-`actions/upload-artifact` 7.0.2 and Runtime Compatibility setup uses
-`actions/setup-python` 7.1.0, with the existing workflow groups, runner inventory
+`actions/upload-artifact` 7.0.2, pnpm setup uses `pnpm/action-setup` 6.1.1 and
+Runtime Compatibility setup uses `actions/setup-python` 7.1.0, with the existing workflow groups, runner inventory
 and permissions. A version bump does not establish that a hosted run completed.
 
 ## Why there is no cap
@@ -95,9 +95,10 @@ registered as `shipped-runtime-dependencies`. It builds the package, then fails
 when a published file imports a package the manifest does not declare for
 consumers, and runs that guard's rejection-path tests.
 
-The security scan, docs gate and Pages callees are pinned to shared-workflow
-commit `fd058ed6fcc780d60cc22e26d8c327281a197932`. Full Veritas readiness retains
-its existing `ea4c99c803a565f56cd18abbf9041f3467d1ee93` pin. Exact downloaded
+The security scan, docs gate, Pages and full Veritas readiness callees are pinned
+to shared-workflow commit `a5a3d3e6a93f4bdb6017164a1917507394b6912c`. That
+readiness callee accepts an optional `runner-image` input; this repository does
+not set it, so the job keeps its `ubuntu-latest` default. Exact downloaded
 callee snapshots and SHA-256 digests are retained under
 `evals/fixtures/ci-compute/`. These are evidence fixtures, not alternative
 workflow implementations. The source validator rejects mutable or unknown
@@ -111,9 +112,17 @@ The Docs gate explicitly selects Corpus revision
 `corpus-ref` input. Local `npm run docs:check` and `npm run docs:build` use that
 same revision. This changes source-bound freshness review behavior without
 changing the callee snapshot, runner expansion, permissions or concurrency.
-PR and merge-group checks remain strict against their base: unchanged covering
+PR and merge-group checks are strict against their base: unchanged covering
 prose requires a new complete local source/document byte review under the
 [review contract](https://github.com/kontourai/corpus/blob/b127e35a818b532369843731b3c64792baade83e/docs/related-content.md#review-an-unchanged-covering-document).
+One exception: a pull request run that Dependabot itself triggered on a pull request
+Dependabot opened reports stale documents without failing (`advisory-freshness`).
+Dependabot cannot write that review, and every Dependabot change touches a covered
+input (`package.json`, `pnpm-lock.yaml` or a workflow), so the strict check failed on
+every one of them. The stale documents are still listed in the job log. Any other actor's
+push to such a branch, every human pull request, merge group and push to `main` remain
+strict, and a superseding pull request that carries the same bump must still record the
+review or update the prose.
 Pages retains its independently pinned build and deployment implementation;
 this gate selection does not qualify publication.
 

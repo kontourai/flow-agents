@@ -281,7 +281,7 @@ const validate = new Ajv2020({ strict: false, allErrors: true, formats: { "date-
 if (!validate(result)) process.exit(1);
 const mislabeled = structuredClone(result);
 mislabeled.reviewer.provider = "openai/codex-action";
-mislabeled.reviewer.provider_revision = "86365089eb2b84e0a8fb0717b304f8bdcb13b20e";
+mislabeled.reviewer.provider_revision = "bdf19a4a223ec2549a3e2274a0cf61556bc07675";
 if (validate(mislabeled)) process.exit(2);
 const fakeVersion = structuredClone(result);
 fakeVersion.reviewer.provider_revision = "not-a-version";
@@ -436,7 +436,7 @@ else
   bad "publish should refuse a result whose engine provenance mismatches the selected engine"
 fi
 
-grep -Fq 'openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e' "$ACTION" \
+grep -Fq 'openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675' "$ACTION" \
   && ok "official Codex action is pinned to an exact revision" \
   || bad "official Codex action must be pinned to an exact revision"
 grep -Fq 'sandbox: read-only' "$ACTION" && grep -Fq 'safety-strategy: drop-sudo' "$ACTION" \

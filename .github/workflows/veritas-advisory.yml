@@ -13,6 +13,6 @@ concurrency:
 
 jobs:
   readiness:
-    uses: kontourai/.github/.github/workflows/veritas-advisory.yml@ea4c99c803a565f56cd18abbf9041f3467d1ee93 # Veritas 1.11.2
+    uses: kontourai/.github/.github/workflows/veritas-advisory.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c # Veritas 1.11.2
     with:
       require-ready: true

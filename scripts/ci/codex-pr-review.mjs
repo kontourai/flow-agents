@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-const OFFICIAL_ACTION_REVISION = "86365089eb2b84e0a8fb0717b304f8bdcb13b20e";
+const OFFICIAL_ACTION_REVISION = "bdf19a4a223ec2549a3e2274a0cf61556bc07675";
 // Exact kiro-cli release the composite installs and runs. Keep in lockstep with
 // scripts/ci/install-kiro-cli.sh, which pins this version plus per-arch SHA-256
 // checksums of the official versioned artifacts.
