@@ -75,7 +75,7 @@ export function resolveLearningReviewLedger(options = {}) {
 /** Non-empty lines of a ledger file's text. A byte-order mark and CRLF line ends are accepted. */
 export function ledgerLines(text) {
   const lines = [];
-  text.replace(/^﻿/, "").split(/\r?\n/).forEach((line, index) => {
+  text.replace(/^\uFEFF/, "").split(/\r?\n/).forEach((line, index) => {
     if (line.trim() !== "") lines.push({ text: line, number: index + 1 });
   });
   return lines;

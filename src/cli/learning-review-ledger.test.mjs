@@ -153,7 +153,7 @@ test("corrupt lines become typed gaps with their line numbers, never dropped; BO
   const kitLine = JSON.parse(good.find((line) => line.includes('"kit-review-cost-inflation"')));
   const kitAsSkill = { ...kitLine, proposal_id: "kit-as-skill", target: { kind: "skill", id: "x" } };
   const lines = [good[0], "{not json", "[1,2]", JSON.stringify({ hello: "world" }), JSON.stringify(noCitations), JSON.stringify(longExcerpt), JSON.stringify(kitAsSkill), ...good.slice(1)];
-  fs.writeFileSync(file, `﻿${lines.join("\r\n")}\r\n`);
+  fs.writeFileSync(file, `\uFEFF${lines.join("\r\n")}\r\n`);
   const { entries, gaps } = published.readLearningReviewLedger(file);
   assert.equal(entries.length, good.length, "every good line is still an entry");
   assert.deepEqual(gaps.map((gap) => [gap.line, gap.code]), [[2, "invalid-json"], [3, "not-an-object"], [4, "schema"], [5, "schema"], [6, "schema"], [7, "schema"]]);
