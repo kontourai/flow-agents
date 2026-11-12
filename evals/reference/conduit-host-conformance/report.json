@@ -1,10 +1,11 @@
 {
-  "schemaVersion": "2",
+  "schemaVersion": "3",
   "adapters": [
     {
       "evidenceScope": "adapter-contract",
+      "installEvidence": "inert",
       "adapterId": "claude-code",
-      "adapterVersion": "0.7.1",
+      "adapterVersion": "0.8.0",
       "hostId": "flow-agents-local-harness-binding",
       "hostVersion": "public-config-binding-v1",
       "capabilities": {
@@ -53,7 +54,8 @@
         "capability.influence.session-start.decision=unavailable",
         "capability.influence.stop.contextInjection=unavailable",
         "capability.install.context=static-only",
-        "capability.lifecycle.before-model=approximated"
+        "capability.lifecycle.before-model=approximated",
+        "probe.install-io=not-exercised"
       ],
       "results": [
         {
@@ -90,6 +92,26 @@
         },
         {
           "check": "decision-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-stop",
           "status": "pass"
         },
         {
@@ -132,8 +154,9 @@
     },
     {
       "evidenceScope": "adapter-contract",
+      "installEvidence": "inert",
       "adapterId": "codex",
-      "adapterVersion": "0.7.1",
+      "adapterVersion": "0.8.0",
       "hostId": "flow-agents-codex-kit-provision-binding",
       "hostVersion": "caller-bound-hooks-v1",
       "capabilities": {
@@ -192,7 +215,8 @@
         "capability.lifecycle.after-tool=unavailable",
         "capability.lifecycle.before-model=unavailable",
         "capability.lifecycle.session-start=unavailable",
-        "capability.lifecycle.stop=observational"
+        "capability.lifecycle.stop=observational",
+        "probe.install-io=not-exercised"
       ],
       "results": [
         {
@@ -229,6 +253,26 @@
         },
         {
           "check": "decision-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-stop",
           "status": "pass"
         },
         {
@@ -271,8 +315,9 @@
     },
     {
       "evidenceScope": "adapter-contract",
+      "installEvidence": "inert",
       "adapterId": "strands",
-      "adapterVersion": "0.7.1",
+      "adapterVersion": "0.8.0",
       "hostId": "flow-agents-in-process-binding",
       "hostVersion": "caller-bound-hooks-v1",
       "capabilities": {
@@ -317,7 +362,8 @@
       "limitations": [
         "capability.install.agent=approximated",
         "capability.install.command=approximated",
-        "capability.install.skill=approximated"
+        "capability.install.skill=approximated",
+        "probe.install-io=not-exercised"
       ],
       "results": [
         {
@@ -354,6 +400,26 @@
         },
         {
           "check": "decision-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "decision-context-stop",
           "status": "pass"
         },
         {

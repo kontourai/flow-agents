@@ -391,7 +391,7 @@
     "yaml": "2.9.1"
   },
   "dependencies": {
-    "@kontourai/conduit": "0.7.1",
+    "@kontourai/conduit": "0.8.0",
     "@kontourai/datum": "0.8.1",
     "@kontourai/dispatch": "0.8.1",
     "@kontourai/ferry": "0.8.0",
