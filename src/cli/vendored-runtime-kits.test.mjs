@@ -22,7 +22,7 @@ for (const runtime of ['claude-code', 'opencode', 'kiro']) {
       const home = path.join(scratch, 'home');
       const ws = path.join(scratch, 'ws');
       fs.mkdirSync(home); fs.mkdirSync(ws);
-      const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config') };
+      const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), XDG_STATE_HOME: path.join(home, '.local/state') };
       for (const key of ['FLOW_AGENTS_FLOW_DEFS_DIR', 'FLOW_AGENTS_USER_CLAUDE_SETTINGS', 'FLOW_AGENTS_USER_OPENCODE_CONFIG']) delete env[key];
       const installed = run([path.join(root, 'build/src/cli.js'), 'init', '--runtime', runtime, '--global', '--activate-kit', 'builder', '--yes'], ws, env);
       assert.equal(installed.status, 0, installed.stdout + installed.stderr);
