@@ -17,7 +17,7 @@ import { scorePredictions } from "../../kits/knowledge/learn/evaluate.js";
 import { acquireLedgerLock } from "../../kits/knowledge/learn/ledger-lock.js";
 import { repoScope } from "../../kits/knowledge/learn/scope.js";
 import { readHumanTurns } from "../../kits/knowledge/learn/sessions.js";
-import { readRuntimeMessages } from "../../kits/knowledge/promote/runtime-transcript.js";
+import { readConversation, readRuntimeMessages } from "../../kits/knowledge/promote/runtime-transcript.js";
 import {
   CANARIES, DAY_MS, NOW_MS, THEME_RULES, claudeSession, codexId, codexSession, fix, promptJson, recordingRuntime, sessionId, sessionsWith, transcriptRoot, workspace,
 } from "./learn-support.mjs";
@@ -907,4 +907,13 @@ test("Codex exec and MCP sessions carry delegated briefs and are excluded from i
   assert.equal(document.report.user_messages_by_origin.unknown, 3, "all three are unknown to Ferry");
   const judged = authorRequests(runtime).flatMap((request) => promptJson(request.messages[0].content, "MESSAGES_JSON:").map((item) => item.text));
   assert.deepEqual(judged, ["from vscode"]);
+});
+
+test("a transcript whose only user record is shim-dropped still reports it: the no-thread path keeps the count", () => {
+  const only = Buffer.from(claudeSession(sessionId(30), NOW_MS - DAY_MS, [{ text: "brief", origin: { kind: "unclassified" }, promptSource: "typed" }]));
+  const conversation = readConversation("claude-code", only);
+  assert.deepEqual([conversation.messages.length, conversation.droppedUserTurns], [0, { unknown: 1 }]);
+  assert.deepEqual(readRuntimeMessages("claude-code", only).shimDropped, { unknown: 1 });
+  const withTurn = Buffer.from(claudeSession(sessionId(31), NOW_MS - DAY_MS, [{ text: "brief", origin: { kind: "unclassified" }, promptSource: "typed" }, { text: "typed by me" }]));
+  assert.deepEqual(readConversation("claude-code", withTurn).droppedUserTurns, { unknown: 1 }, "and the with-thread path");
 });
