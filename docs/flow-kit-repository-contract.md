@@ -168,6 +168,7 @@ Optional fields:
 - `product_name`: non-empty display name when the product name differs from `name`.
 - `description`: non-empty summary.
 - `skills`, `docs`, `adapters`, `evals`, `assets`: lists of relative asset paths or objects with `id`, `path`, and optional `description`.
+  For kits published inside the Flow Agents package, every declared asset path must be in the package; the packaging check fails when a `files` exclusion (such as the `*.test.*` one) drops a declared eval.
 - `provisions`: a list of objects with kit-id-prefixed `id`, source `path`, consumer-repository-relative `target`, and optional `description`.
   A host asset also declares `host` (`codex`, `claude-code`, `opencode`, `kiro`, or `pi`)
   and Conduit `kind` (`skill`, `agent`, `hook`, `prompt`, `command`, or `context`)
