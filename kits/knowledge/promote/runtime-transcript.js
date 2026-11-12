@@ -312,27 +312,33 @@ export function readConversation(harness, content) {
 
   if (harness === "claude-code") {
     const kept = [];
+    let unattributed = 0;
     for (const line of lines) {
       const facts = claudeLineFacts(line);
+      if (facts.nonHumanOrigin) unattributed += 1;
       if (facts.harnessEntry) continue; // excluded lines are never imported, so their shape does not matter
       if (facts.unrecognizedConversation) throw drift("claude-code: a conversation-shaped record has an unrecognized type");
       if (facts.missingTime) throw drift("claude-code: a conversation record has no source timestamp");
       kept.push(line);
     }
     const thread = importThread(createClaudeCodeImporter, kept);
-    if (!thread) return empty;
+    // A record removed for a non-human raw origin is a user turn a person did not write; its kind is Ferry's to name.
+    const shimDropped = unattributed ? { unknown: unattributed } : {};
+    if (!thread) return { ...empty, droppedUserTurns: shimDropped };
     if (thread.id === FERRY_CLAUDE_FALLBACK_ID) throw drift("claude-code: no record carries a sessionId");
     // A subagent's own transcript (Ferry 0.8 imports it, under the id `<parent>:agent-<id>`) is a sidechain,
     // as a Codex subagent rollout is: its "user" is the parent agent.
     const subagent = thread.metadata?.custom?.claudeSubagent;
     if (subagent) return { ...empty, sessionId: requireSessionId(subagent.parentSessionId), sidechain: true };
+    const conversation = conversationFromThread(thread);
+    for (const [kind, count] of Object.entries(shimDropped)) conversation.droppedUserTurns[kind] = (conversation.droppedUserTurns[kind] ?? 0) + count;
     return {
       sessionId: requireSessionId(thread.id),
       sidechain: false,
       cwd: thread.metadata?.cwd ?? null,
       gitBranch: thread.metadata?.git?.branch ?? null,
       partialTail,
-      ...conversationFromThread(thread),
+      ...conversation,
     };
   }
 

@@ -184,13 +184,24 @@ describe("AC1 residue contract and workflow-sidecar compatibility", () => {
 });
 
 describe("AC2 runtime-session parsing, sittings and provenance", () => {
+  test("dropped user turns are summed across the transcripts a run reads, not overwritten", () => {
+    const box = sandbox();
+    const other = "5b1f2c3d-0000-4000-8000-00000000c1a1";
+    const copy = path.join(path.dirname(box.claudeTranscript), `${other}.jsonl`);
+    fs.writeFileSync(copy, fs.readFileSync(box.claudeTranscript, "utf8").replaceAll(CLAUDE_SESSION, other));
+    appendTelemetry(box, event("claude-code", box.claudeTranscript), event("claude-code", copy));
+    const { report } = run(box);
+    assert.equal(report.blocked.length, 0);
+    assert.deepEqual(report.dropped_user_turns, { unknown: 4 }, "two transcripts with two each");
+  });
+
   test("Claude Code project JSONL yields user/assistant text sittings with provenance", () => {
     const box = sandbox();
     appendTelemetry(box, event("claude-code", box.claudeTranscript));
     const { residues, report } = run(box);
     assert.equal(report.blocked.length, 0);
-    // The peer message is dropped and counted; the task notification is wrapper text only, so there is nothing to count.
-    assert.deepEqual(report.dropped_user_turns, { agent: 1 });
+    // The peer message and the task notification carry a non-human raw origin: removed before import, counted unknown.
+    assert.deepEqual(report.dropped_user_turns, { unknown: 2 });
     assert.deepEqual(residues.map((r) => r.sittingId), [`claude-code:${CLAUDE_SESSION}:0`, `claude-code:${CLAUDE_SESSION}:1`]);
     const [first, second] = residues;
     assert.deepEqual(first.provenance, {
@@ -1079,7 +1090,7 @@ describe("review round 1 regressions (PR #1575)", () => {
     const noTime = (rec) => ({ ...rec, timestamp: undefined });
     for (const [runtime, rows] of [
       ["codex", [codexMeta(), codexMsg("user", "REAL_ONE"), noTime({ type: "event_msg", payload: { type: "task_complete" } }), noTime({ type: "event_msg", payload: { type: "token_count", info: null } }), noTime(codexMsg("developer", "DEV_NO_TIME"))]],
-      ["claude-code", [claudeRec("REAL_ONE"), noTime(claudeRec("TRANSCRIPT_ONLY_NO_TIME", { uuid: "p", isVisibleInTranscriptOnly: true })), noTime({ type: "queue-operation", operation: "enqueue", sessionId: UID })]],
+      ["claude-code", [claudeRec("REAL_ONE"), noTime(claudeRec("PEER_NO_TIME", { uuid: "p", origin: { kind: "peer" } })), noTime({ type: "queue-operation", operation: "enqueue", sessionId: UID })]],
     ]) {
       const { box } = single(runtime, ndjson(rows));
       const result = run(box);
@@ -1340,7 +1351,8 @@ describe("Thread origin: only human-authored user messages reach a sitting", () 
     const conversation = readConversation("claude-code", buffer(CLAUDE));
     assert.equal(conversation.sessionId, CLAUDE_UID);
     assert.deepEqual(kept(conversation), ["user:TYPED_HUMAN_PROMPT", "assistant:CLAUDE_REPLY_ONE", "assistant:CLAUDE_REPLY_TWO"]);
-    assert.deepEqual(conversation.droppedUserTurns, { unknown: 4, agent: 1 }, "each dropped user turn is counted under its origin kind");
+    // The peer record's raw origin is not human, so the line shim removes it before import and it counts as unknown.
+    assert.deepEqual(conversation.droppedUserTurns, { unknown: 5 }, "each dropped user turn is counted");
   });
 
   const CODEX = [
@@ -1374,6 +1386,23 @@ describe("Thread origin: only human-authored user messages reach a sitting", () 
     assert.deepEqual(kept(conversation), ["assistant:EXEC_REPLY"]);
     assert.deepEqual(conversation.droppedUserTurns, { unknown: 1 });
   });
+
+  // Ferry 0.8 reads Claude Code's own origin.kind first but trusts promptSource typed/queued over an origin it does not
+  // map, so each record below would import as human. The line shim removes any record whose raw origin is not
+  // { kind: "human" }, and the run counts it as unknown.
+  for (const [name, extra] of [
+    ["an unclassified origin.kind", { origin: { kind: "unclassified" }, promptSource: "typed" }],
+    ["an origin.kind Ferry does not know yet", { origin: { kind: "observer" }, promptSource: "queued" }],
+    ["a non-object origin", { origin: "peer", promptSource: "typed" }],
+  ]) {
+    test(`Claude Code: ${name} with a typed prompt source is not read as the person`, () => {
+      const records = [claudeUser(1, "UNMAPPED_ORIGIN_MARKER", extra), claudeAssistant(2, "UNMAPPED_REPLY")];
+      assert.deepEqual(userOrigins(ferryThread(createClaudeCodeImporter, records)), { UNMAPPED_ORIGIN_MARKER: "human" }, "Ferry alone reads it as human");
+      const conversation = readConversation("claude-code", buffer(records));
+      assert.deepEqual(kept(conversation), ["assistant:UNMAPPED_REPLY"]);
+      assert.deepEqual(conversation.droppedUserTurns, { unknown: 1 });
+    });
+  }
 
   test("a user message with no origin is drift: the importer did not derive one, so nothing says a person wrote it", () => {
     const thread = ferryThread(createCodexImporter, CODEX);

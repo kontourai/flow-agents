@@ -8,7 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolveRef } from "@kontourai/datum";
-import { MAX_PASS_ENV, MAX_RUNTIME_TIMEOUT_MS, validateDreamConfig } from "../../kits/knowledge/dream/config.js";
+import { MAX_ENV_NAME_LENGTH, MAX_PASS_ENV, MAX_RUNTIME_TIMEOUT_MS, PASS_ENV_REFUSED, validateDreamConfig } from "../../kits/knowledge/dream/config.js";
 import { MODEL_SETUP_DOC, resolveClaudeExecutable } from "../../kits/knowledge/dream/model.js";
 import { telemetryLine, tempDir } from "./dream-support.mjs";
 
@@ -43,10 +43,11 @@ function transcript(cwd = "/Users/fixture-user/dev/ledger") {
  * `log` and `statuses` are baked in when given, because a child started with an allowlisted environment does not
  * see FAKE_CLAUDE_*; otherwise they come from the environment (a host runtime passes the whole environment). `hang`
  * makes it read its input and then never answer, ignoring SIGTERM, so only a timeout and SIGKILL can end it.
+ * `hangFrom: n` answers calls before the nth normally and hangs from the nth on.
  * `wrapper` makes the executable a `/bin/sh` script that runs the fake as its child without `exec`, as a version
  * manager's shim does: signalling only the direct child would leave the fake running and holding the pipes.
  */
-function fakeClaude(dir, { log, statuses, hang = false, wrapper = false } = {}) {
+function fakeClaude(dir, { log, statuses, hang = false, hangFrom = null, wrapper = false } = {}) {
   const script = path.join(dir, "fake-claude.mjs");
   fs.writeFileSync(script, `
     import fs from "node:fs";
@@ -55,9 +56,10 @@ function fakeClaude(dir, { log, statuses, hang = false, wrapper = false } = {}) 
     const chunks = [];
     for await (const chunk of process.stdin) chunks.push(chunk);
     const stdin = Buffer.concat(chunks).toString("utf8");
+    const callNo = (fs.existsSync(LOG) ? fs.readFileSync(LOG, "utf8").split("\\n").filter(Boolean).length : 0) + 1;
     const planted = Object.fromEntries(["ANTHROPIC_BASE_URL", "GH_TOKEN", "ANTHROPIC_API_KEY"].map((name) => [name, process.env[name] ?? null]));
-    fs.appendFileSync(LOG, JSON.stringify({ argv: process.argv.slice(2), envNames: Object.keys(process.env).sort(), planted, trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), pid: process.pid, ppid: process.ppid, stdin }) + "\\n");
-    if (${JSON.stringify(hang)}) {
+    fs.appendFileSync(LOG, JSON.stringify({ argv: process.argv.slice(2), envNames: Object.keys(process.env).sort(), planted, trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), pid: process.pid, wrapperPid: process.env.FAKE_WRAPPER_PID ? Number(process.env.FAKE_WRAPPER_PID) : null, stdin }) + "\\n");
+    if (${JSON.stringify(hang)} || (${JSON.stringify(hangFrom)} !== null && callNo >= ${JSON.stringify(hangFrom)})) {
       process.on("SIGTERM", () => {});
       setInterval(() => {}, 1000);
       await new Promise(() => {});
@@ -82,7 +84,7 @@ function fakeClaude(dir, { log, statuses, hang = false, wrapper = false } = {}) 
   `, { mode: 0o600 });
   const executable = path.join(dir, "claude");
   const body = wrapper
-    ? `#!/bin/sh\n${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\nexit $?\n`
+    ? `#!/bin/sh\nFAKE_WRAPPER_PID=$ ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\nexit $?\n`
     : `#!${process.execPath}\nimport(${JSON.stringify(pathToFileURL(script).href)});\n`;
   fs.writeFileSync(executable, body, { mode: 0o700 });
   return executable;
@@ -219,13 +221,44 @@ const SAFE_MODE_FLAGS = ["--safe-mode", "--setting-sources", ""];
 const PLATFORM_ADDED = new Set(process.platform === "darwin" ? ["__CF_USER_TEXT_ENCODING"] : []);
 
 /** A consumer whose config names the claude-code runtime over a fake claude, which logs to `log`. */
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+/** Every process a fake claude logged: the fake and, for a wrapper, the shell that started it (never its parent run). */
+const loggedPids = (log) => readLines(log).flatMap((call) => [call.pid, call.wrapperPid]).filter(Number.isInteger);
+
+/**
+ * A consumer whose config names the claude-code runtime over a fake claude, which logs to `log`. The log lives in its
+ * own directory, removed by the same hook that first SIGKILLs every process the fake logged, so no test leaves a fake
+ * running, even one that fails before it checks.
+ */
 function claudeConsumer(t, { runtime = {}, fake = {} } = {}) {
+  const logDir = tempDir("dream-claude-log-");
+  const log = path.join(logDir, "claude.jsonl");
+  t.after(() => {
+    for (const pid of loggedPids(log)) if (alive(pid)) process.kill(pid, "SIGKILL");
+    fs.rmSync(logDir, { recursive: true, force: true });
+  });
   const c0 = consumer(t);
-  const log = path.join(c0.root, "claude.jsonl");
   const executable = fakeClaude(c0.root, { log, ...fake });
   const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable, ...runtime } } });
   return { c, c0, log, executable };
 }
+
+/** Start the dream command as a child; resolves its exit, or kills it after `limitMs`. Killed in `t.after` if still running. */
+function startDream(t, c) {
+  const child = spawn(process.execPath, [KIT_CLI, "run", "--config", c.configFile], { cwd: c.work, env: c.env, stdio: ["ignore", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  const out = { stdout: "", stderr: "" };
+  child.stdout.on("data", (chunk) => { out.stdout += chunk; });
+  child.stderr.on("data", (chunk) => { out.stderr += chunk; });
+  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+  const exit = (limitMs) => Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), limitMs))]);
+  return { child, out, exit };
+}
+const until = async (condition, limitMs = 30_000) => {
+  const deadline = Date.now() + limitMs;
+  while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+  return condition();
+};
 const onDiskReport = (c, runId) => JSON.parse(fs.readFileSync(path.join(c.dreamDir, "reports", `${runId}.json`), "utf8"));
 
 test("runtime claude-code: a dirty parent environment reaches claude only through passEnv, and claude runs in safe mode", (t) => {
@@ -306,13 +339,10 @@ test("runtime claude-code: claude refusing its sign-in on every pass is setup (e
   assert.equal(JSON.parse(result.stdout).status, "failed");
 });
 
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-
 test("runtime claude-code: a claude that never answers is stopped at runtime.timeoutMs, wrapper and child, SIGKILL included", (t) => {
   // claude is a non-exec /bin/sh wrapper around a child that ignores SIGTERM.
   const { c, log } = claudeConsumer(t, { runtime: { timeoutMs: 1000 }, fake: { hang: true, wrapper: true } });
-  const pids = () => readLines(log).flatMap((call) => [call.pid, call.ppid]);
-  t.after(() => { for (const pid of pids()) if (alive(pid)) process.kill(pid, "SIGKILL"); });
+  const pids = () => loggedPids(log);
   const started = Date.now();
   const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
   assert.equal(result.status, 1, `${result.stderr} (status ${result.status}, signal ${result.signal})`);
@@ -323,26 +353,92 @@ test("runtime claude-code: a claude that never answers is stopped at runtime.tim
   assert.equal(fs.existsSync(path.join(c.dreamDir, "cursors", "runtime-session.cursor.json")), false, "the cursor is held");
 });
 
+const proposalsIn = (c) => filesUnder(path.join(c.memoryRoot, ".corpus-proposals"));
+const cursorOf = (c) => path.join(c.dreamDir, "cursors", "runtime-session.cursor.json");
+
 test("runtime claude-code: SIGINT to the run (a terminal's Ctrl-C) stops claude, wrapper and child, and the run exits 130", async (t) => {
   const { c, log } = claudeConsumer(t, { fake: { hang: true, wrapper: true } });
-  const pids = () => readLines(log).flatMap((call) => [call.pid, call.ppid]);
-  t.after(() => { for (const pid of pids()) if (alive(pid)) process.kill(pid, "SIGKILL"); });
-  const child = spawn(process.execPath, [KIT_CLI, "run", "--config", c.configFile], { cwd: c.work, env: c.env, stdio: ["ignore", "pipe", "pipe"] });
-  let stderr = "";
-  child.stderr.on("data", (chunk) => { stderr += chunk; });
-  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
-  const deadline = Date.now() + 30_000;
-  while (readLines(log).length === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(readLines(log).length, 1, "claude started and is hanging");
+  const run = startDream(t, c);
+  assert.ok(await until(() => readLines(log).length === 1), "claude started and is hanging");
   const started = Date.now();
-  child.kill("SIGINT");
-  const result = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 20_000))]);
-  if (result.timedOut) child.kill("SIGKILL");
-  assert.deepEqual(result, { code: 130, signal: null }, stderr);
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
   assert.ok(Date.now() - started < 10_000, "the run exited promptly");
-  assert.match(stderr, /^DREAM_INTERRUPTED: stopped by SIGINT/m);
-  for (const pid of pids()) assert.equal(alive(pid), false, `claude process ${pid} survived the interrupt`);
-  assert.equal(fs.existsSync(path.join(c.dreamDir, "cursors", "runtime-session.cursor.json")), false, "the cursor is held");
+  assert.match(run.out.stderr, /^DREAM_INTERRUPTED: stopped by SIGINT/m);
+  assert.ok(await until(() => loggedPids(log).every((pid) => !alive(pid)), 2_000), "claude, wrapper and child, survived the interrupt");
+  assert.equal(fs.existsSync(cursorOf(c)), false, "the cursor is held");
+});
+
+test("SIGINT during the last model call: the half-answered sitting is not proposed, the cursor is held, exit 130", async (t) => {
+  // Pass 1 answers; pass 2 hangs. Without the interrupt check, one good pass of two would be proposed and committed.
+  const { c, log } = claudeConsumer(t, { fake: { hangFrom: 2 } });
+  const run = startDream(t, c);
+  assert.ok(await until(() => readLines(log).length === 2), "pass 1 answered and pass 2 started");
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.deepEqual(proposalsIn(c), [], "nothing was proposed");
+  assert.equal(fs.existsSync(c.published), false, "nothing was published");
+  assert.equal(fs.existsSync(cursorOf(c)), false, "the cursor is held");
+  const report = JSON.parse(run.out.stdout);
+  assert.equal(report.status, "failed");
+  assert.equal(report.error.code, "DREAM_INTERRUPTED");
+});
+
+test("SIGINT after the last model call (while the host publishes): the run stops before briefs and the cursor, exit 130", async (t) => {
+  const { c } = claudeConsumer(t);
+  const marker = path.join(c.root, "publishing");
+  const host = path.join(c.root, "slow-host.mjs");
+  fs.writeFileSync(host, `
+    import fs from "node:fs";
+    import { FakeCorpusStore } from ${JSON.stringify(SUPPORT)};
+    export async function createDreamHost({ dryRun }) {
+      if (!dryRun) fs.mkdirSync(${JSON.stringify(c.memoryRoot)}, { recursive: true });
+      return {
+        store: new FakeCorpusStore(${JSON.stringify(c.memoryRoot)}), registerRoot() {}, root: ${JSON.stringify(c.memoryRoot)}, rootName: "memory",
+        async publish(batch) {
+          fs.writeFileSync(${JSON.stringify(marker)}, "");
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          fs.appendFileSync(${JSON.stringify(c.published)}, JSON.stringify(batch) + "\\n");
+        },
+      };
+    }
+  `, { mode: 0o600 });
+  fs.writeFileSync(c.configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(c.configFile, "utf8")), host }), { mode: 0o600 });
+  const run = startDream(t, c);
+  assert.ok(await until(() => fs.existsSync(marker)), "the model calls are done and the host is publishing");
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.equal(fs.existsSync(cursorOf(c)), false, "the cursor is held");
+  assert.deepEqual(filesUnder(path.join(c.dreamDir, "briefs")), [], "no briefs were written");
+  assert.equal(JSON.parse(run.out.stdout).error.code, "DREAM_INTERRUPTED");
+});
+
+test("a second SIGINT within Relay's grace period still kills claude's SIGTERM-ignoring child, and the run exits 130", async (t) => {
+  const { c, log } = claudeConsumer(t, { fake: { hang: true, wrapper: true } });
+  const run = startDream(t, c);
+  assert.ok(await until(() => readLines(log).length === 1), "claude started and is hanging");
+  run.child.kill("SIGINT");
+  // The first SIGINT sends the group SIGTERM: the wrapper exits, its child ignores it and keeps the pipes, so the run
+  // waits on Relay's 2 s SIGKILL. A second signal inside that window must not let this process die before it.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.ok(await until(() => loggedPids(log).every((pid) => !alive(pid)), 1_000), `a claude process survived: ${loggedPids(log).filter(alive)}`);
+});
+
+test("signal handlers: none when main() runs in a host's process; with handleSignals they are removed after the grace period", async (t) => {
+  const { main } = await import(KIT_CLI);
+  const sink = { write() { return true; } };
+  const counts = () => [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  const baseline = counts();
+  const { c } = claudeConsumer(t);
+  assert.equal(await main(["run", "--config", c.configFile], { stdout: sink, stderr: sink }), 0);
+  assert.deepEqual(counts(), baseline, "an in-process run installs no handlers");
+  const { c: c2 } = claudeConsumer(t);
+  assert.equal(await main(["run", "--config", c2.configFile], { stdout: sink, stderr: sink, handleSignals: true }), 0);
+  assert.deepEqual(counts(), baseline.map((n) => n + 1), "the command keeps its handlers through the grace period");
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  assert.deepEqual(counts(), baseline, "and then removes them");
 });
 
 test("user turns a person did not write are counted in the report, and the command says so", (t) => {
@@ -377,7 +473,12 @@ test("config: runtime.passEnv and runtime.timeoutMs are bounded, and refused pas
   const names = (n) => Array.from({ length: n }, (_, i) => `VAR_${i}`);
   assert.deepEqual(validateDreamConfig(runtime({ passEnv: names(MAX_PASS_ENV) })).runtime.passEnv, names(MAX_PASS_ENV));
   assert.equal(validateDreamConfig(runtime({ timeoutMs: MAX_RUNTIME_TIMEOUT_MS })).runtime.timeoutMs, MAX_RUNTIME_TIMEOUT_MS);
+  assert.equal(validateDreamConfig(runtime({ passEnv: ["A".repeat(MAX_ENV_NAME_LENGTH)] })).runtime.passEnv[0].length, MAX_ENV_NAME_LENGTH);
+  for (const name of [...PASS_ENV_REFUSED, "DYLD_INSERT_LIBRARIES", "dyld_library_path", "node_options", "Path"]) {
+    assert.throws(() => validateDreamConfig(runtime({ passEnv: ["ANTHROPIC_BASE_URL", name] })), (error) => error.code === "DREAM_CONFIG_INVALID" && /may not name/.test(error.message), name);
+  }
   for (const extra of [
+    { passEnv: ["A".repeat(MAX_ENV_NAME_LENGTH + 1)] },
     { passEnv: names(MAX_PASS_ENV + 1) }, { passEnv: "ANTHROPIC_BASE_URL" }, { passEnv: ["ANTHROPIC_BASE_URL", "ANTHROPIC_BASE_URL"] },
     { passEnv: ["1BAD"] }, { passEnv: ["A=B"] }, { passEnv: [""] }, { passEnv: [7] },
     { timeoutMs: 0 }, { timeoutMs: -1 }, { timeoutMs: 1.5 }, { timeoutMs: MAX_RUNTIME_TIMEOUT_MS + 1 }, { timeoutMs: "1000" },

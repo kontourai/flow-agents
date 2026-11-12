@@ -1220,7 +1220,12 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
    - **Environment.** It gets only `PATH`, `HOME`, `USER` and `TMPDIR`, plus the variables you name in
      `passEnv` (at most 32). Provider keys, gateway URLs and other services' tokens in the run's environment do not
      reach it unless you name them. If you route Claude through your own gateway with `ANTHROPIC_BASE_URL`, name it,
-     as in the example.
+     as in the example. `passEnv` refuses the base names, which are already passed, and names that make a loader,
+     shell or interpreter run code the run did not choose: `NODE_OPTIONS`, `NODE_PATH`, `NODE_REPL_EXTERNAL_MODULE`,
+     `BASH_ENV`, `ENV`, `BASHOPTS`, `SHELLOPTS`, `PROMPT_COMMAND`, `PS4`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
+     `LD_AUDIT`, any `DYLD_*`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`,
+     `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS` and `JDK_JAVA_OPTIONS` (without regard to case).
+     A name may be at most 128 characters.
    - **Isolation.** It runs with `--safe-mode --setting-sources ""`, so it loads none of your hooks, MCP servers,
      `CLAUDE.md` files, skills, plugins, or user, project and local settings files. That includes a settings file's
      `env` block and `apiKeyHelper`, so a gateway or key set only in a settings file is not used. Put it in the
@@ -1233,10 +1238,13 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
      and Linux `claude` runs in its own process group, and Relay sends the group `SIGTERM`, then `SIGKILL`
      2 seconds later. That also stops a `claude` that is a shell or version-manager wrapper with the binary as its
      child. A stopped call fails the run (exit 1) and holds the cursor. Because the group no longer receives a
-     terminal's Ctrl-C directly, the run catches `SIGINT` and `SIGTERM`, stops `claude` the same way and exits
-     130 or 143; a second signal kills the run at once. Not covered: a process that leaves the group (`setsid`), and
-     the run itself being killed with `SIGKILL`, which leaves `claude` running until it ends. On Windows only the
-     direct child is signalled.
+     terminal's Ctrl-C directly, the command catches `SIGINT` and `SIGTERM`. It stops `claude` the same way,
+     stops at the next step without proposing, publishing, writing briefs or committing the cursor (a sitting whose
+     pass was interrupted is never proposed), and exits 130 or 143. A second signal ends the run at once and first
+     sends `SIGKILL` to any `claude` group still running. Not covered: a process that leaves the group (`setsid`),
+     and the run itself being killed with `SIGKILL`, which leaves `claude` running until it ends. On Windows only
+     the direct child is signalled. A host that calls the dream in its own process gets none of this signal handling
+     unless it asks for it.
    - **Windows.** A `claude.cmd` shim cannot be started without a shell, so the run refuses it (exit 2). Set
      `executable` to the real `claude.exe`, or to the node script the shim runs.
 
