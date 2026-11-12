@@ -256,3 +256,17 @@ test('each directory check stands on its own: a world-writable briefs directory,
  assert.doesNotMatch(await f.sessionStart(), /configured amber heron/, 'a dreamDir reached through a symlink is refused');
  delete process.env.FLOW_AGENTS_DREAM_CONFIG;
 });
+
+test('a dreamDir under a group-writable (not sticky) directory serves nothing, though dreamDir itself is private', async t => {
+ const f = dreamFixture(t, { dreamDir: undefined });
+ const shared = path.join(f.temp, 'shared'); const dir = path.join(shared, 'dream');
+ f.write(dir, 'global.json', ['shared-parent heron']);
+ fs.chmodSync(dir, 0o700); fs.chmodSync(path.join(dir, 'briefs'), 0o700);
+ fs.writeFileSync(f.config, JSON.stringify({ ...JSON.parse(fs.readFileSync(f.config, 'utf8')), dreamDir: dir }), { mode: 0o600 });
+ process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
+ fs.chmodSync(shared, 0o700);
+ assert.match(await f.sessionStart(), /shared-parent heron/, 'baseline: a private parent is fine');
+ fs.chmodSync(shared, 0o775);
+ assert.doesNotMatch(await f.sessionStart(), /shared-parent heron/, 'a group-writable, non-sticky ancestor is refused');
+ delete process.env.FLOW_AGENTS_DREAM_CONFIG;
+});

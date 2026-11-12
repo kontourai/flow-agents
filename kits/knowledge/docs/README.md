@@ -1215,7 +1215,10 @@ SessionStart hook injects as your memory. The run, the hook trigger and the hook
 `dreamDir/briefs` that has a symlink anywhere on its path, is not owned by you, or is group or world writable. They
 also refuse one under a directory that another user owns, or that is group or world writable without the sticky bit.
 The run exits 2 and the hook injects nothing. A `dreamDir` that does not exist yet passes when the directories above
-it pass, and the run creates it 0700.
+it pass, and the run creates it 0700. These checks run in the CLI (`flow-agents dream`), the hook trigger and the hook; `runDream`
+itself does not run them. A host that calls `runDream` as a library must first call
+`assertOwnerControlledDir(dreamDir, "dreamDir")` and `assertOwnerControlledDir(path.join(dreamDir, "briefs"), "dreamDir/briefs")`.
+Both are exported from `kits/knowledge/dream/index.js`.
 
 **Where the briefs are read.** At `SessionStart`, the profile-memory hook reads briefs from the dream's `dreamDir`.
 If the hook's environment sets `FLOW_AGENTS_DREAM_CONFIG` (the same variable the hook trigger reads), the hook loads

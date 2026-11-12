@@ -45,10 +45,18 @@ function fakeClaude(dir) {
     for await (const chunk of process.stdin) chunks.push(chunk);
     const stdin = Buffer.concat(chunks).toString("utf8");
     fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ argv: process.argv.slice(2), trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), stdin }) + "\\n");
-    if (process.env.FAKE_CLAUDE_AUTH_FAIL === "1") {
-      // What the CLI prints when its sign-in is missing or expired: an error result with the API's 401.
-      process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: true, api_error_status: 401, result: "Invalid API key · Please run /login" }));
-      process.exit(1);
+    // FAKE_CLAUDE_STATUSES: one HTTP status per call, in order (the last repeats); 200 answers normally. A 401 is what
+    // the CLI prints when its sign-in is missing or expired, a 529 an overloaded API.
+    const statuses = (process.env.FAKE_CLAUDE_STATUSES ?? "").split(",").filter(Boolean).map(Number);
+    if (statuses.length) {
+      const counter = process.env.FAKE_CLAUDE_LOG + ".calls";
+      const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0;
+      fs.writeFileSync(counter, String(n + 1));
+      const status = statuses[Math.min(n, statuses.length - 1)];
+      if (status !== 200) {
+        process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: true, api_error_status: status, result: status === 401 ? "Invalid API key · Please run /login" : "Overloaded" }));
+        process.exit(1);
+      }
     }
     const quote = ${JSON.stringify(QUOTE)};
     const claim = { subject: "ledger service", subjectType: "service", property: "rounding mode", value: "half-even", posture: "stated" };
@@ -194,17 +202,31 @@ test("runtime claude-code is refused with exit 2 and starts nothing, because Rel
   assert.equal(dry.status, 0, "a dry run needs no model, so the option does not block it");
 });
 
-test("a runtime that refuses its credentials (claude not signed in) exits 2 with setup help, not 1", (t) => {
+function authRun(t, statuses) {
   const c0 = consumer(t);
   const executable = fakeClaude(c0.root);
   const c = consumer(t);
   relayHost(c, executable);
-  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: path.join(c.root, "claude.jsonl"), FAKE_CLAUDE_AUTH_FAIL: "1" });
+  const log = path.join(c.root, "claude.jsonl");
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log, FAKE_CLAUDE_STATUSES: statuses });
+  return { result, calls: readLines(log).length };
+}
+
+test("a runtime that refuses its credentials on every pass (claude not signed in) exits 2 with setup help, not 1", (t) => {
+  const { result } = authRun(t, "401,401");
   assert.equal(result.status, 2, result.stderr);
-  assert.match(result.stderr, /^DREAM_MODEL_UNAVAILABLE: the model runtime refused its credentials/m);
+  assert.match(result.stderr, /^DREAM_MODEL_UNAVAILABLE: the model runtime refused its credentials on every pass/m);
   assert.match(result.stderr, /sign in with \/login/);
   assert.match(result.stderr, /Give the dream run a model in one of these ways/);
   assert.equal(JSON.parse(result.stdout).status, "failed", "the failed run's report is still printed");
+});
+
+test("a sitting whose passes failed with a 401 and then an outage is a failed run (exit 1), not a setup error", (t) => {
+  const { result, calls } = authRun(t, "401,529");
+  assert.equal(calls, 2, "both passes reached the runtime");
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /^DREAM_DISTILL_FAILED/m);
+  assert.doesNotMatch(result.stderr, /DREAM_MODEL_UNAVAILABLE/);
 });
 
 test("config: runtime is validated, and cannot be combined with role", () => {
@@ -375,4 +397,33 @@ test("each run-side directory check stands on its own: a world-writable briefs d
   const viaLink = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
   assert.equal(viaLink.status, 2, viaLink.stderr);
   assert.match(viaLink.stderr, /^DREAM_CONFIG_INVALID: dreamDir path must not contain a symlink/m);
+});
+
+test("a dreamDir under a directory its group can write is refused, though dreamDir itself is private", (t) => {
+  const c = consumer(t);
+  const shared = path.join(c.root, "shared");
+  fs.mkdirSync(path.join(shared, "dream", "briefs"), { recursive: true, mode: 0o700 });
+  fs.chmodSync(shared, 0o775); // not sticky: anyone in the group can rename dream away and put another in its place
+  fs.writeFileSync(c.configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(c.configFile, "utf8")), dreamDir: path.join(shared, "dream") }), { mode: 0o600 });
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /dreamDir is under a group or world writable directory/);
+});
+
+test("a dreamDir that is a dangling symlink is refused with exit 2, not treated as not created yet", (t) => {
+  const c = consumer(t);
+  fs.symlinkSync(path.join(c.root, "nowhere"), c.dreamDir);
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /^DREAM_CONFIG_INVALID: dreamDir path must not contain a symlink/m);
+});
+
+test("the kit index exports the directory check for hosts that call runDream as a library", async (t) => {
+  const kit = await import("../../kits/knowledge/dream/index.js");
+  assert.equal(typeof kit.assertOwnerControlledDir, "function");
+  const dir = tempDir("dream-lib-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(kit.assertOwnerControlledDir(dir, "dreamDir"), dir);
+  fs.chmodSync(dir, 0o777);
+  assert.throws(() => kit.assertOwnerControlledDir(dir, "dreamDir"), (error) => error.code === "DREAM_CONFIG_INVALID");
 });

@@ -51,18 +51,46 @@ function storeForMissingRoot(root) {
   };
 }
 
-/** The runtime, reporting into `refused` when a call fails authentication (Relay's AUTHENTICATION_FAILED). */
-function watchAuthentication(runtime, refused) {
+/**
+ * Which passes failed authentication, per sitting. `runtime` records the code of the call that failed, and `extract`
+ * files each pass under its sitting (the extraction request's `sourceRef` is the sitting id). The run gives up on a
+ * sitting only when every pass failed, so `onlyAuthentication(sittingId)` is true when each of that sitting's failed
+ * passes was Relay's AUTHENTICATION_FAILED: a 401 in one pass and an outage in another is an outage, and one sitting's
+ * 401 says nothing about another sitting. Passes run one at a time, so one pass is in flight at once.
+ */
+function trackAuthentication(runtime) {
+  const bySitting = new Map();
+  let inFlight = null;
   const watched = Object.create(runtime);
   watched.invoke = async (...args) => {
     try {
       return await runtime.invoke(...args);
     } catch (error) {
-      if (error?.code === "AUTHENTICATION_FAILED") refused.error = error;
+      if (inFlight && inFlight.code === null) inFlight.code = error?.code ?? "ERROR";
       throw error;
     }
   };
-  return watched;
+  const extract = (inner) => async (request) => {
+    const pass = { code: null };
+    inFlight = pass;
+    try {
+      const result = await inner(request);
+      if (result?.error && pass.code === null) pass.code = "ERROR";
+      return result;
+    } catch (error) {
+      if (pass.code === null) pass.code = error?.code ?? "ERROR";
+      throw error;
+    } finally {
+      inFlight = null;
+      const key = request?.sourceRef;
+      bySitting.set(key, [...(bySitting.get(key) ?? []), pass]);
+    }
+  };
+  const onlyAuthentication = (sittingId) => {
+    const failed = (bySitting.get(sittingId) ?? []).filter((pass) => pass.code !== null);
+    return failed.length > 0 && failed.every((pass) => pass.code === "AUTHENTICATION_FAILED");
+  };
+  return { runtime: watched, extract, onlyAuthentication };
 }
 
 export function parseArgs(argv) {
@@ -114,13 +142,14 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);
     }
     if (args.dryRun && host.store == null) host.store = storeForMissingRoot(host.root);
-    const refused = {};
+    let auth = null;
     if (!host.extract && !args.dryRun) {
       const runtime = host.runtime
         ?? (config.runtime
           ? await createCliRuntime(config.runtime)
           : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
-      host.extract = await extractForRuntime(watchAuthentication(runtime, refused));
+      auth = trackAuthentication(runtime);
+      host.extract = auth.extract(await extractForRuntime(auth.runtime));
     }
     const report = await runDream(host, {
       enabled: config.enabled,
@@ -131,9 +160,9 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       ...(config.dreamDir ? { dreamDir: config.dreamDir } : {}),
       ...Object.fromEntries(["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs", "proposerId", "visibility"].filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
     }).catch((error) => {
-      // Every pass failing because the runtime refused its credentials is a setup problem, not a failed run.
-      if (error?.code !== "DREAM_DISTILL_FAILED" || !refused.error) throw error;
-      throw dreamError("DREAM_MODEL_UNAVAILABLE", `the model runtime refused its credentials (${refused.error.message}); for the Claude Code CLI, run claude and sign in with /login; for a Datum role, check its key`, { help: modelSetupHelp(config.role ?? DEFAULT_ROLE), report: error.report });
+      // A sitting whose every pass failed because the runtime refused its credentials is a setup problem, not a failed run.
+      if (error?.code !== "DREAM_DISTILL_FAILED" || !auth?.onlyAuthentication(error.sittingId)) throw error;
+      throw dreamError("DREAM_MODEL_UNAVAILABLE", "the model runtime refused its credentials on every pass (Relay AUTHENTICATION_FAILED); for the Claude Code CLI, run claude and sign in with /login; for a Datum role, check its key", { help: modelSetupHelp(config.role ?? DEFAULT_ROLE), report: error.report });
     });
     stdout.write(`${JSON.stringify(report)}\n`);
     return report.status === "blocked" ? 3 : 0;

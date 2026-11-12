@@ -95,8 +95,17 @@ const trustedOwner = (stat, uid) => uid === null || stat.uid === uid || stat.uid
 export function assertOwnerControlledDir(dir, label) {
   assertAbsolute(dir, label);
   const resolved = path.resolve(dir);
+  // lstat, not existsSync: existsSync follows a link, so a dangling symlink would read as "not created yet".
   let existing = resolved;
-  while (!fs.existsSync(existing)) {
+  for (;;) {
+    let stat = null;
+    try {
+      stat = fs.lstatSync(existing);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw dreamError("DREAM_CONFIG_INVALID", `${label} cannot be inspected (${error?.code ?? "error"}): ${existing}`);
+    }
+    if (stat?.isSymbolicLink()) throw dreamError("DREAM_CONFIG_INVALID", `${label} path must not contain a symlink: ${existing} is a symlink`);
+    if (stat) break;
     const parent = path.dirname(existing);
     if (parent === existing) break;
     existing = parent;

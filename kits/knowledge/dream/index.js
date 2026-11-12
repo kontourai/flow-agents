@@ -7,7 +7,9 @@
  * @module dream
  */
 
-export { DEFAULT_ROLE, loadDreamConfig, validateDreamConfig } from "./config.js";
+// `runDream` does not check its `dreamDir`; the CLI and the hook paths do. A library caller that passes its own
+// dreamDir must call `assertOwnerControlledDir(dreamDir, "dreamDir")` and the same for `<dreamDir>/briefs` first.
+export { DEFAULT_ROLE, assertOwnerControlledDir, loadDreamConfig, validateDreamConfig } from "./config.js";
 export {
   DEFAULT_GLOBAL_BUDGET_BYTES,
   DEFAULT_PROJECT_BUDGET_BYTES,
