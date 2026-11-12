@@ -16,6 +16,7 @@ export {
   measureEffect, mergeIntoCurrent, proposalId, qualifies, readLedger, reviewItemFor, themeState,
 } from "./propose.js";
 export { acquireLedgerLock, ledgerLockPath } from "./ledger-lock.js";
-export { assertUntracked, repoScope } from "./scope.js";
+export { defaultLedger, readLearningReviewLedger, resolveLearningReviewLedger, validateLedgerLine } from "./ledger.js";
+export { assertUntracked, repoScope, scopeKey, scopeTag } from "./scope.js";
 export { DEFAULT_SINCE_DAYS, runLearn } from "./run.js";
 export { defaultTranscriptRoots, humanTurns, isHumanTurn, readHumanTurns } from "./sessions.js";

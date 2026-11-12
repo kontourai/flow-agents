@@ -17,22 +17,20 @@
  *
  * A judge finding the rule already written (`covered_by`) is reported, never escalated on.
  *
- * Everything here is pure except `readLedger`, `writeMergedLedger` and `writeReviewItems`.
+ * Everything here is pure except `writeMergedLedger` and `writeReviewItems` (`readLedger` lives in ledger.js).
  * Proposals are advisory: nothing in the learn loop edits a rules file, a skill, a hook or a
  * Veritas config.
  *
  * @module learn/propose
  */
 
-import { createHash } from "node:crypto";
-import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { currentProposedReviewItem, reviewResourceApiVersion } from "@kontourai/survey";
 
 import { truncateUtf8, writePrivateAtomic } from "../dream/util.js";
 import { learnError } from "./model.js";
-import { scopeKey } from "./scope.js";
+import { scopeKey, scopeTag } from "./scope.js";
 
 export const SOURCE_FAMILY = "correction-recurrence";
 export const PRODUCER_ID = "knowledge.learn";
@@ -159,14 +157,6 @@ function proposedChange(kind, rule, rulesFileName) {
     case "hook": return `Enforce "${rule}" with a harness hook that detects or blocks the behaviour; the ratified skill has not reduced the recurrence.`;
     default: return `Add an executable check to the repository's Veritas config that fails when "${rule}" is violated; the ratified hook has not reduced the recurrence.`;
   }
-}
-
-/**
- * `all` for an all-projects proposal, `r<8 hex>` (a hash of the repository identity) for a repository's. Part of
- * every proposal id, so one ledger can hold proposals of several scopes without one scope's id answering for another.
- */
-export function scopeTag(scope) {
-  return scope?.kind === "repo" ? `r${createHash("sha256").update(String(scope.repo)).digest("hex").slice(0, 8)}` : "all";
 }
 
 export function proposalId(kind, themeId, suffix = "", scope = { kind: "all-projects" }) {
@@ -403,33 +393,7 @@ export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowS
   return changed;
 }
 
-/**
- * Read the ledger strictly: a line that is not a JSON object with a proposal_id stops the run before anything is
- * written. A byte-order mark and CRLF line ends are accepted (a rewrite normalizes them to LF).
- */
-export function readLedger(file) {
-  let text;
-  try {
-    text = fs.readFileSync(file, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") return { lines: [], entries: [] };
-    throw error;
-  }
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim() !== "");
-  const entries = lines.map((line, index) => {
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      entry = null;
-    }
-    if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.proposal_id !== "string") {
-      throw learnError("LEARN_LEDGER_CORRUPT", `ledger line ${index + 1} of ${file} is not a proposal; repair it and retry (nothing was written)`);
-    }
-    return entry;
-  });
-  return { lines, entries };
-}
+export { readLedger } from "./ledger.js";
 
 const decisionOf = (entry) => JSON.stringify([entry?.decision ?? null, entry?.follow_on_ref ?? null]);
 

@@ -510,6 +510,34 @@ refusing with nothing written. The learn loop re-reads the ledger under the lock
 (`LEARN_LEDGER_CHANGED`) when any correction-recurrence entry was added, removed or had its
 decision changed since it started; other producers' lines are kept exactly as they are then.
 
+### Reading the ledger from another program
+
+`@kontourai/flow-agents/learning-review-proposals` is the supported read-only interface; copying
+the learn kit's internals is not. It holds no lock and writes nothing.
+
+- `resolveLearningReviewLedger({ cwd, env, allProjects })` returns `{ ledgerPath, scope }`. It
+  resolves exactly as `flow-agents learn` does, because the CLI calls the same function. That
+  means: the main checkout of the repository containing `cwd` (from `git rev-parse
+  --git-common-dir`); a bare repository's worktree; or `cwd` with `allProjects`. The
+  `LEARNING_REVIEW_PROPOSALS_LEDGER` and `TELEMETRY_DATA_DIR` overrides apply, with relative
+  values resolved against that directory. Outside a repository, without `allProjects`, it throws
+  with `code: "LEARN_NOT_A_REPOSITORY"`. `flow-agents learn --print-ledger-path` prints the same
+  path.
+- `readLearningReviewLedger(path, { scope })` returns `{ exists, entries, gaps }`. Every
+  non-empty line (BOM and CRLF tolerated) becomes either an entry, which validates against the
+  per-line schema, or a gap `{ line, code: "invalid-json" | "not-an-object" | "schema", message,
+  proposal_id? }`. A line is never dropped silently. With `scope`, only that scope's
+  correction-recurrence entries are kept (by `scopeKey`). v0.1 kit and gate entries carry no
+  scope and are always kept.
+- `ledgerLineSchema` is `#/$defs/proposal` rooted so its references resolve, and
+  `validateLedgerLine` checks one parsed line against it. The document schema is
+  `ledgerDocumentSchema`, also exported as the file
+  `@kontourai/flow-agents/schemas/learning-review-proposals.schema.json`.
+- `scopeKey(scope)` is the comparison key (`repo:<path>`, `all-projects`). `scopeTag(scope)` is
+  the `r<8 hex>` / `all` suffix every correction-recurrence `proposal_id` carries.
+- The declarations type an entry as `CorrectionRecurrenceProposal | KitGateProposal`,
+  discriminated by `pattern`.
+
 ### Review
 
 Each learn run also writes, before the ledger, the open queue (every correction-recurrence proposal whose
