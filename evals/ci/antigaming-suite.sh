@@ -12,6 +12,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 TESTS=(
+  "evals/integration/test_vendored_runtime_kits.sh"
   "evals/acceptance/prove-capture-teeth.sh"
   "evals/acceptance/prove-capture-teeth-declared.sh"
   "evals/integration/test_gate_lockdown.sh"

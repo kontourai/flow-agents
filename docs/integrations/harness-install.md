@@ -18,6 +18,14 @@ This page walks through three harness installs: Claude Code (the L2 reference ru
 `flow-agents init` (from `npx @kontourai/flow-agents`) calls `install.sh` for the selected runtime.
 Published packages carry the built bundles in a single pack. The installer expands the selected bundle into a private temporary directory; a source checkout uses its generated `dist/` tree.
 
+Claude Code, Codex, OpenCode and Kiro bundles carry standalone public runtime
+imports and `build/runtime-imports.json` alongside owned package metadata. Their
+installed CLIs and hook-side kit lookup do not need an ambient npm dependency tree.
+Global installs under `.flow-agents/` admit only the executing installation's exact
+physical kit tree through the artifact-storage exclusion; sibling artifact kits
+remain refused. See [Developer Architecture](../developer-architecture.md#durable-claude-code-global-runtime)
+for that boundary and local install regression coverage.
+
 ## Claude Code
 
 Claude Code is the L2 reference implementation. All four policy classes are wired: workflow steering, quality gate, stop-goal-fit, and config protection.
