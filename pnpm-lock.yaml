@@ -43,8 +43,8 @@ importers:
         version: 0.28.2
     devDependencies:
       '@kontourai/corpus-store':
-        specifier: 0.1.0-next.0
-        version: 0.1.0-next.0
+        specifier: 0.1.0-next.5
+        version: 0.1.0-next.5
       '@kontourai/forage':
         specifier: 1.0.2
         version: 1.0.2(playwright@1.61.0)
@@ -1060,8 +1060,8 @@ packages:
     resolution: {integrity: sha512-EiAd0KYVnysVy6I1lvW6vHoGTocLmG81HotMDsqJTIcqhMBImFAyojMs1qPqXrBnH/HpjrLI+yBlUSOzKtJwjw==}
     engines: {node: '>=22'}
 
-  '@kontourai/corpus-store@0.1.0-next.0':
-    resolution: {integrity: sha512-P81cVVEKjaxc5B3lopikvMCUeXjvRIiiUHnWRn45M/kW4ver66r94o45t78LUbj/GvCaWn7PfCa8hPWenQVT+A==}
+  '@kontourai/corpus-store@0.1.0-next.5':
+    resolution: {integrity: sha512-d9S5M0CG8+xeg8zi6GGvu77ImeB8ygfQmaU0aFZDQdZXFxfa0wLgvLiezmXClnGNU0KOBocYYVO6B1jtTbxlnA==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -4205,7 +4205,7 @@ snapshots:
   '@apidevtools/json-schema-ref-parser@16.0.5(@types/json-schema@7.0.15)':
     dependencies:
       '@types/json-schema': 7.0.15
-      js-yaml: 5.4.2
+      js-yaml: 5.4.3
 
   '@aws-crypto/crc32@5.2.0':
     dependencies:
@@ -5265,7 +5265,7 @@ snapshots:
 
   '@kontourai/conduit@0.7.1': {}
 
-  '@kontourai/corpus-store@0.1.0-next.0':
+  '@kontourai/corpus-store@0.1.0-next.5':
     dependencies:
       js-yaml: 5.4.2
 

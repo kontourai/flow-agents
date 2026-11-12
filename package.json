@@ -378,7 +378,7 @@
     "test:delegation-rounds": "npm run build --silent && node --test src/cli/delegation-group-rounds.test.mjs src/cli/delegation-flow-runtime.test.mjs"
   },
   "devDependencies": {
-    "@kontourai/corpus-store": "0.1.0-next.0",
+    "@kontourai/corpus-store": "0.1.0-next.5",
     "@kontourai/forage": "1.0.2",
     "@kontourai/lookout": "0.8.9",
     "@kontourai/traverse": "5.0.3",
