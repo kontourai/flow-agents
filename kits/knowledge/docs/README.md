@@ -1167,3 +1167,73 @@ opt-in `SessionEnd`/`PreCompact` hook starts it. It is disabled until an operato
 enables it, it consumes the residue, claim, routing and proposal contracts above rather
 than defining its own, it only proposes, and it commits its cursor last. It is exposed
 through the declared `knowledge.dream-runner` adapter and the `knowledge.dream` flow.
+
+### Dream run model setup
+
+An installed package runs the dream with `flow-agents dream run --config /abs/dream.config.json [--dry-run] [--trigger NAME]`.
+That command forwards to `kits/knowledge/dream/cli.js`, so its arguments, report and exit codes are the same.
+
+The config path, and every directory above it, must not be a symlink. On macOS `/tmp` and `/var` are symlinks to
+`/private/tmp` and `/private/var`. When the run refuses a config for this reason, the error names the real path to pass instead.
+
+The run reaches a model only through a Relay `ModelRuntime`, routed through Dispatch. You can choose one of these runtimes:
+
+1. **A Datum role** (the default, `extraction-default`, or the config's `role`). Add the role to
+   `~/.config/kontour/datum.json`, or to `.datum/config.json` in the directory where the run starts:
+
+   ```json
+   {"providers":{"anthropic":{"kind":"anthropic-compatible","auth":{"env":"ANTHROPIC_API_KEY"},"models":["claude-sonnet-5"]}},"roles":{"extraction-default":"claude-sonnet-5@anthropic"}}
+   ```
+
+   The default runtime factory supports `anthropic-compatible` providers.
+2. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
+
+The Claude Code CLI (a Claude subscription without an API key) is **not available yet**. The config accepts
+`"runtime": { "kind": "claude-code", "model": "sonnet" }`, but a real run with it exits 2 with `DREAM_MODEL_UNSUPPORTED`
+and starts nothing. Relay's Claude Code runtime would start `claude` with this process's whole environment, including
+provider keys, gateway URLs and other services' tokens. It would also start a full session that loads your hooks, MCP
+servers and `CLAUDE.md`, and any of those would see the transcript excerpt. The option opens when Relay can restrict
+both ([relay#84](https://github.com/kontourai/relay/issues/84)). Until then, a host that wants the CLI builds that
+runtime itself and owns those risks.
+
+A run's token budget counts input and output tokens. Relay does not count cached prompt tokens, so the budget can
+understate what a provider charges.
+
+**Dry runs and a new memory root.** `--dry-run` creates nothing. Constructing a Corpus store over a memory root
+that does not exist yet creates that root, because Corpus binds a root to a stable identity at construction. So when
+`createDreamHost` is called with `dryRun: true` and the root does not exist, return no `store`; the run then reads the
+root as empty. Over an existing root, open the store as usual. When the root exists, a missing `store` exits 2, because
+an empty answer would hide the proposals already in the root. Keep the store's coordination directory outside the root,
+because the store's constructor creates it.
+
+If neither is configured, the run exits 2 with `DREAM_MODEL_UNCONFIGURED`. The error names the missing role and prints
+how to set up a model. A missing credential or a runtime that refuses its credentials (`DREAM_MODEL_UNAVAILABLE`, for
+example a 401 from the provider), and an unsupported provider or runtime (`DREAM_MODEL_UNSUPPORTED`), also exit 2.
+
+**The dream directory is yours alone.** `dreamDir` holds the cursor, lock, reports and the briefs that the
+SessionStart hook injects as your memory. The run, the hook trigger and the hook refuse a `dreamDir` or
+`dreamDir/briefs` that has a symlink anywhere on its path, is not owned by you, or is group or world writable. They
+also refuse one under a directory that another user owns, or that is group or world writable without the sticky bit.
+The run exits 2 and the hook injects nothing. A `dreamDir` that does not exist yet passes when the directories above
+it pass, and the run creates it 0700. These checks run in the CLI (`flow-agents dream`), the hook trigger and the hook; `runDream`
+itself does not run them. A host that calls `runDream` as a library must first call
+`assertOwnerControlledDir(dreamDir, "dreamDir")` and `assertOwnerControlledDir(path.join(dreamDir, "briefs"), "dreamDir/briefs")`.
+Both are exported from `kits/knowledge/dream/index.js`.
+
+**Where the briefs are read.** At `SessionStart`, the profile-memory hook reads briefs from the dream's `dreamDir`.
+If the hook's environment sets `FLOW_AGENTS_DREAM_CONFIG` (the same variable the hook trigger reads), the hook loads
+that config with the run's ownership checks and uses its `dreamDir`. If the config cannot be loaded, or does not
+say `"enabled": true`, the hook injects nothing. Without the variable, the hook uses the default directory. It reads `project-<id>.json` for the session's
+working directory first, where `<id>` follows the run's rule (the directory name), then `global.json`, and it skips
+entries that are already present.
+
+Set `FLOW_AGENTS_DREAM_CONFIG` in your user-level environment. Do not let a project set it, because the config it
+names chooses the briefs that the hook injects as your memory. A project that can set a hook's environment can already
+run code in every Node hook (for example through `NODE_OPTIONS`), so the hook trusts this variable as much as the rest of
+that environment.
+**Known limitation: a project ID is only a directory name.** The run and the hook derive the ID from the last
+segment of the working directory, lowercased, with other characters replaced by `-`. So `/a/api` and `/b/api` share
+one `project-api.json`, and a session in either checkout gets both checkouts' project claims. That brief contains no
+claims beyond those already eligible for the global brief, which includes every project's claims, but it does rank
+the other checkout's claims as this project's. A worktree whose directory name differs from its main checkout gets no
+project brief. A stable project identity is a follow-up.

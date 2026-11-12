@@ -1,30 +1,97 @@
 #!/usr/bin/env node
 /**
  * Command-line entry for the dream run (#671): the thing a host scheduler or the
- * opt-in hook trigger invokes.
+ * opt-in hook trigger invokes. An installed package reaches it as
+ * `flow-agents dream run ...` (src/cli/dream.ts forwards here).
  *
  *   node dream/cli.js run --config /abs/dream.config.json [--dry-run] [--trigger NAME]
  *
  * Disabled unless the config says `"enabled": true`. The config's `host` is an
  * operator-owned module exporting `createDreamHost({ config })`, which returns
  * the host-composed pieces the run must not discover for itself (`dryRun` is true
- * under `--dry-run`, and the host must then create and write nothing):
+ * under `--dry-run`, and the host must then create and write nothing; a host whose
+ * memory root does not exist yet returns no `store` then, see storeForMissingRoot):
  *   { store, registerRoot, root, rootName, publish, runtime?, extract?, reviewDecisions? }
- * With neither `runtime` nor `extract`, the model is the Datum role named by the
- * config (default `extraction-default`), routed through Dispatch and Relay.
+ * With neither `runtime` nor `extract`, the model is the config's `runtime` (the
+ * Claude Code CLI) when it names one, and otherwise the Datum role named by the
+ * config (default `extraction-default`); either way it is a Relay runtime routed
+ * through Dispatch.
  *
  * Exit codes: 0 ran (success, noop, dry-run), 1 failed, 2 disabled or bad
- * configuration, 3 blocked telemetry, 75 another run holds the lock.
+ * configuration (including no model set up), 3 blocked telemetry, 75 another run
+ * holds the lock.
  *
  * @module dream/cli
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { DEFAULT_ROLE, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
-import { createRoleRuntime, extractForRuntime } from "./model.js";
-import { runDream } from "./run.js";
+import { DEFAULT_ROLE, assertOwnerControlledDir, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
+import { createCliRuntime, createRoleRuntime, extractForRuntime, modelSetupHelp } from "./model.js";
+import { defaultDreamDir, runDream } from "./run.js";
 import { dreamError } from "./util.js";
+
+/** Errors that mean the operator has to change something before any run can work: exit 2, not a failed run. */
+const CONFIGURATION_CODES = new Set(["DREAM_DISABLED", "DREAM_CONFIG_INVALID", "DREAM_MODEL_UNCONFIGURED", "DREAM_MODEL_UNAVAILABLE", "DREAM_MODEL_UNSUPPORTED"]);
+
+/**
+ * A dry run creates nothing, but constructing a Corpus store over a memory root that does not exist yet creates the
+ * root (Corpus binds a root to a stable identity when the store is built). So under `--dry-run` a host whose root is
+ * missing returns no `store`, and the run reads this one: the root holds nothing yet, so there is nothing to list. A
+ * host that leaves out the store while its root exists would hide the proposals in it, and is refused.
+ */
+function storeForMissingRoot(root) {
+  if (typeof root !== "string" || !path.isAbsolute(root)) throw dreamError("DREAM_CONFIG_INVALID", "root must be an absolute path");
+  if (fs.existsSync(root)) throw dreamError("DREAM_CONFIG_INVALID", "the host returned no store, but its memory root exists; open the store read-only instead");
+  return {
+    async listProposals() { return []; },
+    async proposeCreate() { throw dreamError("DREAM_DRY_RUN", "a dry run proposes nothing"); },
+  };
+}
+
+/**
+ * Which passes failed authentication, per sitting. `runtime` records the code of the call that failed, and `extract`
+ * files each pass under its sitting (the extraction request's `sourceRef` is the sitting id). The run gives up on a
+ * sitting only when every pass failed, so `onlyAuthentication(sittingId)` is true when each of that sitting's failed
+ * passes was Relay's AUTHENTICATION_FAILED: a 401 in one pass and an outage in another is an outage, and one sitting's
+ * 401 says nothing about another sitting. Passes run one at a time, so one pass is in flight at once.
+ */
+function trackAuthentication(runtime) {
+  const bySitting = new Map();
+  let inFlight = null;
+  const watched = Object.create(runtime);
+  watched.invoke = async (...args) => {
+    try {
+      return await runtime.invoke(...args);
+    } catch (error) {
+      if (inFlight && inFlight.code === null) inFlight.code = error?.code ?? "ERROR";
+      throw error;
+    }
+  };
+  const extract = (inner) => async (request) => {
+    const pass = { code: null };
+    inFlight = pass;
+    try {
+      const result = await inner(request);
+      if (result?.error && pass.code === null) pass.code = "ERROR";
+      return result;
+    } catch (error) {
+      if (pass.code === null) pass.code = error?.code ?? "ERROR";
+      throw error;
+    } finally {
+      inFlight = null;
+      const key = request?.sourceRef;
+      bySitting.set(key, [...(bySitting.get(key) ?? []), pass]);
+    }
+  };
+  const onlyAuthentication = (sittingId) => {
+    const failed = (bySitting.get(sittingId) ?? []).filter((pass) => pass.code !== null);
+    return failed.length > 0 && failed.every((pass) => pass.code === "AUTHENTICATION_FAILED");
+  };
+  return { runtime: watched, extract, onlyAuthentication };
+}
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -58,6 +125,11 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     return 2;
   }
   try {
+    // The run keeps its cursor, lock, reports and briefs here, and the SessionStart hook injects the briefs as the
+    // user's memory, so another user must not be able to write, or redirect, either directory.
+    const dreamDir = config.dreamDir ?? defaultDreamDir();
+    assertOwnerControlledDir(dreamDir, "dreamDir");
+    assertOwnerControlledDir(path.join(dreamDir, "briefs"), "dreamDir/briefs");
     let host;
     try {
       const module = await import(pathToFileURL(assertOwnerControlledFile(config.host, "host")).href);
@@ -69,9 +141,15 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       if (error?.code === "DREAM_CONFIG_INVALID") throw error;
       throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);
     }
+    if (args.dryRun && host.store == null) host.store = storeForMissingRoot(host.root);
+    let auth = null;
     if (!host.extract && !args.dryRun) {
-      const runtime = host.runtime ?? (await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
-      host.extract = await extractForRuntime(runtime);
+      const runtime = host.runtime
+        ?? (config.runtime
+          ? await createCliRuntime(config.runtime)
+          : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
+      auth = trackAuthentication(runtime);
+      host.extract = auth.extract(await extractForRuntime(auth.runtime));
     }
     const report = await runDream(host, {
       enabled: config.enabled,
@@ -81,13 +159,19 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       transcriptRoots: config.transcriptRoots,
       ...(config.dreamDir ? { dreamDir: config.dreamDir } : {}),
       ...Object.fromEntries(["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs", "proposerId", "visibility"].filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
+    }).catch((error) => {
+      // A sitting whose every pass failed because the runtime refused its credentials is a setup problem, not a failed run.
+      if (error?.code !== "DREAM_DISTILL_FAILED" || !auth?.onlyAuthentication(error.sittingId)) throw error;
+      throw dreamError("DREAM_MODEL_UNAVAILABLE", "the model runtime refused its credentials on every pass (Relay AUTHENTICATION_FAILED); for the Claude Code CLI, run claude and sign in with /login; for a Datum role, check its key", { help: modelSetupHelp(config.role ?? DEFAULT_ROLE), report: error.report });
     });
     stdout.write(`${JSON.stringify(report)}\n`);
     return report.status === "blocked" ? 3 : 0;
   } catch (error) {
     stderr.write(`${error.code ?? "DREAM_FAILED"}: ${String(error.message).slice(0, 300)}\n`);
+    // Setup guidance is ours, not echoed input, so it is printed whole.
+    if (typeof error.help === "string") stderr.write(`${error.help}\n`);
     if (error.report) stdout.write(`${JSON.stringify(error.report)}\n`);
-    return error.code === "DREAM_LOCKED" ? 75 : error.code === "DREAM_DISABLED" || error.code === "DREAM_CONFIG_INVALID" ? 2 : 1;
+    return error.code === "DREAM_LOCKED" ? 75 : CONFIGURATION_CODES.has(error.code) ? 2 : 1;
   }
 }
 
