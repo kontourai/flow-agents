@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Command-line entry for the dream run (#671): the thing a host scheduler or the
- * opt-in hook trigger invokes.
+ * opt-in hook trigger invokes. An installed package reaches it as
+ * `flow-agents dream run ...` (src/cli/dream.ts forwards here).
  *
  *   node dream/cli.js run --config /abs/dream.config.json [--dry-run] [--trigger NAME]
  *
@@ -10,11 +11,14 @@
  * the host-composed pieces the run must not discover for itself (`dryRun` is true
  * under `--dry-run`, and the host must then create and write nothing):
  *   { store, registerRoot, root, rootName, publish, runtime?, extract?, reviewDecisions? }
- * With neither `runtime` nor `extract`, the model is the Datum role named by the
- * config (default `extraction-default`), routed through Dispatch and Relay.
+ * With neither `runtime` nor `extract`, the model is the config's `runtime` (the
+ * Claude Code CLI) when it names one, and otherwise the Datum role named by the
+ * config (default `extraction-default`); either way it is a Relay runtime routed
+ * through Dispatch.
  *
  * Exit codes: 0 ran (success, noop, dry-run), 1 failed, 2 disabled or bad
- * configuration, 3 blocked telemetry, 75 another run holds the lock.
+ * configuration (including no model set up), 3 blocked telemetry, 75 another run
+ * holds the lock.
  *
  * @module dream/cli
  */
@@ -22,9 +26,12 @@
 import { pathToFileURL } from "node:url";
 
 import { DEFAULT_ROLE, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
-import { createRoleRuntime, extractForRuntime } from "./model.js";
+import { createCliRuntime, createRoleRuntime, extractForRuntime } from "./model.js";
 import { runDream } from "./run.js";
 import { dreamError } from "./util.js";
+
+/** Errors that mean the operator has to change something before any run can work: exit 2, not a failed run. */
+const CONFIGURATION_CODES = new Set(["DREAM_DISABLED", "DREAM_CONFIG_INVALID", "DREAM_MODEL_UNCONFIGURED", "DREAM_MODEL_UNAVAILABLE", "DREAM_MODEL_UNSUPPORTED"]);
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -70,7 +77,8 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);
     }
     if (!host.extract && !args.dryRun) {
-      const runtime = host.runtime ?? (await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
+      const runtime = host.runtime
+        ?? (config.runtime ? await createCliRuntime(config.runtime) : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
       host.extract = await extractForRuntime(runtime);
     }
     const report = await runDream(host, {
@@ -86,8 +94,10 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     return report.status === "blocked" ? 3 : 0;
   } catch (error) {
     stderr.write(`${error.code ?? "DREAM_FAILED"}: ${String(error.message).slice(0, 300)}\n`);
+    // Setup guidance is ours, not echoed input, so it is printed whole.
+    if (typeof error.help === "string") stderr.write(`${error.help}\n`);
     if (error.report) stdout.write(`${JSON.stringify(error.report)}\n`);
-    return error.code === "DREAM_LOCKED" ? 75 : error.code === "DREAM_DISABLED" || error.code === "DREAM_CONFIG_INVALID" ? 2 : 1;
+    return error.code === "DREAM_LOCKED" ? 75 : CONFIGURATION_CODES.has(error.code) ? 2 : 1;
   }
 }
 

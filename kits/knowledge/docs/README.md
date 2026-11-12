@@ -1167,3 +1167,44 @@ opt-in `SessionEnd`/`PreCompact` hook starts it. It is disabled until an operato
 enables it, it consumes the residue, claim, routing and proposal contracts above rather
 than defining its own, it only proposes, and it commits its cursor last. It is exposed
 through the declared `knowledge.dream-runner` adapter and the `knowledge.dream` flow.
+
+### Dream run model setup
+
+An installed package runs the dream with `flow-agents dream run --config /abs/dream.config.json [--dry-run] [--trigger NAME]`.
+That command forwards to `kits/knowledge/dream/cli.js`, so its arguments, report and exit codes are the same.
+
+The config path, and every directory above it, must not be a symlink. On macOS `/tmp` and `/var` are symlinks to
+`/private/tmp` and `/private/var`. When the run refuses a config for this reason, the error names the real path to pass instead.
+
+The run reaches a model only through a Relay `ModelRuntime`, routed through Dispatch. You can choose one of these runtimes:
+
+1. **A Datum role** (the default, `extraction-default`, or the config's `role`). Add the role to
+   `~/.config/kontour/datum.json`, or to `.datum/config.json` in the directory where the run starts:
+
+   ```json
+   {"providers":{"anthropic":{"kind":"anthropic-compatible","auth":{"env":"ANTHROPIC_API_KEY"},"models":["claude-sonnet-5"]}},"roles":{"extraction-default":"claude-sonnet-5@anthropic"}}
+   ```
+
+   The default runtime factory supports `anthropic-compatible` providers.
+2. **The Claude Code CLI**, for a Claude subscription without an API key. Add this to the dream config instead of `role`:
+
+   ```json
+   "runtime": { "kind": "claude-code", "model": "sonnet", "executable": "/abs/path/to/claude" }
+   ```
+
+   `executable` is optional; without it, the run uses `claude` from `PATH`. The run uses `@kontourai/relay/claude-code`
+   to start `claude --print` with no tools and no session persistence, then passes the scrubbed sitting on stdin.
+   Each extraction pass is one CLI call within the same Dispatch token budget as a role. The CLI process gets
+   `FLOW_AGENTS_DREAM_TRIGGER=0`, so a dream hook trigger in the same harness does not start another run when that process exits.
+3. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
+
+If none of these runtimes is configured, the run exits 2 with `DREAM_MODEL_UNCONFIGURED`. The error names the missing
+role and prints all three ways to set up a model. A missing credential (`DREAM_MODEL_UNAVAILABLE`) or an unsupported
+provider kind (`DREAM_MODEL_UNSUPPORTED`) also exits 2.
+
+**Where the briefs are read.** At `SessionStart`, the profile-memory hook reads briefs from the dream's `dreamDir`.
+If the hook's environment sets `FLOW_AGENTS_DREAM_CONFIG` (the same variable the hook trigger reads), the hook loads
+that config with the run's ownership checks and uses its `dreamDir`. If the config cannot be loaded, the hook injects
+nothing. Without the variable, the hook uses the default directory. It reads `project-<id>.json` for the session's
+working directory first, where `<id>` follows the run's rule (the directory name), then `global.json`, and it skips
+entries that are already present.

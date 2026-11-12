@@ -156,3 +156,66 @@ test('non-atomic fallback rejects links and identity changes before reading', t 
  fs.writeFileSync(probe,`(async()=>{const M=require('module'),fs=require('fs'),assert=require('assert/strict'),old=M._load;let opens=0,swap=false;const fake={...fs,constants:{...fs.constants,O_NOFOLLOW:0,O_NONBLOCK:0},openSync(...args){opens++;return fs.openSync(...args)},fstatSync(fd){const s=fs.fstatSync(fd);return swap?new Proxy(s,{get(o,k){if(k==='ino')return o.ino+1;const v=Reflect.get(o,k,o);return typeof v==='function'?v.bind(o):v}}):s}};M._load=function(id,...args){return id==='node:fs'?fake:old.call(this,id,...args)};const p=require(${JSON.stringify(file)});const marker=await p.loadMemoryMarker();assert.ok(marker);assert.equal(p.profileMemoryContributor('SessionStart',{},8192,marker),null,'fallback rejects final link');assert.equal(opens,0,'link rejected before opening');fs.unlinkSync(${JSON.stringify(brief)});fs.copyFileSync(${JSON.stringify(target)},${JSON.stringify(brief)});swap=true;assert.equal(p.profileMemoryContributor('SessionStart',{},8192,marker),null,'fallback rejects changed file identity');swap=false;assert.match(p.profileMemoryContributor('SessionStart',{},8192,marker).text,/violet kestrel/,'control reads regular file')})().catch(e=>{console.error(e);process.exitCode=1});`);
  const p=spawnSync(process.execPath,[probe],{encoding:'utf8',env:process.env});assert.equal(p.status,0,p.stderr);
 });
+
+// The dream run writes `<dreamDir>/briefs/global.json` and `project-<id>.json`, where dreamDir comes from the dream
+// config. These go through runAsync, the installed hook's entry point, so the dream helpers load the way they do there.
+function dreamFixture(t, { dreamDir, project = 'ledger' } = {}) {
+ const { temp } = setup(t);
+ const write = (dir, name, entries) => { fs.mkdirSync(path.join(dir, 'briefs'), { recursive: true }); fs.writeFileSync(path.join(dir, 'briefs', name), JSON.stringify({ version: 1, entries })); };
+ const config = path.join(temp, 'dream.config.json');
+ const dir = dreamDir ?? path.join(temp, 'configured-dream');
+ fs.writeFileSync(config, JSON.stringify({ enabled: true, telemetryFile: path.join(temp, 't.jsonl'), transcriptRoots: [temp], host: path.join(temp, 'host.mjs'), dreamDir: dir }), { mode: 0o600 });
+ const cwd = path.join(temp, 'dev', project); fs.mkdirSync(path.join(cwd, 'docs'), { recursive: true });
+ return { temp, config, dir, cwd, write, sessionStart: (at = cwd) => runAsync(JSON.stringify({ hook_event_name: 'SessionStart', cwd: at })) };
+}
+
+test('the reader follows the dream config to its dreamDir, and not the default directory', async t => {
+ const f = dreamFixture(t);
+ f.write(f.dir, 'global.json', ['configured amber heron']);
+ process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
+ const out = await f.sessionStart();
+ assert.match(out, /configured amber heron/);
+ assert.doesNotMatch(out, /violet kestrel/, 'the default directory is not read when the config names another');
+ delete process.env.FLOW_AGENTS_DREAM_CONFIG;
+ assert.match(await f.sessionStart(), /violet kestrel/, 'without the config the default directory is still read');
+});
+
+test('the reader serves the working directory\'s project brief first, then the global brief, without repeats', async t => {
+ const f = dreamFixture(t);
+ f.write(f.dir, 'global.json', ['global slate wren', 'shared ochre finch']);
+ f.write(f.dir, 'project-ledger.json', ['ledger cobalt pike', 'shared ochre finch']);
+ f.write(f.dir, 'project-other.json', ['other rust vole']);
+ process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
+ const out = await f.sessionStart();
+ assert.ok(out.indexOf('ledger cobalt pike') >= 0 && out.indexOf('ledger cobalt pike') < out.indexOf('global slate wren'), 'project entries come first');
+ assert.equal(out.split('shared ochre finch').length - 1, 1, 'an entry in both briefs is injected once');
+ assert.doesNotMatch(out, /other rust vole/, 'another project\'s brief is not read');
+ const elsewhere = path.join(f.temp, 'dev', 'unrelated'); fs.mkdirSync(elsewhere, { recursive: true });
+ const plain = await f.sessionStart(elsewhere);
+ assert.match(plain, /global slate wren/); assert.doesNotMatch(plain, /ledger cobalt pike/);
+ // The default directory gets the same project lookup.
+ delete process.env.FLOW_AGENTS_DREAM_CONFIG;
+ f.write(path.join(process.env.XDG_DATA_HOME, 'knowledge-store/knowledge/dream'), 'project-ledger.json', ['default-dir ledger teal moth']);
+ assert.match(await f.sessionStart(), /default-dir ledger teal moth/);
+});
+
+test('a project brief refused by the purge gate is skipped like a global one', async t => {
+ const f = dreamFixture(t);
+ f.write(f.dir, 'project-ledger.json', ['ledger cobalt pike']);
+ fs.writeFileSync(path.join(f.dir, 'purge-gate.json'), JSON.stringify({ version: 1, generation: 'a'.repeat(32), state: 'purging' }));
+ process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
+ assert.doesNotMatch(await f.sessionStart(), /ledger cobalt pike/);
+ delete process.env.FLOW_AGENTS_DREAM_CONFIG;
+});
+
+test('a dream config that fails the run\'s own checks serves nothing, rather than falling back to the default directory', async t => {
+ const f = dreamFixture(t);
+ f.write(f.dir, 'global.json', ['configured amber heron']);
+ fs.chmodSync(f.config, 0o666);
+ process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
+ const out = await f.sessionStart();
+ assert.doesNotMatch(out, /configured amber heron|violet kestrel/);
+ process.env.FLOW_AGENTS_DREAM_CONFIG = path.join(f.temp, 'no-such-config.json');
+ assert.doesNotMatch(await f.sessionStart(), /violet kestrel/);
+ delete process.env.FLOW_AGENTS_DREAM_CONFIG;
+});

@@ -12,6 +12,7 @@ import { main as consoleLearningProjection } from "./cli/console-learning-projec
 import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
 import { main as livenessFleet } from "./cli/liveness-fleet.js";
 import { main as consoleTrustProjection } from "./cli/console-trust-projection.js";
+import { main as dream } from "./cli/dream.js";
 import { main as kit } from "./cli/kit.js";
 import { main as codexGovernanceHook } from "./cli/codex-governance-hook.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
@@ -47,6 +48,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["console-process-projection", consoleProcessProjection],
   ["console-trust-projection", consoleTrustProjection],
   ["context-map", contextMap],
+  ["dream", dream],
   ["assignment-provider", assignmentProvider],
   ["effective-assignment-provider-settings", effectiveAssignmentProviderSettings],
   ["effective-change-provider-settings", effectiveChangeProviderSettings],

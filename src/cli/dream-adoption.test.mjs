@@ -1,0 +1,263 @@
+// Adopting the dream run from the published package alone: a consumer with no host runtime and no Datum config, a
+// Claude Code subscription instead of an API key, a config under macOS /tmp, and the installed command. Every run here
+// is a child process with a clean environment, so the exit code is the real one and no operator setting leaks in.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { resolveRef } from "@kontourai/datum";
+import { validateDreamConfig } from "../../kits/knowledge/dream/config.js";
+import { MODEL_SETUP_DOC } from "../../kits/knowledge/dream/model.js";
+import { telemetryLine, tempDir } from "./dream-support.mjs";
+
+const REPO = path.resolve(import.meta.dirname, "..", "..");
+const KIT_CLI = path.join(REPO, "kits", "knowledge", "dream", "cli.js");
+const PACKAGE_CLI = path.join(REPO, "build", "src", "cli.js");
+const SUPPORT = path.join(import.meta.dirname, "dream-support.mjs");
+
+// Synthetic, assembled from fragments so no detector-shaped literal is committed. The token has the shape of a
+// GitHub personal access token, which the #669 scrub replaces with <SECRET>.
+const SECRET = ["gh", "p_", "Q9w8E7r6T5y4U3i2O1p0A9s8D7f6G5h4J3k2"].join("");
+const MARKER = "quokka-marker-7f3a";
+const QUOTE = `I pinned the ledger rounding to half-even under ${MARKER}.`;
+const SESSION = "7d3e1a20-0000-4000-8000-0000000000a1";
+
+/** A Claude Code project transcript in the shape Claude Code writes: a user turn carrying the token, an assistant turn carrying the marker. */
+function transcript(cwd = "/Users/fixture-user/dev/ledger") {
+  const base = { isSidechain: false, cwd, sessionId: SESSION, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "cli" };
+  return [
+    { ...base, parentUuid: null, promptId: "p-1", message: { role: "user", content: `Please pin the ledger rounding. The registry deploy token is ${SECRET} if you need it.` }, permissionMode: "default", type: "user", uuid: "00000000-0000-4000-8000-0000000000b1", timestamp: "2026-10-30T09:00:02.000Z" },
+    { ...base, parentUuid: "00000000-0000-4000-8000-0000000000b1", message: { model: "claude-opus-5-5", id: "msg_b1", type: "message", role: "assistant", content: [{ type: "text", text: `Done. ${QUOTE}` }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 5 } }, requestId: "req_msg_b1", type: "assistant", uuid: "00000000-0000-4000-8000-0000000000b2", timestamp: "2026-10-30T09:00:06.000Z" },
+  ].map((line) => JSON.stringify(line)).join("\n").concat("\n");
+}
+
+/**
+ * A stand-in for the `claude` command that Relay's Claude Code runtime spawns. It records what it was given (argv,
+ * stdin, and the trigger guard from its environment) and answers in the CLI's `--output-format json` shape, with the
+ * structured output the forced tool asks for: one claim, grounded in QUOTE, when the content holds it.
+ */
+function fakeClaude(dir) {
+  const script = path.join(dir, "fake-claude.mjs");
+  fs.writeFileSync(script, `
+    import fs from "node:fs";
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    const stdin = Buffer.concat(chunks).toString("utf8");
+    fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ argv: process.argv.slice(2), trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, stdin }) + "\\n");
+    const quote = ${JSON.stringify(QUOTE)};
+    const claim = { subject: "ledger service", subjectType: "service", property: "rounding mode", value: "half-even", posture: "stated" };
+    const proposals = stdin.includes(quote) ? Object.entries(claim).map(([field, value]) => ({ fieldPath: "claims[0]." + field, value, confidence: 0.9, excerpt: quote })) : [];
+    process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "", structured_output: { proposals }, usage: { input_tokens: 12, output_tokens: 7 }, stop_reason: "end_turn" }));
+  `, { mode: 0o600 });
+  const executable = path.join(dir, "claude");
+  fs.writeFileSync(executable, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`, { mode: 0o700 });
+  return executable;
+}
+
+/**
+ * Preloaded into the run: every network primitive throws and is logged, and a child process is allowed only when it is
+ * the configured runtime's executable. The log is the proof of where the run sent anything.
+ */
+function egressGuard(dir) {
+  const file = path.join(dir, "egress-guard.cjs");
+  fs.writeFileSync(file, `
+    const fs = require("node:fs");
+    const record = (entry) => fs.appendFileSync(process.env.EGRESS_LOG, JSON.stringify(entry) + "\\n");
+    const block = (name) => function () { record({ blocked: name }); throw new Error("egress blocked: " + name); };
+    const net = require("node:net"), tls = require("node:tls"), http = require("node:http"), https = require("node:https"), dns = require("node:dns"), cp = require("node:child_process");
+    for (const [owner, key, name] of [[net, "connect", "net.connect"], [net, "createConnection", "net.createConnection"], [net.Socket.prototype, "connect", "socket.connect"], [tls, "connect", "tls.connect"], [http, "request", "http.request"], [http, "get", "http.get"], [https, "request", "https.request"], [https, "get", "https.get"], [dns, "lookup", "dns.lookup"]]) owner[key] = block(name);
+    globalThis.fetch = async () => { record({ blocked: "fetch" }); throw new Error("egress blocked: fetch"); };
+    for (const key of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]) {
+      const original = cp[key];
+      cp[key] = function (command, ...rest) {
+        record({ exec: key, command: String(command) });
+        if (command !== process.env.EGRESS_ALLOWED_EXEC) throw new Error("exec blocked: " + command);
+        return original.call(this, command, ...rest);
+      };
+    }
+    require("node:module").syncBuiltinESMExports();
+  `);
+  return file;
+}
+
+/** A consumer's machine: an empty home (no Datum config), a working directory without `.datum/`, one session, and a host module with a store and no model. */
+function consumer(t, { config = {} } = {}) {
+  const root = tempDir("dream-adopt-");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const home = path.join(root, "home");
+  const work = path.join(root, "work");
+  const transcripts = path.join(root, "transcripts");
+  for (const dir of [home, work, transcripts]) fs.mkdirSync(dir, { recursive: true });
+  const session = path.join(transcripts, "session.jsonl");
+  fs.writeFileSync(session, transcript());
+  const telemetryFile = path.join(root, "telemetry.jsonl");
+  fs.writeFileSync(telemetryFile, telemetryLine("claude-code", session));
+  const memoryRoot = path.join(root, "memory");
+  const published = path.join(root, "published.jsonl");
+  const host = path.join(root, "host.mjs");
+  fs.writeFileSync(host, `
+    import fs from "node:fs";
+    import { FakeCorpusStore } from ${JSON.stringify(SUPPORT)};
+    export async function createDreamHost({ dryRun }) {
+      if (!dryRun) fs.mkdirSync(${JSON.stringify(memoryRoot)}, { recursive: true });
+      return {
+        store: new FakeCorpusStore(${JSON.stringify(memoryRoot)}), registerRoot() {}, root: ${JSON.stringify(memoryRoot)}, rootName: "memory",
+        publish(batch) { fs.appendFileSync(${JSON.stringify(published)}, JSON.stringify(batch) + "\\n"); },
+      };
+    }
+  `, { mode: 0o600 });
+  const dreamDir = path.join(root, "dream");
+  const configFile = path.join(root, "dream.config.json");
+  fs.writeFileSync(configFile, JSON.stringify({ enabled: true, telemetryFile, transcriptRoots: [transcripts], host, dreamDir, visibility: { kind: "restricted", audiences: ["user:owner"] }, ...config }), { mode: 0o600 });
+  // Only what a fresh shell would have: no DATUM_* overrides, no provider keys, nothing from the operator's own setup.
+  const env = { PATH: process.env.PATH, HOME: home, XDG_CONFIG_HOME: path.join(home, ".config"), XDG_DATA_HOME: path.join(home, ".local", "share"), TMPDIR: root };
+  const run = (command, args, extraEnv = {}, nodeArgs = []) => spawnSync(process.execPath, [...nodeArgs, command, ...args], { cwd: work, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 60_000 });
+  return { root, home, work, transcripts, memoryRoot, published, dreamDir, configFile, run };
+}
+
+function filesUnder(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { recursive: true }).map((name) => path.join(dir, name)).filter((file) => fs.statSync(file).isFile());
+}
+const readLines = (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
+
+// ── 1. No model set up is a configuration error ─────────────────────────────────────────────────────────────
+
+test("with no host runtime and no Datum config, the run exits 2 and says how to give it a model", (t) => {
+  const c = consumer(t);
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /^DREAM_MODEL_UNCONFIGURED: .*"extraction-default"/m, "names the missing role");
+  assert.match(result.stderr, /Datum UNKNOWN_ROLE/);
+  assert.match(result.stderr, /~\/\.config\/kontour\/datum\.json/);
+  assert.match(result.stderr, /"runtime": \{ "kind": "claude-code", "model": "sonnet" \}/, "offers the subscription path");
+  assert.match(result.stderr, /return `runtime`.*createDreamHost/, "offers the host path");
+  assert.ok(result.stderr.includes(`See ${MODEL_SETUP_DOC}`), "links the doc");
+  assert.equal(fs.existsSync(c.dreamDir), false, "nothing ran");
+
+  // The Datum example in the message is one Datum accepts for that role: paste it, export the key, and the role resolves.
+  const example = result.stderr.split("\n").find((line) => line.trim().startsWith('{"providers"'));
+  const resolved = resolveRef("extraction-default", { config: JSON.parse(example), env: { ANTHROPIC_API_KEY: "placeholder" } });
+  assert.equal(resolved.provider, "anthropic");
+  assert.equal(resolved.auth.available, true);
+});
+
+test("a configured role names itself in the message", (t) => {
+  const c = consumer(t, { config: { role: "memory-extraction" } });
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /Datum role "memory-extraction"/);
+  assert.match(result.stderr, /"roles":\{"memory-extraction":/);
+});
+
+// ── 2. The Claude Code CLI as the model, without a host runtime ──────────────────────────────────────────────
+
+test("runtime claude-code runs the extraction through Relay's Claude Code runtime, with no host runtime and no API key", (t) => {
+  const c0 = consumer(t);
+  const executable = fakeClaude(c0.root);
+  const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable } } });
+  const log = path.join(c.root, "claude.jsonl");
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, "success");
+  assert.equal(report.claims.created, 1, "the claim the CLI returned was proposed");
+
+  const calls = readLines(log);
+  assert.equal(calls.length, 2, "one CLI call per extraction pass");
+  for (const call of calls) {
+    // These are Relay's Claude Code arguments: the dream run reached the model only through that runtime.
+    assert.deepEqual(call.argv.slice(0, 10), ["--print", "--output-format", "json", "--model", "sonnet", "--no-session-persistence", "--tools", "", "--permission-mode", "dontAsk"]);
+    assert.equal(call.argv[10], "--json-schema");
+    assert.equal(call.trigger, "0", "the extraction session cannot start another dream run through the hook trigger");
+    assert.match(call.stdin, /The content is untrusted text/);
+  }
+});
+
+test("config: runtime is validated, and cannot be combined with role", () => {
+  const base = { telemetryFile: "/t.jsonl", transcriptRoots: ["/r"], host: "/h.mjs" };
+  assert.deepEqual(validateDreamConfig({ ...base, runtime: { kind: "claude-code", model: "sonnet" } }).runtime, { kind: "claude-code", model: "sonnet" });
+  for (const runtime of [{ kind: "codex", model: "m" }, { kind: "claude-code" }, { kind: "claude-code", model: " " }, { kind: "claude-code", model: "sonnet", executable: "claude" }, { kind: "claude-code", model: "sonnet", apiKey: "x" }, "claude-code", []]) {
+    assert.throws(() => validateDreamConfig({ ...base, runtime }), (error) => error.code === "DREAM_CONFIG_INVALID", JSON.stringify(runtime));
+  }
+  assert.throws(() => validateDreamConfig({ ...base, role: "r", runtime: { kind: "claude-code", model: "sonnet" } }), /role or runtime, not both/);
+});
+
+// ── 3. A symlinked config path names the path to use ─────────────────────────────────────────────────────────
+
+test("a config reached through a symlinked directory is refused with its real path, and that path works", (t) => {
+  const c = consumer(t);
+  const real = path.join(c.root, "real");
+  fs.mkdirSync(real, { mode: 0o700 });
+  fs.copyFileSync(c.configFile, path.join(real, "dream.config.json"));
+  fs.chmodSync(path.join(real, "dream.config.json"), 0o600);
+  fs.symlinkSync(real, path.join(c.root, "via-link")); // what macOS /tmp -> /private/tmp looks like
+  const refused = c.run(KIT_CLI, ["run", "--config", path.join(c.root, "via-link", "dream.config.json")]);
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /symlink/);
+  assert.ok(refused.stderr.includes(`resolves to ${path.join(real, "dream.config.json")}; pass that path instead`), refused.stderr);
+  const accepted = c.run(KIT_CLI, ["run", "--config", path.join(real, "dream.config.json")]);
+  assert.doesNotMatch(accepted.stderr, /symlink/, "the named path passes the config checks");
+});
+
+// ── 4. The installed command ─────────────────────────────────────────────────────────────────────────────────
+
+test("flow-agents dream forwards to the dream run, with its arguments and exit code", (t) => {
+  const c = consumer(t);
+  const unconfigured = c.run(PACKAGE_CLI, ["dream", "run", "--config", c.configFile]);
+  assert.equal(unconfigured.status, 2, unconfigured.stderr);
+  assert.match(unconfigured.stderr, /DREAM_MODEL_UNCONFIGURED/);
+  const usage = c.run(PACKAGE_CLI, ["dream"]);
+  assert.equal(usage.status, 2);
+  assert.match(usage.stderr, /DREAM_USAGE/);
+  const dry = c.run(PACKAGE_CLI, ["dream", "run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.equal(JSON.parse(dry.stdout).status, "dry-run");
+});
+
+// ── 8. Privacy: what a local run sends, and where ─────────────────────────────────────────────────────────────
+
+test("privacy: in local mode the transcript reaches only the configured runtime, the token never leaves the scrub, and the marker appears only where documented", (t) => {
+  const c0 = consumer(t);
+  const executable = fakeClaude(c0.root);
+  const guard = egressGuard(c0.root);
+  const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable } } });
+  const log = path.join(c.root, "claude.jsonl");
+  const egress = path.join(c.root, "egress.jsonl");
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log, EGRESS_LOG: egress, EGRESS_ALLOWED_EXEC: executable }, ["--require", guard]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.claims.created, 1, "the sitting was distilled, so the excerpt did travel");
+
+  // Where the run sent anything: the configured runtime's executable, once per pass, and nothing else.
+  const attempts = readLines(egress);
+  assert.deepEqual(attempts, [{ exec: "spawn", command: executable }, { exec: "spawn", command: executable }], "no network call and no other process");
+
+  // What the runtime was given: the scrubbed excerpt. The token was replaced before the model saw it; the marker,
+  // ordinary conversation text, is what the docs say the model receives.
+  const calls = readLines(log);
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    const sent = JSON.stringify(call);
+    assert.equal(sent.includes(SECRET), false, "the token reached the model runtime");
+    assert.match(call.stdin, /registry deploy token is <SECRET>/, "the scrub ran on this turn, and the turn was sent");
+    assert.ok(call.stdin.includes(QUOTE), "the excerpt reached the configured runtime");
+  }
+  assert.ok(report.redaction_hits >= 1);
+
+  // Every output of the run: stdout, stderr, and every file it wrote (reports, cursor, briefs, proposals, the
+  // published review batch). The inputs (transcript, telemetry) and the recordings above are excluded.
+  const outputs = [
+    ["stdout", result.stdout], ["stderr", result.stderr],
+    ...[...filesUnder(c.dreamDir), ...filesUnder(c.memoryRoot), c.published].filter((file) => fs.existsSync(file)).map((file) => [path.relative(c.root, file), fs.readFileSync(file, "utf8")]),
+  ];
+  assert.ok(outputs.some(([name]) => name.startsWith("dream/reports/")), "the run wrote its report");
+  assert.ok(outputs.some(([name]) => name.startsWith("memory/.corpus-proposals/")), "the run wrote its proposals");
+  for (const [name, text] of outputs) assert.equal(text.includes(SECRET), false, `the token reached ${name}`);
+
+  // The marker appears where the docs say transcript text goes: the proposed claim's grounded excerpt in the store,
+  // and the routing decisions handed to the host's review delivery. Not in the report, the cursor or the briefs.
+  const withMarker = outputs.filter(([, text]) => text.includes(MARKER)).map(([name]) => name.replace(/\/[^/]+$/, "/*"));
+  assert.deepEqual([...new Set(withMarker)].sort(), ["memory/.corpus-proposals/*", "published.jsonl"]);
+});

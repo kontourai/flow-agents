@@ -95,47 +95,40 @@ export async function extractForRuntime(runtime, options = {}) {
 
 const ANTHROPIC_KINDS = new Set(["anthropic-compatible"]);
 
+/** Datum errors that mean "this machine has no model set up for the role", as opposed to a failed call. */
+const DATUM_SETUP_CODES = new Set([
+  "UNKNOWN_ROLE", "UNKNOWN_PROVIDER", "UNKNOWN_MODEL", "AMBIGUOUS_MODEL", "MISSING_ENV", "INVALID_CONFIG",
+  "SECRET_LITERAL", "SECRET_BACKEND_UNAVAILABLE",
+]);
+
+export const MODEL_SETUP_DOC = "https://github.com/kontourai/flow-agents/blob/main/kits/knowledge/docs/README.md#dream-run-model-setup";
+
 /**
- * A Relay `ModelRuntime` for a Datum role, routed through Dispatch.
- *
- * Datum resolves the role without reading the credential. The credential is
- * materialised only when the runtime is first used. Dispatch enforces the
- * per-invocation token budget and requires structured-tool capability.
- *
- * @param {{ role: string, resolveOptions?: object, maxTotalTokens?: number, createRuntime?: (target: object, credentials: () => object) => import("@kontourai/relay").ModelRuntime | Promise<import("@kontourai/relay").ModelRuntime>, onReceipt?: (receipt: object) => void }} options
+ * What to tell an operator whose dream run has no model: the three supported ways to give it one, each complete
+ * enough to paste. The Datum example is pinned by a test that resolves it, so it cannot drift from what Datum accepts.
  */
-export async function createRoleRuntime({ role, resolveOptions = {}, maxTotalTokens = 64_000, createRuntime, onReceipt }) {
-  if (typeof role !== "string" || !role.trim()) throw dreamError("DREAM_CONFIG_INVALID", "a Datum role name is required");
-  const { resolveRef, resolve } = await import("@kontourai/datum");
-  const { bindDatumResolvedRef } = await import("@kontourai/dispatch/datum");
+export function modelSetupHelp(role) {
+  const datum = { providers: { anthropic: { kind: "anthropic-compatible", auth: { env: "ANTHROPIC_API_KEY" }, models: ["claude-sonnet-5"] } }, roles: { [role]: "claude-sonnet-5@anthropic" } };
+  return [
+    "Give the dream run a model in one of these ways:",
+    `  1. A Datum role named "${role}" in ~/.config/kontour/datum.json (or .datum/config.json in the directory the run starts in), for example:`,
+    `       ${JSON.stringify(datum)}`,
+    "  2. The Claude Code CLI on this machine (a subscription, no API key): add this to the dream config",
+    '       "runtime": { "kind": "claude-code", "model": "sonnet" }',
+    "  3. A host runtime: return `runtime` (a Relay ModelRuntime) or `extract` from your host module's createDreamHost.",
+    `See ${MODEL_SETUP_DOC}`,
+  ].join("\n");
+}
+
+function setupError(code, message, role, cause) {
+  return dreamError(code, message, { help: modelSetupHelp(role), ...(cause ? { cause } : {}) });
+}
+
+/** Wrap a Relay runtime in Dispatch, so the per-invocation token budget and the capability policy apply to every call. */
+async function dispatchOver({ id, role, candidate, runtime, maxTotalTokens, onReceipt }) {
   const { createDispatchRuntime } = await import("@kontourai/dispatch");
-
-  const resolved = resolveRef(role, resolveOptions);
-  const { candidate, target } = bindDatumResolvedRef(role, resolved, {
-    evidence: { level: "declared", capabilities: ["structured-tools"], structuredToolsFidelity: "prompted", source: "knowledge.dream" },
-    worstCaseUsage: { maxTokens: maxTotalTokens },
-  });
-  if (!target.auth.available) throw dreamError("DREAM_MODEL_UNAVAILABLE", `credential for role "${role}" is not available`);
-
-  let built;
-  const factory = createRuntime ?? (async (resolvedTarget, credentials) => {
-    if (!ANTHROPIC_KINDS.has(resolvedTarget.kind)) {
-      throw dreamError("DREAM_MODEL_UNSUPPORTED", `provider kind "${resolvedTarget.kind}" has no Relay runtime wired for the dream run`);
-    }
-    const { createAnthropicRuntime } = await import("@kontourai/relay/anthropic");
-    const { apiKey, baseUrl, model } = credentials();
-    return createAnthropicRuntime({ model, apiKey, ...(baseUrl ? { baseUrl } : {}), provider: resolvedTarget.provider });
-  });
-  const runtimes = {
-    get(id) {
-      return id === target.runtimeId ? built : undefined;
-    },
-  };
-  // Dispatch's registry is synchronous, so build the runtime first and look it up by id.
-  built = await factory(target, () => resolve(role, resolveOptions));
-
   return createDispatchRuntime({
-    id: `dream:${role}`,
+    id,
     capabilities: { structuredTools: true, structuredToolsFidelity: "prompted", streaming: false, abort: true, usage: true },
     plan: {
       schemaVersion: 1,
@@ -144,7 +137,76 @@ export async function createRoleRuntime({ role, resolveOptions = {}, maxTotalTok
       budget: { maxAttempts: 1, maxTotalTokens },
       policy: { requiredCapabilities: ["structured-tools"], minimumEvidence: "declared", minimumStructuredToolsFidelity: "prompted" },
     },
-    runtimes,
+    // Dispatch's registry is synchronous, so the runtime is built first and looked up by id.
+    runtimes: { get: (runtimeId) => (runtimeId === candidate.runtimeId ? runtime : undefined) },
     ...(onReceipt ? { onReceipt } : {}),
   });
+}
+
+/**
+ * A Relay `ModelRuntime` for a Datum role, routed through Dispatch.
+ *
+ * Datum resolves the role without reading the credential. The credential is
+ * materialised only when the runtime is first used. Dispatch enforces the
+ * per-invocation token budget and requires structured-tool capability.
+ *
+ * A role this machine has not set up is a configuration error (`DREAM_MODEL_UNCONFIGURED`), not a failed run, and
+ * carries `help`: the setup that would satisfy it.
+ *
+ * @param {{ role: string, resolveOptions?: object, maxTotalTokens?: number, createRuntime?: (target: object, credentials: () => object) => import("@kontourai/relay").ModelRuntime | Promise<import("@kontourai/relay").ModelRuntime>, onReceipt?: (receipt: object) => void }} options
+ */
+export async function createRoleRuntime({ role, resolveOptions = {}, maxTotalTokens = 64_000, createRuntime, onReceipt }) {
+  if (typeof role !== "string" || !role.trim()) throw dreamError("DREAM_CONFIG_INVALID", "a Datum role name is required");
+  const { resolveRef, resolve } = await import("@kontourai/datum");
+  const { bindDatumResolvedRef } = await import("@kontourai/dispatch/datum");
+
+  let resolved;
+  try {
+    resolved = resolveRef(role, resolveOptions);
+  } catch (error) {
+    if (!DATUM_SETUP_CODES.has(error?.code)) throw error;
+    throw setupError("DREAM_MODEL_UNCONFIGURED", `no model is set up for the dream run's Datum role "${role}" (Datum ${error.code}: ${error.message})`, role, error);
+  }
+  const { candidate, target } = bindDatumResolvedRef(role, resolved, {
+    evidence: { level: "declared", capabilities: ["structured-tools"], structuredToolsFidelity: "prompted", source: "knowledge.dream" },
+    worstCaseUsage: { maxTokens: maxTotalTokens },
+  });
+  if (!target.auth.available) throw setupError("DREAM_MODEL_UNAVAILABLE", `credential for role "${role}" is not available`, role);
+
+  const factory = createRuntime ?? (async (resolvedTarget, credentials) => {
+    if (!ANTHROPIC_KINDS.has(resolvedTarget.kind)) {
+      throw setupError("DREAM_MODEL_UNSUPPORTED", `provider kind "${resolvedTarget.kind}" has no Relay runtime wired for the dream run`, role);
+    }
+    const { createAnthropicRuntime } = await import("@kontourai/relay/anthropic");
+    const { apiKey, baseUrl, model } = credentials();
+    return createAnthropicRuntime({ model, apiKey, ...(baseUrl ? { baseUrl } : {}), provider: resolvedTarget.provider });
+  });
+  const runtime = await factory(target, () => resolve(role, resolveOptions));
+  return dispatchOver({ id: `dream:${role}`, role, candidate, runtime, maxTotalTokens, onReceipt });
+}
+
+export const RUNTIME_KINDS = Object.freeze(["claude-code"]);
+
+/**
+ * A Relay `ModelRuntime` over the Claude Code CLI (`@kontourai/relay/claude-code`), routed through Dispatch: the
+ * dream run's model for a machine whose Claude access is a subscription signed in to the `claude` command rather than
+ * an API key. Relay runs `claude --print` with no tools and no session persistence and hands it the prompt on stdin;
+ * nothing here calls a provider.
+ *
+ * `FLOW_AGENTS_DREAM_TRIGGER=0` is set for that process so a dream hook trigger wired into the same harness does not
+ * start another run when the extraction session ends.
+ *
+ * @param {{ kind: "claude-code", model: string, executable?: string, maxTotalTokens?: number, onReceipt?: (receipt: object) => void }} options
+ */
+export async function createCliRuntime({ kind, model, executable, maxTotalTokens = 64_000, onReceipt }) {
+  if (kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", `runtime.kind must be one of: ${RUNTIME_KINDS.join(", ")}`);
+  const { createClaudeCodeRuntime } = await import("@kontourai/relay/claude-code");
+  const runtime = createClaudeCodeRuntime({ model, ...(executable ? { executable } : {}), environment: { FLOW_AGENTS_DREAM_TRIGGER: "0" } });
+  const candidate = {
+    id: runtime.id,
+    runtimeId: runtime.id,
+    evidence: { level: "declared", capabilities: ["structured-tools"], structuredToolsFidelity: "native", source: "knowledge.dream" },
+    worstCaseUsage: { maxTokens: maxTotalTokens },
+  };
+  return dispatchOver({ id: `dream:${runtime.id}`, role: runtime.id, candidate, runtime, maxTotalTokens, onReceipt });
 }

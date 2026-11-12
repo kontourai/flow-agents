@@ -18,6 +18,6 @@ export {
 export { PURGE_GATE_FILE, createPurgeFence, readPurgeGate, scrubBriefs } from "./purge-gate.js";
 export { MEMORY_CATEGORY, decodeEnvelope, encodeEnvelope, indexProposals } from "./envelope.js";
 export { TRIGGER_EVENTS, handleTrigger } from "./hook-trigger.js";
-export { bindTraverseExtract, createRelayExtractionProvider, createRoleRuntime, extractForRuntime } from "./model.js";
+export { MODEL_SETUP_DOC, RUNTIME_KINDS, bindTraverseExtract, createCliRuntime, createRelayExtractionProvider, createRoleRuntime, extractForRuntime, modelSetupHelp } from "./model.js";
 export { proposeSitting } from "./propose.js";
 export { DEFAULT_MAX_SITTINGS_PER_RUN, DREAM_PROPOSER_ID, REPORT_SCHEMA_VERSION, defaultDreamDir, runDream } from "./run.js";

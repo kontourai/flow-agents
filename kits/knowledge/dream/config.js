@@ -14,8 +14,9 @@ const MAX_CONFIG_BYTES = 64 * 1024;
 const KEYS = new Set([
   "enabled", "telemetryFile", "transcriptRoots", "dreamDir", "host", "role", "passes", "maxSittingsPerRun",
   "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs",
-  "triggerMinIntervalMs", "proposerId", "visibility",
+  "triggerMinIntervalMs", "proposerId", "visibility", "runtime",
 ]);
+const RUNTIME_KEYS = new Set(["kind", "model", "executable"]);
 const POSITIVE_INTEGERS = ["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "idleGapMs", "triggerMinIntervalMs"];
 
 export const DEFAULT_ROLE = "extraction-default";
@@ -61,7 +62,24 @@ export function validateDreamConfig(config) {
     if (config[key] !== undefined && !(Number.isSafeInteger(config[key]) && config[key] > 0)) throw dreamError("DREAM_CONFIG_INVALID", `${key} must be a positive integer`);
   }
   if (config.role !== undefined && (typeof config.role !== "string" || !config.role.trim())) throw dreamError("DREAM_CONFIG_INVALID", "role must be a Datum role name");
+  if (config.runtime !== undefined) validateRuntime(config.runtime, config.role);
   return { ...config, enabled: config.enabled === true };
+}
+
+/**
+ * `runtime` names a model runtime the run builds itself instead of resolving a Datum role. The only kind is
+ * `claude-code`: the Claude Code CLI, reached through Relay and Dispatch (model.js).
+ */
+function validateRuntime(runtime, role) {
+  if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) throw dreamError("DREAM_CONFIG_INVALID", "runtime must be an object");
+  for (const key of Object.keys(runtime)) {
+    if (!RUNTIME_KEYS.has(key)) throw dreamError("DREAM_CONFIG_INVALID", `unknown runtime key: ${key}`);
+  }
+  if (runtime.kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", 'runtime.kind must be "claude-code"');
+  if (typeof runtime.model !== "string" || !runtime.model.trim()) throw dreamError("DREAM_CONFIG_INVALID", "runtime.model must name a model the claude command accepts, such as sonnet");
+  if (runtime.executable !== undefined) assertAbsolute(runtime.executable, "runtime.executable");
+  // Two sources for one model would leave the reader of the config guessing which one ran.
+  if (role !== undefined) throw dreamError("DREAM_CONFIG_INVALID", "set role or runtime, not both");
 }
 
 const trustedOwner = (stat, uid) => uid === null || stat.uid === uid || stat.uid === 0;
@@ -83,7 +101,8 @@ export function assertOwnerControlledFile(file, label) {
   } catch {
     throw dreamError("DREAM_CONFIG_INVALID", `${label} cannot be read: no such file`);
   }
-  if (real !== resolved) throw dreamError("DREAM_CONFIG_INVALID", `${label} path must not contain a symlink`);
+  // Name the real path: on macOS /tmp and /var are themselves symlinks, so the refusal must say what to pass instead.
+  if (real !== resolved) throw dreamError("DREAM_CONFIG_INVALID", `${label} path must not contain a symlink: ${resolved} resolves to ${real}; pass that path instead`);
   const uid = typeof process.getuid === "function" ? process.getuid() : null;
   const stat = fs.lstatSync(resolved);
   if (!stat.isFile()) throw dreamError("DREAM_CONFIG_INVALID", `${label} must be a regular file`);
