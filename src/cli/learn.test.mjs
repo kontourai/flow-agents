@@ -19,7 +19,7 @@ import { repoScope } from "../../kits/knowledge/learn/scope.js";
 import { readHumanTurns } from "../../kits/knowledge/learn/sessions.js";
 import { readRuntimeMessages } from "../../kits/knowledge/promote/runtime-transcript.js";
 import {
-  CANARIES, DAY_MS, NOW_MS, THEME_RULES, claudeSession, fix, promptJson, recordingRuntime, sessionId, sessionsWith, transcriptRoot, workspace,
+  CANARIES, DAY_MS, NOW_MS, THEME_RULES, claudeSession, codexId, codexSession, fix, promptJson, recordingRuntime, sessionId, sessionsWith, transcriptRoot, workspace,
 } from "./learn-support.mjs";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -797,4 +797,24 @@ test("a theme carried by inferred turns needs them in at least two sessions, or 
   const withHuman = sessionsWith([[sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`), fix("fetch-main")], ...filler]);
   const mixed = (await learn(withHuman, { inferHuman: true, thresholds })).document.proposals;
   assert.deepEqual(mixed.map((p) => [p.authority, p.evidence.cost.human_occurrences]), [["inferred", 1]]);
+});
+
+test("Codex harness and hook turns, which carry text and no envelope, never reach the author classifier", async () => {
+  const root = fs.realpathSync(makeFixtureDir("learn-codex-"));
+  const dir = path.join(root, "2026", "11", "01");
+  fs.mkdirSync(dir, { recursive: true });
+  for (let n = 1; n <= 3; n += 1) {
+    fs.writeFileSync(path.join(dir, `rollout-${n}.jsonl`), codexSession(codexId(n), NOW_MS - (10 - n) * DAY_MS, [
+      { text: `typed in the IDE ${n}` },
+      { role: "assistant", text: "done" },
+      { text: `house rules from AGENTS.md ${n}`, provenance: "agents_md" },
+      { text: `hook output ${n}`, hook: true },
+    ]));
+  }
+  const ws = workspace();
+  const runtime = recordingRuntime();
+  const document = await runLearn({ roots: [root], ledgerPath: ws.ledger, nowMs: NOW_MS, sinceMs: NOW_MS - 60 * DAY_MS, scope: ALL, inferHuman: true, invoke: toolInvoker(runtime) });
+  assert.deepEqual(document.report.user_messages_by_origin, { harness: 3, hook: 3, unknown: 3 }, "real Ferry: harness and hook turns, without envelopes");
+  const judged = authorRequests(runtime).flatMap((request) => promptJson(request.messages[0].content, "MESSAGES_JSON:").map((item) => item.text)).sort();
+  assert.deepEqual(judged, ["typed in the IDE 1", "typed in the IDE 2", "typed in the IDE 3"]);
 });

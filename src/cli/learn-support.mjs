@@ -160,3 +160,25 @@ export function sessionsWith(perSession, { firstDay = 20, idOffset = 0, cwd } = 
     turns: texts.flatMap((text) => (typeof text === "string" ? [{ role: "assistant", text: "Here is what I did." }, { text }] : [{ role: "assistant", text: "Here is what I did." }, text])),
   }));
 }
+
+/**
+ * One Codex rollout in the line shape Codex writes (as kits/knowledge/promote/fixtures/runtime/codex-rollout.jsonl).
+ * `source` is `session_meta.source`: `cli` (Ferry: human), `vscode` (unknown), `subagent` (agent). A turn with
+ * `provenance: "agents_md"` (or `hook: true`) carries the metadata Ferry reads as harness (or hook) text, with no
+ * envelope. Turns: `{ role?: "assistant", text, provenance?, hook? }`.
+ */
+export function codexSession(id, startMs, turns, { source = "vscode", cwd = CWD } = {}) {
+  const at = (n) => new Date(startMs + n * 60_000).toISOString();
+  const lines = [{ timestamp: at(0), type: "session_meta", payload: { id, session_id: id, timestamp: at(0), cwd, originator: "codex_vscode", cli_version: "0.130.0", source, model_provider: "openai", git: { branch: "main" } }, ordinal: 1 }];
+  turns.forEach((turn, n) => {
+    const role = turn.role === "assistant" ? "assistant" : "user";
+    const payload = { type: "message", id: `m${n}`, role, content: [{ type: role === "assistant" ? "output_text" : "input_text", text: turn.text }] };
+    if (turn.provenance || turn.hook) {
+      payload.internal_chat_message_metadata_passthrough = { content_item_kinds: ["text"], content_item_metadata: [{ provenance: { type: turn.provenance ?? "harness", ...(turn.hook ? { hook: true } : {}) } }] };
+    }
+    lines.push({ timestamp: at(n + 1), type: "response_item", payload, ordinal: n + 2 });
+  });
+  return `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+}
+
+export const codexId = (n) => `019a0000-0000-7000-8000-${String(n).padStart(12, "0")}`;
