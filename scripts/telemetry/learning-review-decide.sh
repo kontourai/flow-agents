@@ -29,6 +29,21 @@ USAGE
 }
 
 command -v jq >/dev/null 2>&1 || { echo "learning-review-decide: jq is required" >&2; exit 1; }
+LEDGER_LOCK_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ledger-lock.mjs"
+
+# The ledger lock (shared with flow-agents learn and the other script): taken for the whole
+# read-modify-write, owned by this script's pid, released on exit. A lock still held after
+# LEARNING_REVIEW_LOCK_TIMEOUT_MS (default 10000) refuses with nothing written.
+take_ledger_lock() {
+  local who="$1"
+  command -v node >/dev/null 2>&1 || { echo "$who: node is required for the ledger lock" >&2; exit 1; }
+  if ! ledger_lock="$(node "$LEDGER_LOCK_HELPER" acquire "$ledger_path" "$$")"; then
+    echo "$who: the ledger is locked by another writer ($ledger_path.lock); nothing was written" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2086 # epoch and token are two words on purpose
+  trap 'node "$LEDGER_LOCK_HELPER" release "$ledger_path" $ledger_lock >/dev/null 2>&1' EXIT
+}
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then usage; exit 0; fi
 
@@ -81,6 +96,7 @@ if [[ ! -f "$ledger_path" ]]; then
   exit 1
 fi
 
+take_ledger_lock learning-review-decide
 found="$(jq -c --arg pid "$proposal_id" 'select(.proposal_id == $pid)' "$ledger_path" 2>/dev/null | head -n1)"
 if [[ -z "$found" ]]; then
   echo "learning-review-decide: proposal-id not found in ledger: $proposal_id" >&2

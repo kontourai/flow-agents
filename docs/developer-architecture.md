@@ -266,6 +266,9 @@ A host that runs the dream as a command instead of calling `runDream` uses `flow
 in the kit. [Dream run model setup](../kits/knowledge/docs/README.md#dream-run-model-setup) lists the model runtimes
 the command accepts.
 
+`flow-agents learn` forwards the same way, from `src/cli/learn.ts` to `kits/knowledge/learn/cli.js`; see
+[the learn loop](../kits/knowledge/docs/learn.md).
+
 ## Delegation authority and bounded rounds
 
 The package exports separate `delegation-group-rounds` and

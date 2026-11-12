@@ -70,6 +70,8 @@ Builder kit). When no kit declares one, or more than one kit does, `start` refus
 
 The same binary runs the Knowledge kit's dream run: `flow_agents dream run --config /abs/dream.config.json [--dry-run]`.
 For the config and model setup, see [Dream run model setup](../kits/knowledge/docs/README.md#dream-run-model-setup).
+It also runs the Knowledge kit's learn loop: `flow-agents learn [--since 30d] [--dry-run]` proposes rules from corrections you
+keep repeating in your agent transcripts; see [the learn loop](../kits/knowledge/docs/learn.md).
 
 ## Approved cross-repository rollouts
 
