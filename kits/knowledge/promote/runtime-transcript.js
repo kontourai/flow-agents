@@ -251,20 +251,19 @@ function requireSessionId(id) {
 }
 
 /**
- * Read a runtime transcript into canonical conversation messages.
+ * Import a runtime transcript as a canonical Thread, with the drift checks every
+ * reader of runtime transcripts shares. `thread` is null when the transcript
+ * holds no conversation (or is a Codex sidechain, reported as `sidechain`).
  *
- * @param {"claude-code" | "codex"} harness  the runtime telemetry says wrote it
+ * @param {"claude-code" | "codex"} harness  the runtime the transcript claims to be
  * @param {Buffer} content  the whole transcript file
- * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
- *   gitBranch: string | null, partialTail: boolean, unterminatedMemory: boolean,
- *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}> }}
+ * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null, gitBranch: string | null,
+ *   partialTail: boolean, thread: object | null }}
  * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
-export function readConversation(harness, content) {
+export function importRuntimeThread(harness, content) {
   const { lines, partialTail } = completeLines(content);
-  const empty = {
-    sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, unterminatedMemory: false, messages: [],
-  };
+  const empty = { sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, thread: null };
   if (lines.length === 0) return empty;
 
   const detected = detectFormat(lines.slice(0, 200).join("\n"));
@@ -290,7 +289,7 @@ export function readConversation(harness, content) {
       cwd: thread.metadata?.cwd ?? null,
       gitBranch: thread.metadata?.git?.branch ?? null,
       partialTail,
-      ...conversationFromThread(thread),
+      thread,
     };
   }
 
@@ -308,14 +307,55 @@ export function readConversation(harness, content) {
   }
   const thread = importThread(createCodexImporter, kept);
   if (!thread) return { ...empty, sessionId, gitBranch: meta.gitBranch };
-  return {
-    sessionId,
-    sidechain: false,
-    cwd: thread.metadata?.cwd ?? null,
-    gitBranch: meta.gitBranch,
-    partialTail,
-    ...conversationFromThread(thread),
-  };
+  return { sessionId, sidechain: false, cwd: thread.metadata?.cwd ?? null, gitBranch: meta.gitBranch, partialTail, thread };
+}
+
+/**
+ * Read a runtime transcript into canonical conversation messages.
+ *
+ * @param {"claude-code" | "codex"} harness  the runtime telemetry says wrote it
+ * @param {Buffer} content  the whole transcript file
+ * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
+ *   gitBranch: string | null, partialTail: boolean, unterminatedMemory: boolean,
+ *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}> }}
+ * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
+ */
+export function readConversation(harness, content) {
+  const { thread, ...meta } = importRuntimeThread(harness, content);
+  if (!thread) return { ...meta, unterminatedMemory: false, messages: [] };
+  return { ...meta, ...conversationFromThread(thread) };
+}
+
+/**
+ * The canonical user and assistant messages of a runtime transcript, one per
+ * Thread message (never merged), each with its Thread message id and the
+ * `origin` the importer derived (`undefined` when the importer derives none).
+ * Text has injected memory and harness tags removed, as in `readConversation`;
+ * it is NOT scrubbed, so a caller that sends or stores it must scrub it first.
+ * A message whose text is empty after stripping is still returned, so a reader
+ * can count it by origin.
+ *
+ * @param {"claude-code" | "codex"} harness
+ * @param {Buffer} content
+ * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null, gitBranch: string | null,
+ *   partialTail: boolean, messages: Array<{id: string, role: "user"|"assistant", origin: object | undefined,
+ *   text: string, timestampMs: number, sidechain: boolean}> }}
+ */
+export function readRuntimeMessages(harness, content) {
+  const { thread, ...meta } = importRuntimeThread(harness, content);
+  const messages = [];
+  for (const message of thread?.messages ?? []) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    messages.push({
+      id: message.id,
+      role: message.role,
+      origin: message.origin,
+      text: messageText(message).text,
+      timestampMs: message.timestamp,
+      sidechain: message.metadata?.sidechain === true,
+    });
+  }
+  return { ...meta, messages };
 }
 
 /**

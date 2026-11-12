@@ -453,14 +453,19 @@ ledger_result="$(jq -c -n \
   ($existing | map(.proposal_id)) as $existing_ids
 
   | ($existing | map(
+      # Only kit and gate proposals are measured here; other source families (v0.2
+      # correction-recurrence) are effect-filled by their own producer and pass through untouched.
       if (.decision.status == "ratified") and (.effect_observed == null)
+         and ((.target.kind == "kit") or (.target.kind == "gate"))
          and ($eff_since != null) and (.window.until != null) and (.window.until < $eff_since)
       then
         . as $entry
-        | ( if $entry.target.kind == "kit"
+        # first(...) // null: a target with no row in this window must yield null (left unfilled), never an
+        # empty stream, which would drop the ratified ledger line and its recorded human decision.
+        | ( first( if $entry.target.kind == "kit"
             then ($aggregates.by_kit[]? | select(.kit_id == $entry.target.id) | .second_half_avg_cost_usd)
             else ($aggregates.by_gate[]? | select(.gate_id == $entry.target.id) | .false_block_rate)
-            end ) as $after
+            end ) // null ) as $after
         | (if $after == null then $entry else (
             ( if $entry.target.kind == "kit"
               then $entry.evidence.cost.second_half_avg_cost_usd
