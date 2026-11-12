@@ -1,5 +1,23 @@
 # Changelog
 
+## [10.0.0](https://github.com/kontourai/flow-agents/compare/v9.14.0...v10.0.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** the dream run's runtime-session reader keeps a user turn only when Ferry records it as human (origin.kind "human"). Agent briefs, harness and hook text, compaction summaries, task notifications and unknown-origin prompts (SDK or IDE clients, accepted suggestions, Claude Code records from before it wrote origin/promptSource) no longer reach a sitting as the person's words; a user message with no origin is reported as transcript drift and holds the cursor. The Survey Flow gate adapter's trust bundle now carries Survey 9's review-outcome policy and attestation evidence, and the tracked Conduit conformance report is schema 3.
+
+### Features
+
+* **deps:** adopt published Kontour primitives and run the dream on an isolated Claude Code CLI ([#1629](https://github.com/kontourai/flow-agents/issues/1629)) ([b27c7b3](https://github.com/kontourai/flow-agents/commit/b27c7b314c8bbd5ee0462619258e5a3cb2108ed0))
+* **learning:** correction-recurrence learning source and flow-agents learn ([#1628](https://github.com/kontourai/flow-agents/issues/1628)) ([ed5ee86](https://github.com/kontourai/flow-agents/commit/ed5ee86a546ef12fd192fb6d312565333c244415))
+
+
+### Fixes
+
+* **knowledge:** make the dream run adoptable without a host runtime ([#1626](https://github.com/kontourai/flow-agents/issues/1626)) ([e68de99](https://github.com/kontourai/flow-agents/commit/e68de99885b6a51e4ff4959129fb0665d250935d))
+* **packaging:** declare @kontourai/traverse as a runtime dependency and guard shipped imports ([#1625](https://github.com/kontourai/flow-agents/issues/1625)) ([cb84f31](https://github.com/kontourai/flow-agents/commit/cb84f315e1d74106eda5a49cfa6643b50c29bb3a))
+
 ## [9.14.0](https://github.com/kontourai/flow-agents/compare/v9.13.0...v9.14.0) (2026-11-06)
 
 
