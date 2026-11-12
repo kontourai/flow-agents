@@ -13,17 +13,22 @@
  *      edge it reports (static import/export-from, dynamic `import("…")`, `require`) is
  *      collected. Parsing, not regex, so prose and JSDoc type references
  *      never count and string-literal dynamic imports always do.
- *   3. A bare specifier must name a package in dependencies, peerDependencies or
+ *   3. esbuild does not report `require.resolve("…")` or calls through a `require` made by
+ *      `createRequire`, so a second pass matches those shapes in each file's esbuild-transformed
+ *      text (comments already stripped): `require.resolve("x")`, `createRequire(…)("x")`,
+ *      `createRequire(…).resolve("x")`, and `r("x")` / `r.resolve("x")` where
+ *      `const r = createRequire(…)`.
+ *   4. A bare specifier must name a package in dependencies, peerDependencies or
  *      optionalDependencies. Node builtins are exempt. A self-reference must name an `exports`
  *      subpath, because that is all Node resolves for it.
+ *   5. Test files are excluded from the package by `files` negations, so every asset a shipped
+ *      kit.json declares (a kit eval may be a *.test.js file) must still be in the pack.
  *
  * Exemptions are per (path prefix, package) with a stated reason; an empty reason is refused.
  *
- * Not covered: non-literal dynamic imports (`import(variable)`), and node code embedded in shell
- * heredocs or other non-JS files. Both are invisible to a parser.
- *
- * Not covered either: `require.resolve(…)`, and `require` obtained from `createRequire`; esbuild
- * reports neither as an import edge.
+ * Not covered: non-literal specifiers (`import(variable)`, `require(variable)`), a created
+ * `require` passed around under another name, and node code embedded in shell heredocs or other
+ * non-JS files.
  *
  * Usage: node scripts/check-shipped-dependencies.mjs [--root <package dir>]
  * Exit 0 when clean, 1 on any undeclared import or precondition failure.
@@ -33,7 +38,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
+import { build, transform } from "esbuild";
 
 // Shipped paths whose imports are deliberately not satisfied by this package's manifest.
 // Key: path prefix (posix, relative to the package root). Value: package name -> reason.
@@ -45,8 +50,8 @@ const EXEMPTIONS = {
   "scripts/ci/": {
     yaml: "This repository's own CI compute-policy tooling, run only by its workflows and evals/ci tests against a dev install; no shipped runtime path or bin invokes scripts/ci/.",
   },
-  "kits/knowledge/promote/store-target.corpus.test.js": {
-    "@kontourai/corpus-store": "Repository test (run by evals/static/test_knowledge_providers.sh against a dev install); store-target.js itself references the package only in JSDoc types.",
+  "scripts/build-knowledge-yaml.mjs": {
+    yaml: "Build-time generator run by `npm run build` in this repository; it deliberately resolves the exact devDependency pin and writes the self-contained adapter the kit ships.",
   },
 };
 
@@ -156,6 +161,56 @@ export async function collectImports(root, files) {
   return edges;
 }
 
+// Kit asset classes, mirroring ASSET_CLASSES in src/runtime-adapters.ts (the installer's reader).
+const KIT_ASSET_CLASSES = ["flows", "skills", "docs", "adapters", "evals", "assets", "provisions"];
+
+function missingKitAssets(root, files, fileSet) {
+  const missing = [];
+  for (const manifest of files.filter((file) => /^kits\/[^/]+\/kit\.json$/.test(file))) {
+    const kitDir = path.posix.dirname(manifest);
+    const kit = JSON.parse(readFileSync(path.join(root, manifest), "utf8"));
+    for (const assetClass of KIT_ASSET_CLASSES) {
+      for (const entry of Array.isArray(kit[assetClass]) ? kit[assetClass] : []) {
+        const rel = typeof entry === "string" ? entry : entry?.path;
+        if (typeof rel !== "string") continue;
+        const target = path.posix.normalize(path.posix.join(kitDir, rel));
+        if (!fileSet.has(target) && !files.some((file) => file.startsWith(`${target}/`))) missing.push(`${assetClass} ${target}`);
+      }
+    }
+  }
+  return missing;
+}
+
+// A single string-literal argument; named groups so it composes into larger patterns.
+const STRING = String.raw`\s*(?<q>["'\x60])(?<spec>[^"'\x60\n]+)\k<q>\s*\)`;
+
+// Edges esbuild does not report: require.resolve and calls through a createRequire result.
+export async function collectResolveEdges(root, files) {
+  const edges = [];
+  for (const file of files) {
+    const source = readFileSync(path.join(root, file), "utf8");
+    if (!/\bresolve\s*\(|createRequire/.test(source)) continue;
+    const loader = /\.[cm]?ts$/.test(file) ? "ts" : "js";
+    const { code } = await transform(source, { loader, sourcefile: file, legalComments: "none" });
+    const add = (kind, specifier) => {
+      if (!specifier.includes("${")) edges.push({ file, specifier, kind });
+    };
+    for (const m of code.matchAll(new RegExp(String.raw`\brequire\.resolve\(${STRING}`, "g"))) add("require-resolve", m.groups.spec);
+    for (const m of code.matchAll(new RegExp(String.raw`\bcreateRequire\([^()]*(?:\([^()]*\)[^()]*)*\)(?<res>\.resolve)?\(${STRING}`, "g"))) add(m.groups.res ? "created-require-resolve" : "created-require-call", m.groups.spec);
+    const names = [...code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[\w$]+\.)?createRequire\s*\(/g)].map((m) => m[1]);
+    for (const name of new Set(names)) {
+      if (name === "require") continue; // handled below
+      const escaped = name.replace(/\$/g, "\\$");
+      for (const m of code.matchAll(new RegExp(String.raw`(?<![\w$.])${escaped}(?<res>\.resolve)?\(${STRING}`, "g"))) add(m.groups.res ? "created-require-resolve" : "created-require-call", m.groups.spec);
+    }
+    if (names.includes("require")) {
+      // `const require = createRequire(...)` shadows the global, so esbuild reports no edge for require("x").
+      for (const m of code.matchAll(new RegExp(String.raw`(?<![\w$.])require\(${STRING}`, "g"))) add("created-require-call", m.groups.spec);
+    }
+  }
+  return edges;
+}
+
 export async function checkShippedDependencies(root) {
   const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
   const files = packedFiles(root);
@@ -184,7 +239,7 @@ export async function checkShippedDependencies(root) {
   ]);
   const devOnly = new Set(Object.keys(pkg.devDependencies ?? {}).filter((name) => !declared.has(name)));
   const scanned = files.filter((file) => SCANNED.test(file) && !DECLARATION.test(file));
-  const edges = await collectImports(root, scanned);
+  const edges = [...await collectImports(root, scanned), ...await collectResolveEdges(root, scanned)];
 
   const violations = [];
   const exempted = new Map();
@@ -205,7 +260,13 @@ export async function checkShippedDependencies(root) {
     violations.push({ ...edge, name, why: devOnly.has(name) ? "only in devDependencies" : "not in package.json" });
   }
 
+  const missingAssets = missingKitAssets(root, files, fileSet);
   const lines = [];
+  if (missingAssets.length > 0) {
+    lines.push(`shipped-dependencies: FAIL — ${missingAssets.length} asset(s) declared by a shipped kit.json are not in the pack.`);
+    lines.push("A `files` negation (for example the *.test.* exclusions) dropped them; re-include each path in package.json `files`.");
+    for (const asset of missingAssets) lines.push(`  ${asset}`);
+  }
   if (violations.length === 0) {
     lines.push(`shipped-dependencies: OK — ${scanned.length} shipped source files, ${edges.length} import edges, every bare import is declared.`);
   } else {
@@ -222,7 +283,7 @@ export async function checkShippedDependencies(root) {
     }
   }
   for (const [key, reason] of exempted) lines.push(`  exempt: ${key} — ${reason}`);
-  return { ok: violations.length === 0, report: lines.join("\n"), violations };
+  return { ok: violations.length === 0 && missingAssets.length === 0, report: lines.join("\n"), violations, missingAssets };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

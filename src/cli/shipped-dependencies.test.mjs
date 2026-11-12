@@ -114,3 +114,50 @@ test('an unparseable shipped file is an error, not a pass', (t) => {
   assert.equal(status, 1, output);
   assert.match(output, /ERROR — esbuild could not parse shipped files/);
 });
+
+test('createRequire and require.resolve shapes esbuild does not report still fail', (t) => {
+  const root = fixture(t, {
+    files: {
+      'lib/inline.js': 'import { createRequire } from "node:module";\nexport const pad = createRequire(import.meta.url)("left-pad");\n',
+      'lib/named.js': 'import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nexport const where = req.resolve("right-pad/package.json");\n',
+      'lib/shadow.js': 'import { createRequire } from "node:module";\nconst require = createRequire(import.meta.url);\nexport const c = require("center-pad");\n',
+      'lib/resolve.cjs': 'module.exports = require.resolve("other-pad");\n',
+    },
+  });
+  const { status, output } = runGuard(root);
+  assert.equal(status, 1, output);
+  assert.match(output, /lib\/inline\.js: created-require-call "left-pad"/);
+  assert.match(output, /lib\/named\.js: created-require-resolve "right-pad\/package\.json"/);
+  assert.match(output, /lib\/shadow\.js: created-require-call "center-pad"/);
+  assert.match(output, /lib\/resolve\.cjs: require-resolve "other-pad"/);
+});
+
+test('path.resolve, commented resolve calls and declared created-require targets pass', (t) => {
+  const root = fixture(t, {
+    files: {
+      'lib/paths.js': [
+        'import path from "node:path";',
+        'import { createRequire } from "node:module";',
+        'const req = createRequire(import.meta.url);',
+        '// require.resolve("ghost-in-comment"); req("ghost-too");',
+        'export const a = path.resolve("src");',
+        'export const b = req.resolve("declared/package.json");',
+        '',
+      ].join('\n'),
+    },
+  });
+  const { status, output } = runGuard(root);
+  assert.equal(status, 0, output);
+  assert.doesNotMatch(output, /ghost|"src"/);
+});
+
+test('an asset a shipped kit.json declares but the pack excludes fails', (t) => {
+  const kit = JSON.stringify({ id: 'demo', evals: [{ id: 'demo.suite', path: 'suite.test.js' }] });
+  const files = { 'kits/demo/kit.json': kit, 'kits/demo/suite.test.js': 'export {};\n' };
+  const excluded = runGuard(fixture(t, { manifest: { files: ['index.js', 'lib/', 'kits/', '!**/*.test.js'] }, files }));
+  assert.equal(excluded.status, 1, excluded.output);
+  assert.match(excluded.output, /1 asset\(s\) declared by a shipped kit\.json are not in the pack/);
+  assert.match(excluded.output, /evals kits\/demo\/suite\.test\.js/);
+  const reincluded = runGuard(fixture(t, { manifest: { files: ['index.js', 'lib/', 'kits/', '!**/*.test.js', 'kits/demo/suite.test.js'] }, files }));
+  assert.equal(reincluded.status, 0, reincluded.output);
+});
