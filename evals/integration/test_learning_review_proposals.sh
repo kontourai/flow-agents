@@ -222,6 +222,15 @@ for pid in ghost-kit-ratified correction-recurrence-agents-md-fetch-main-first; 
   [[ "$(printf '%s' "$KEPT" | jq -r '.decision.status')" == "ratified" ]] && pass "$pid keeps its ratified decision" || fail "$pid lost its decision"
   [[ "$(printf '%s' "$KEPT" | jq -c '.effect_observed')" == "null" ]] && pass "$pid stays unfilled (not measurable by this analyzer)" || fail "$pid was filled by the wrong analyzer"
 done
+# A correction-recurrence hook proposal whose target id happens to equal a gate id in the window must still not be
+# measured here: false_block_rate is not its metric (it is effect-filled by flow-agents learn).
+LEDGER_COLLIDE="$TMP/ledger-collide.jsonl"
+cat > "$LEDGER_COLLIDE" <<'JSONL'
+{"proposal_id":"correction-recurrence-hook-unit-tests-pass","source":{"family":"correction-recurrence","producer":"knowledge.learn","contract_version":"0.2"},"target":{"kind":"hook","id":"unit tests pass"},"pattern":"correction-recurrence","proposed_change":"x","severity":"advisory","evidence":{"cost":{"occurrences":5},"defect":{"citations":[]}},"expected_effect":{"metric":"recurrence_per_week","direction":"decrease","description":"x"},"decision":{"status":"ratified","decided_by":"tester","decided_at":"2026-01-01T00:00:00Z","rationale":"r"},"follow_on_ref":null,"effect_observed":null,"window":{"since":1000,"until":2000}}
+JSONL
+: "$(bash "$ANALYZER" --sessions-root "$PP/sessions" --ledger "$LEDGER_COLLIDE" "$PP/economics.jsonl")"
+COLLIDE="$(jq -c 'select(.proposal_id == "correction-recurrence-hook-unit-tests-pass")' "$LEDGER_COLLIDE")"
+[[ "$(printf '%s' "$COLLIDE" | jq -c '.effect_observed')" == "null" ]] && pass "a correction-recurrence proposal sharing a gate id is not measured as that gate" || fail "a correction-recurrence proposal was measured with the gate's false_block_rate: $(printf '%s' "$COLLIDE" | jq -c '.effect_observed')"
 
 # ── regression: --since/--until ISO-8601 (date-only, Z, +00:00) all parse to a real windowed pass ──
 # Code-review iteration 2 finding [HIGH]: to_epoch_ms's old `sub("Z$"; "+00:00")` direction broke
