@@ -757,6 +757,7 @@ test("only unknown-origin turns reach the author classifier: never agent, harnes
     { text: "typed by a person" },
     sdk("sdk prompt one"),
     { text: "accepted suggestion", origin: { kind: "human" }, promptSource: "suggestion_accepted" },
+    { text: "[Request interrupted by user]", origin: { kind: "human" }, promptSource: "suggestion_accepted" }, // unknown WITH an envelope
   ];
   const sessions = sessionsWith(Array.from({ length: 3 }, () => kinds));
   const { runtime } = await learn(sessions, { inferHuman: true });
