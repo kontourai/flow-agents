@@ -470,7 +470,15 @@ proposal's `human_occurrences` and `human_sessions` alone met the proposal thres
 human-origin rate (`human_occurrences x 7 / max(7, window_days)`) and `after` the lineage root's
 human-origin recurrences per week since the decision, the same with or without
 `--infer-human`. Otherwise the basis is inferred turns (`inferred_occurrences` and inferred
-recurrences), measured only by a run that infers. With
+recurrences), measured only by a run that infers.
+
+The basis is decided at the first measurement and frozen on the entry:
+`"measurement_basis": { "measured_on": "human | inferred", "thresholds": { "min_occurrences": 5, "min_sessions": 3 }, "decided_at": "<ISO>" }`.
+Every later measurement reuses it, whatever thresholds the later run was given. For an entry
+without `evidence.cost.human_sessions`, the human session count is taken from
+`evidence.defect.citations`: exactly when `citations_total` equals the number of citations, or as
+a lower bound that already meets `min_sessions`. If neither settles it, the entry is left
+unmeasured and the run's `notes` name it. With
 `expected = before x days / 7`: fewer than 3 expected is `insufficient-data`; an observed count
 at most `expected x 0.7` is `improved`, at least `expected x 1.3` is `worsened`, otherwise
 `unchanged`. This is a heuristic band, not a significance test. Zero recurrences is a

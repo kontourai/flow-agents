@@ -943,18 +943,23 @@ test("a rule resting on inferred turns (1 human, 9 inferred) is measured on infe
   assert.deepEqual(document.proposals.map((p) => [p.target.kind, p.authority]), [["skill", "inferred"]], "and it escalates");
 });
 
-test("a rule whose human occurrences alone met the threshold is measured on human turns, identically with or without --infer-human", async () => {
+test("at the threshold boundary (exactly 5 human across exactly 3 sessions) a rule is measured on human turns, identically with or without --infer-human", async () => {
   const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), sdk(`[author:human] ${fix("fetch-main")}`)]));
-  const measure = async (inferHuman) => {
+  const measure = async (counts, inferHuman) => {
     const ws = workspace();
-    seedLedger(ws, [mixedEntry({ human: 6, humanSessions: 4, inferred: 3 })]);
+    seedLedger(ws, [mixedEntry(counts)]);
     await learn(sessions, { ws, inferHuman });
     return ledgerLines(ws)[0].effect_observed;
   };
-  const off = await measure(false);
-  const on = await measure(true);
-  assert.deepEqual([off.measured_on, off.after_occurrences, off.before], ["human", 5, 1]);
+  const off = await measure({ human: 5, humanSessions: 3, inferred: 3 }, false);
+  const on = await measure({ human: 5, humanSessions: 3, inferred: 3 }, true);
+  assert.deepEqual([off.measured_on, off.after_occurrences], ["human", 5]);
   assert.deepEqual(on, { ...off }, "toggling --infer-human changes nothing");
+  // One human occurrence short, or one session short, is not enough: such a rule rests on its inferred turns.
+  for (const short of [{ human: 4, humanSessions: 3, inferred: 3 }, { human: 5, humanSessions: 2, inferred: 3 }]) {
+    assert.equal(await measure(short, false), null, `${JSON.stringify(short)} is not measured on human turns`);
+    assert.equal((await measure(short, true)).measured_on, "inferred", JSON.stringify(short));
+  }
 });
 
 test("a file whose only user records were removed before import still has its drops counted, by scope", async () => {
@@ -965,4 +970,51 @@ test("a file whose only user records were removed before import still has its dr
   assert.deepEqual([all.report.shim_dropped_user_turns, all.report.user_messages_by_origin.unknown, all.report.files_skipped.NO_CONVERSATION], [1, 1, 1]);
   const scoped = readHumanTurns({ roots: [root], sinceMs: null, untilMs: null, scope: () => true });
   assert.deepEqual([scoped.report.shim_dropped_unattributed, scoped.report.shim_dropped_user_turns, scoped.report.user_messages_by_origin.unknown], [1, 0, undefined], "no cwd to scope by: counted, but not as this repository's");
+});
+
+// ── round 6 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("the measurement basis is frozen at the first measurement: later thresholds never move it", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), sdk(`[author:human] ${fix("fetch-main")}`)]));
+  const ws = workspace();
+  seedLedger(ws, [mixedEntry({ human: 6, humanSessions: 3, inferred: 3 })]);
+  await learn(sessions, { ws, inferHuman: true });
+  const first = ledgerLines(ws)[0];
+  assert.deepEqual(first.measurement_basis, { measured_on: "human", thresholds: { min_occurrences: 5, min_sessions: 3 }, decided_at: new Date(NOW_MS).toISOString() });
+  // At 8/3, a fresh decision would say inferred (6 human < 8). The frozen basis stands, and the rule is re-measured on it.
+  await learn(sessions, { ws, inferHuman: true, nowMs: NOW_MS + 8 * DAY_MS, thresholds: { minOccurrences: 8, minSessions: 3 } });
+  const later = ledgerLines(ws)[0];
+  assert.equal(later.effect_history.length, 1, "it was measured again");
+  assert.equal(later.effect_observed.measured_on, "human");
+  assert.deepEqual(later.measurement_basis, first.measurement_basis);
+});
+
+function withoutHumanSessions(entry, citations, citationsTotal) {
+  const copy = structuredClone(entry);
+  delete copy.evidence.cost.human_sessions;
+  copy.evidence.defect = { ...copy.evidence.defect, citations, citations_total: citationsTotal };
+  return copy;
+}
+const cite = (thread, authority = "human") => ({ thread_id: `claude-code:${thread}`, message_id: `m-${thread}-${Math.random()}`, at: "2026-10-01T00:00:00.000Z", excerpt: "x", authority });
+
+test("a rule written without human_sessions is decided from its citations when they are exact, and left unmeasured with a note when not", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), "hello"]));
+  const run = async (entry) => {
+    const ws = workspace();
+    seedLedger(ws, [entry]);
+    const { document } = await learn(sessions, { ws });
+    return { effect: ledgerLines(ws)[0].effect_observed, notes: document.notes.join("\n") };
+  };
+  const base = mixedEntry({ human: 6, humanSessions: 0, inferred: 3 });
+  // All 9 occurrences cited: the 6 human ones span 3 threads, exactly.
+  const exact = withoutHumanSessions(base, [cite("a"), cite("a"), cite("b"), cite("b"), cite("c"), cite("c"), cite("x", "inferred"), cite("y", "inferred"), cite("z", "inferred")], 9);
+  assert.equal((await run(exact)).effect.measured_on, "human");
+  // 8 of 9 cited, and the cited human ones already span 3 threads: the lower bound settles it.
+  const bound = withoutHumanSessions(base, [cite("a"), cite("b"), cite("c"), cite("c"), cite("c"), cite("x", "inferred"), cite("y", "inferred"), cite("z", "inferred")], 9);
+  assert.equal((await run(bound)).effect.measured_on, "human");
+  // 8 of 9 cited, spanning only 2 human threads: the uncited one might be a third. Not guessed.
+  const unknown = withoutHumanSessions(base, [cite("a"), cite("a"), cite("b"), cite("b"), cite("b"), cite("x", "inferred"), cite("y", "inferred"), cite("z", "inferred")], 9);
+  const result = await run(unknown);
+  assert.equal(result.effect, null, "left unmeasured");
+  assert.match(result.notes, /records no human_sessions .* left unmeasured/);
 });

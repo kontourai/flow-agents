@@ -275,7 +275,18 @@ What a ratified rule is measured on (`measured_on`) depends on what it was learn
   inferred). Its human rate is too small ever to reach the 3 expected recurrences a
   measurement needs, so it would stay `insufficient-data` and could never escalate. It is
   measured against its inferred rate, and only by a run with `--infer-human`; a run without
-  that flag leaves it unmeasured instead of counting zero. Zero recurrences is a measurement,
+  that flag leaves it unmeasured instead of counting zero.
+
+The basis is decided once, at a rule's first measurement, and frozen on its ledger entry
+(`measurement_basis`: what it is measured on, the thresholds that decided it, and when). Later
+runs reuse it, so running with other `--min-occurrences` or `--min-sessions` values never moves
+a rule from one basis to the other.
+
+A proposal recorded before `human_sessions` was added doesn't say how many sessions its human
+occurrences span. The loop reads that from the proposal's citations when it can: exactly, when
+every occurrence is cited, or as a lower bound that already meets the threshold. When the
+citations can't settle it, the rule is left unmeasured and the run prints a note naming it. The
+loop never guesses. Zero recurrences is a measurement,
 not a gap. The measurement is repeated on later runs as more time passes; the previous one moves
 to `effect_history`, so one early sample is never final. A run with the same count over the same
 whole number of days changes nothing.

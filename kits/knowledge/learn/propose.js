@@ -253,24 +253,53 @@ export function buildProposal(row, { state, window, judgement, conflictCheck, ru
 }
 
 /**
- * What a ratified proposal is measured on, and the rate it is measured against.
+ * The human-origin sessions a proposal's evidence supports, or null when it cannot be known.
+ *
+ * Proposals record `human_sessions` (from round 5 on). For one written before that, it is derived from the cited
+ * evidence only when that is exact: every occurrence is cited (`citations_total` equals the citations kept), so the
+ * distinct `thread_id`s of human-authority citations are all of them. A partial citation list gives only a lower
+ * bound, which is returned as `atLeast` so a decision that the bound already settles can still be made. Nothing is
+ * guessed.
+ */
+export function humanSessionsOf(cost, defect = {}) {
+  if (typeof cost.human_sessions === "number") return { exact: cost.human_sessions };
+  const citations = Array.isArray(defect.citations) ? defect.citations : [];
+  const threads = new Set(citations.filter((citation) => citation.authority !== "inferred").map((citation) => citation.thread_id)).size;
+  if (typeof defect.citations_total === "number" && defect.citations_total === citations.length) return { exact: threads };
+  return { atLeast: threads };
+}
+
+/**
+ * What a ratified proposal is measured on, decided once, from its own evidence.
  *
  * Human-origin turns, when the proposal's human-origin occurrences alone met the proposal threshold
  * (`minOccurrences` across `minSessions`), or when it had no inferred occurrence at all: then turning --infer-human on
  * or off never changes the measurement. Otherwise (a rule that rests mostly on inferred turns, such as 1 human and 9
  * inferred), the human rate is too small ever to measure, so it is measured on inferred turns, by an inferring run only.
  * Entries from before the human/inferred split counted human turns only.
+ *
+ * Returns `{ on: null, reason }` when the evidence cannot decide (its human sessions are unknown and the cited lower
+ * bound does not settle the threshold): such a rule is left unmeasured, with a note, rather than measured on a guess.
  */
-export function measurementBasis(entry, thresholds = DEFAULT_THRESHOLDS) {
+export function decideBasis(entry, thresholds = DEFAULT_THRESHOLDS) {
   const cost = entry.evidence?.cost ?? {};
   const human = typeof cost.human_occurrences === "number" ? cost.human_occurrences : cost.occurrences;
   const inferred = typeof cost.inferred_occurrences === "number" ? cost.inferred_occurrences : 0;
-  const humanSessions = typeof cost.human_sessions === "number" ? cost.human_sessions : inferred === 0 ? cost.sessions : 0;
-  const humanEnough = human >= thresholds.minOccurrences && humanSessions >= thresholds.minSessions;
-  const on = inferred === 0 || humanEnough ? "human" : "inferred";
-  const count = on === "human" ? human : inferred;
-  if (typeof count !== "number" || typeof cost.window_days !== "number") return { on, before: cost.rate_per_week };
-  return { on, before: round4((count * 7) / Math.max(7, cost.window_days)) };
+  if (inferred === 0) return { on: "human" };
+  if (!(human >= thresholds.minOccurrences)) return { on: "inferred" };
+  const sessions = humanSessionsOf(cost, entry.evidence?.defect);
+  if (sessions.exact !== undefined) return { on: sessions.exact >= thresholds.minSessions ? "human" : "inferred" };
+  if (sessions.atLeast >= thresholds.minSessions) return { on: "human" };
+  return { on: null, reason: `${entry.proposal_id} records no human_sessions and its citations do not settle whether ${human} human occurrences span ${thresholds.minSessions} sessions; it is left unmeasured` };
+}
+
+/** The rate a basis is measured against: that basis's occurrences per week over the proposal's window. */
+export function basisRate(entry, on) {
+  const cost = entry.evidence?.cost ?? {};
+  const human = typeof cost.human_occurrences === "number" ? cost.human_occurrences : cost.occurrences;
+  const count = on === "human" ? human : cost.inferred_occurrences;
+  if (typeof count !== "number" || typeof cost.window_days !== "number") return cost.rate_per_week;
+  return round4((count * 7) / Math.max(7, cost.window_days));
 }
 
 /**
@@ -293,20 +322,29 @@ export function measureEffect({ before, count, days, minExpected = DEFAULT_EFFEC
 /**
  * Measure ratified correction-recurrence entries of this run's scope whose ratification the run can see (the window
  * reaches back to the decision and at least `minDays` have passed). Counts follow the theme's lineage root, so a theme
- * the clusterer split later still counts. The basis (`measurementBasis`) is human-origin turns for a proposal whose
+ * the clusterer split later still counts. The basis (`decideBasis`, frozen in `measurement_basis` at the first
+ * measurement) is human-origin turns for a proposal whose
  * human occurrences alone met the threshold, so turning `--infer-human` on or off never changes it; a proposal resting
  * on inferred turns is measured on inferred turns (`measured_on: "inferred"`), and only by a run that infers
  * (`inferHuman`), never as a silent zero. An entry is re-measured on later runs, so one early sample is not final; the
  * previous measurement moves to `effect_history`. A run that would record the same count over the same whole number of
  * days changes nothing. Returns the indexes it changed.
  */
-export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs, nowMs, measuredAt, effect = DEFAULT_EFFECT, inferHuman = false, thresholds = DEFAULT_THRESHOLDS }) {
+export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs, nowMs, measuredAt, effect = DEFAULT_EFFECT, inferHuman = false, thresholds = DEFAULT_THRESHOLDS, notes = [] }) {
   const key = scopeKey(scope);
   const changed = [];
   entries.forEach((entry, index) => {
     if (!isCorrectionEntry(entry) || entry.decision?.status !== "ratified" || scopeKey(entry.scope) !== key) return;
     const decided = decidedMs(entry);
-    const { on, before } = measurementBasis(entry, thresholds);
+    // The basis is frozen at the first measurement: a later run with other thresholds never moves it.
+    const frozen = entry.measurement_basis?.measured_on;
+    const decision = frozen === "human" || frozen === "inferred" ? { on: frozen } : decideBasis(entry, thresholds);
+    if (decision.on === null) {
+      notes.push(decision.reason);
+      return;
+    }
+    const on = decision.on;
+    const before = basisRate(entry, on);
     if (!Number.isFinite(decided) || typeof before !== "number" || typeof entry.theme?.id !== "string") return;
     if (on === "inferred" && !inferHuman) return; // inferred turns were not read this run: not a zero
     if (windowSinceMs !== null && windowSinceMs > decided) return; // this run did not read back to the decision
@@ -332,6 +370,9 @@ export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowS
         min_expected: effect.minExpected,
       },
       ...(previous ? { effect_history: [...(entry.effect_history ?? []), previous].slice(-MAX_EFFECT_HISTORY) } : {}),
+      measurement_basis: entry.measurement_basis?.measured_on
+        ? entry.measurement_basis
+        : { measured_on: on, thresholds: { min_occurrences: thresholds.minOccurrences, min_sessions: thresholds.minSessions }, decided_at: measuredAt },
     };
     changed.push(index);
   });
