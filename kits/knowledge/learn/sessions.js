@@ -63,8 +63,16 @@ export function isHumanTurn(message) {
  * hook, compaction or task-notification turn, never an absent origin, never an envelope, never a sidechain.
  */
 export function isInferenceCandidate(message) {
-  return message?.role === "user" && message.origin?.kind === "unknown" && !message.origin.envelope && message.sidechain !== true;
+  return message?.role === "user" && message.origin?.kind === "unknown" && !message.origin.envelope && message.sidechain !== true
+    && !DELEGATED_CHANNEL.test(String(message.origin.evidence ?? ""));
 }
+
+/**
+ * Codex sessions started by `codex exec` or through Codex's MCP server are, in practice, other programs and agents
+ * delegating work: Ferry reports their prompts `unknown` (`codex:session_meta.source=exec|mcp`), but they are excluded
+ * from inference rather than handed to the author classifier.
+ */
+export const DELEGATED_CHANNEL = /^codex:session_meta\.source=(exec|mcp)(?:,|$)/;
 
 export function humanTurns(messages) {
   return messages.filter(isHumanTurn);
@@ -269,5 +277,7 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
   report.human_turns_in_window = turns.length;
   report.human_sessions_in_window = sessions.size;
   report.unknown_sessions_in_window = unknownSessions.size;
+  // Distinct sessions holding either: a session with both is one session, not two.
+  report.human_or_unknown_sessions_in_window = new Set([...sessions, ...unknownSessions]).size;
   return { turns, unknownTurns, report };
 }

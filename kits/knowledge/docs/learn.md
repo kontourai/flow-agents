@@ -52,6 +52,11 @@ in. Proposals record the repository they were learned for (`scope`). The scope i
 proposal id, so all-projects and repository proposals can share one ledger without colliding.
 A run measures and builds on only the entries of its own scope.
 
+The scope is the main checkout's path. If you move or re-clone the repository, it gets a new
+scope: earlier proposals stay in the ledger, but the loop no longer measures or builds on them.
+Before this release the default ledger lived at each worktree's root. Ledgers left there are
+orphaned; nothing reads them.
+
 `--all-projects` reads every project on the machine. It prints a warning, because excerpts of
 corrections you made in other repositories are then written into this repository's ledger.
 
@@ -128,7 +133,13 @@ classifier. Turns that are agent, harness, hook, compaction or task notification
 envelopes, or sidechains are never sent. The classifier runs through the same scrubbed model
 route. It answers `human` only when a message clearly reads as a person typing to the agent in
 real time, and `not-human` for briefs, specifications, templated text, and anything it is
-unsure about. Turns it keeps:
+unsure about.
+
+Codex sessions started by `codex exec` or through Codex's MCP server (`session_meta.source` of
+`exec` or `mcp`) also arrive as `unknown`. In practice they are other programs and agents
+delegating work, so they are excluded from inference and never reach the classifier.
+
+Turns it keeps:
 
 - are marked `inferred`, never `human`, in the citations;
 - make any proposal citing them `authority: "inferred"`, with `human_occurrences` and
@@ -252,7 +263,13 @@ rate that triggered the proposal would predict for that period:
 - Observed at most `expected x 0.7`: `improved`. At least `expected x 1.3`: `worsened`. In
   between: `unchanged`.
 
-This is a heuristic tolerance band, not a significance test. Zero recurrences is a measurement,
+This is a heuristic tolerance band, not a significance test.
+
+Recurrence is counted on **human-origin** turns, and the rate it is compared with is the
+proposal's human-origin rate. So running with or without `--infer-human` never changes a
+ratified rule's measurement. Only a proposal learned from inferred turns alone is measured on
+inferred turns (`measured_on: "inferred"`). Only a run with `--infer-human` measures it; a run
+without that flag leaves it unmeasured instead of counting zero. Zero recurrences is a measurement,
 not a gap. The measurement is repeated on later runs as more time passes; the previous one moves
 to `effect_history`, so one early sample is never final. A run with the same count over the same
 whole number of days changes nothing.

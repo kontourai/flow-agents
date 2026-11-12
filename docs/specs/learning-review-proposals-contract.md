@@ -429,7 +429,8 @@ script and the advisory-only guardrails.
   `origin.kind` is `"human"` (Ferry 0.8.0 or later) and that is not wholly an envelope
   (`origin.envelope`). Agent briefs and every other origin, including `unknown` and an absent
   origin, never count. Under `--infer-human` (off by default), `unknown`-origin turns (no
-  envelope, no sidechain) that a conservative model author classifier judges human also count,
+  envelope, no sidechain, not a Codex `exec` or `mcp` session) that a conservative model author
+  classifier judges human also count,
   marked `authority: "inferred"` on the citation. A proposal is `authority: "inferred"` when any
   citation is, and `evidence.cost` carries `human_occurrences` and `inferred_occurrences`. A theme
   carried only by inferred turns needs them in at least 2 sessions.
@@ -463,8 +464,11 @@ script and the advisory-only guardrails.
 
 Each learn run measures ratified correction-recurrence proposals of its scope whose
 ratification it can see: the run's window starts at or before `decision.decided_at`, and at
-least 14 days have passed since. `before` is the proposal's `evidence.cost.rate_per_week`;
-`after` is the lineage root's recurrences per week since the decision. With
+least 14 days have passed since. Recurrence is measured on human-origin turns:
+`before` is the proposal's human-origin rate (`human_occurrences x 7 / max(7, window_days)`), and
+`after` is the lineage root's human-origin recurrences per week since the decision, so a run with
+or without `--infer-human` measures the same. A proposal with no human-origin occurrence is
+measured on inferred turns instead (`measured_on: "inferred"`), and only by a run that infers. With
 `expected = before x days / 7`: fewer than 3 expected is `insufficient-data`; an observed count
 at most `expected x 0.7` is `improved`, at least `expected x 1.3` is `worsened`, otherwise
 `unchanged`. This is a heuristic band, not a significance test. Zero recurrences is a
@@ -474,7 +478,8 @@ nothing.
 
 ```json
 "effect_observed": { "measured_at": "<ISO>", "metric": "recurrence_per_week", "before": 0.0, "after": 0.0,
-                     "moved": "improved | worsened | unchanged | insufficient-data", "after_occurrences": 0, "after_days": 0.0,
+                     "moved": "improved | worsened | unchanged | insufficient-data", "measured_on": "human | inferred",
+                     "after_occurrences": 0, "after_days": 0.0,
                      "expected_occurrences": 0.0, "tolerance": 0.3, "min_expected": 3 }
 ```
 

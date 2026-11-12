@@ -141,7 +141,7 @@ export async function runLearn(options) {
   }
   // With --infer-human, sessions holding unknown-origin candidates count toward the minimum too: the author
   // classifier decides later which of their turns are kept.
-  const sessionsAvailable = read.human_sessions_in_window + (inferHuman ? read.unknown_sessions_in_window : 0);
+  const sessionsAvailable = inferHuman ? read.human_or_unknown_sessions_in_window : read.human_sessions_in_window;
   if (sessionsAvailable < minWindowSessions) {
     document.outcome = "insufficient-data";
     document.aggregates.partial = true;
@@ -182,8 +182,11 @@ export async function runLearn(options) {
 
   // Measure first: a ratified rung measured now as not working is what allows this run to propose the next rung.
   const entries = [...ledger.entries];
-  const occurrencesByRoot = new Map([...byRoot].map(([root, items]) => [root, items.map((item) => item.turn.atMs)]));
-  const measured = fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs: sinceMs, nowMs, measuredAt: new Date(nowMs).toISOString(), effect });
+  const occurrencesByRoot = new Map([...byRoot].map(([root, items]) => [root, {
+    human: items.filter((item) => item.turn.authority !== "inferred").map((item) => item.turn.atMs),
+    inferred: items.filter((item) => item.turn.authority === "inferred").map((item) => item.turn.atMs),
+  }]));
+  const measured = fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs: sinceMs, nowMs, measuredAt: new Date(nowMs).toISOString(), effect, inferHuman });
   report.effects_measured = measured.length;
 
   let rules = null;

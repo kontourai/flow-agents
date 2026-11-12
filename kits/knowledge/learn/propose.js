@@ -172,10 +172,16 @@ export function proposalId(kind, themeId, suffix = "", scope = { kind: "all-proj
   return `${SOURCE_FAMILY}-${kind}-${themeId}${suffix}-${scopeTag(scope)}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+/**
+ * At most MAX_CITATIONS, highest pain first, then most recent. A proposal resting partly on inferred turns always
+ * cites at least one of them (in the last slot, if none made the cut), so a reviewer can see what was inferred.
+ */
 function citations(items) {
-  return [...items]
-    .sort((a, b) => b.pain - a.pain || b.turn.atMs - a.turn.atMs || byString(a.turn.key, b.turn.key))
-    .slice(0, MAX_CITATIONS)
+  const ranked = [...items].sort((a, b) => b.pain - a.pain || b.turn.atMs - a.turn.atMs || byString(a.turn.key, b.turn.key));
+  const chosen = ranked.slice(0, MAX_CITATIONS);
+  const inferred = ranked.find((item) => item.turn.authority === "inferred");
+  if (inferred && !chosen.some((item) => item.turn.authority === "inferred")) chosen[chosen.length - 1] = inferred;
+  return chosen
     .sort((a, b) => a.turn.atMs - b.turn.atMs || byString(a.turn.key, b.turn.key))
     .map((item) => ({
       thread_id: item.turn.threadId,
@@ -245,6 +251,21 @@ export function buildProposal(row, { state, window, judgement, conflictCheck, ru
 }
 
 /**
+ * The rate a ratified proposal is measured against: the human-origin rate when the proposal had any human-origin
+ * occurrence, else (a theme learned from inferred turns alone) its inferred rate. Entries from before the split
+ * counted human turns only.
+ */
+export function measurementBasis(entry) {
+  const cost = entry.evidence?.cost ?? {};
+  const human = typeof cost.human_occurrences === "number" ? cost.human_occurrences : cost.occurrences;
+  const inferred = typeof cost.inferred_occurrences === "number" ? cost.inferred_occurrences : 0;
+  const on = human > 0 || inferred === 0 ? "human" : "inferred";
+  const count = on === "human" ? human : inferred;
+  if (typeof count !== "number" || typeof cost.window_days !== "number") return { on, before: cost.rate_per_week };
+  return { on, before: round4((count * 7) / Math.max(7, cost.window_days)) };
+}
+
+/**
  * The effect statistic. Under the rate that triggered the proposal (`before`, per week), the post-ratification period
  * of `days` would expect `expected = before * days / 7` recurrences. With fewer than `minExpected` expected, a count
  * cannot tell improvement from chance: `insufficient-data`. Otherwise the observed count is compared with a
@@ -264,22 +285,25 @@ export function measureEffect({ before, count, days, minExpected = DEFAULT_EFFEC
 /**
  * Measure ratified correction-recurrence entries of this run's scope whose ratification the run can see (the window
  * reaches back to the decision and at least `minDays` have passed). Counts follow the theme's lineage root, so a theme
- * the clusterer split later still counts. An entry is re-measured on later runs, so one early sample is not final; the
+ * the clusterer split later still counts. Recurrence is measured on human-origin turns, so turning `--infer-human`
+ * on or off between runs never changes it; only a proposal learned from inferred turns alone is measured on inferred
+ * turns (`measured_on: "inferred"`), and only by a run that infers (`inferHuman`), never as a silent zero. An entry is re-measured on later runs, so one early sample is not final; the
  * previous measurement moves to `effect_history`. A run that would record the same count over the same whole number of
  * days changes nothing. Returns the indexes it changed.
  */
-export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs, nowMs, measuredAt, effect = DEFAULT_EFFECT }) {
+export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs, nowMs, measuredAt, effect = DEFAULT_EFFECT, inferHuman = false }) {
   const key = scopeKey(scope);
   const changed = [];
   entries.forEach((entry, index) => {
     if (!isCorrectionEntry(entry) || entry.decision?.status !== "ratified" || scopeKey(entry.scope) !== key) return;
     const decided = decidedMs(entry);
-    const before = entry.evidence?.cost?.rate_per_week;
+    const { on, before } = measurementBasis(entry);
     if (!Number.isFinite(decided) || typeof before !== "number" || typeof entry.theme?.id !== "string") return;
+    if (on === "inferred" && !inferHuman) return; // inferred turns were not read this run: not a zero
     if (windowSinceMs !== null && windowSinceMs > decided) return; // this run did not read back to the decision
     const days = (nowMs - decided) / DAY_MS;
     if (days < effect.minDays) return;
-    const count = (occurrencesByRoot.get(rootOf(entry.theme.id)) ?? []).filter((atMs) => atMs > decided).length;
+    const count = ((occurrencesByRoot.get(rootOf(entry.theme.id)) ?? {})[on] ?? []).filter((atMs) => atMs > decided).length;
     const previous = entry.effect_observed;
     if (previous && previous.after_occurrences === count && Math.floor(previous.after_days) === Math.floor(days)) return;
     const { moved, expected, after } = measureEffect({ before, count, days, minExpected: effect.minExpected, tolerance: effect.tolerance });
@@ -288,6 +312,7 @@ export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowS
       effect_observed: {
         measured_at: measuredAt,
         metric: "recurrence_per_week",
+        measured_on: on,
         before,
         after,
         moved,

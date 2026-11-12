@@ -821,3 +821,90 @@ test("Codex harness and hook turns, which carry text and no envelope, never reac
   const judged = authorRequests(runtime).flatMap((request) => promptJson(request.messages[0].content, "MESSAGES_JSON:").map((item) => item.text)).sort();
   assert.deepEqual(judged, ["typed in the IDE 1", "typed in the IDE 2", "typed in the IDE 3"]);
 });
+
+// ── round 4 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("a raw origin Ferry would misread as human (unclassified, a plain string) is never counted, typed or not", async () => {
+  const misread = [
+    { text: fix("fetch-main", 3, "correction", "UNCLASSIFIED typed"), origin: { kind: "unclassified" }, promptSource: "typed" },
+    { text: fix("fetch-main", 3, "correction", "STRING typed"), origin: "human", promptSource: "typed" },
+  ];
+  const { document, runtime } = await learn(sessionsWith(Array.from({ length: 3 }, () => [...misread, "hello"])));
+  assert.equal(document.report.user_messages_by_origin.human, 3, "only the three plain typed hellos");
+  assert.equal(document.report.shim_dropped_user_turns, 6);
+  assert.ok(!sentText(runtime).includes("UNCLASSIFIED") && !sentText(runtime).includes("STRING typed"));
+});
+
+test("SDK-submitted records whose raw origin is agent, harness, hook or unclassified never reach the author classifier", async () => {
+  const kinds = ["agent", "harness", "hook", "unclassified"].map((kind) => ({ text: `RAW-${kind} ${fix("fetch-main")}`, origin: { kind }, promptSource: "sdk" }));
+  const sessions = sessionsWith(Array.from({ length: 3 }, (_, n) => [...kinds, sdk(`plain sdk prompt ${n}`)]));
+  const { document, runtime } = await learn(sessions, { inferHuman: true });
+  const judged = authorRequests(runtime).flatMap((request) => promptJson(request.messages[0].content, "MESSAGES_JSON:").map((item) => item.text));
+  assert.deepEqual(judged.sort(), ["plain sdk prompt 0", "plain sdk prompt 1", "plain sdk prompt 2"]);
+  assert.equal(document.report.shim_dropped_user_turns, 12);
+});
+
+test("an inferred proposal always cites at least one inferred turn, within the citation cap", async () => {
+  // Nine human pain-3 corrections outrank the single pain-0 inferred one for every one of the 8 slots.
+  const sessions = sessionsWith([
+    [fix("fetch-main", 3), fix("fetch-main", 3), fix("fetch-main", 3)],
+    [fix("fetch-main", 3), fix("fetch-main", 3), fix("fetch-main", 3)],
+    [fix("fetch-main", 3), fix("fetch-main", 3), fix("fetch-main", 3), sdk(`[author:human] ${fix("fetch-main", 0)}`)],
+  ]);
+  const { document } = await learn(sessions, { inferHuman: true });
+  const [proposal] = document.proposals;
+  assert.equal(proposal.authority, "inferred");
+  assert.equal(proposal.evidence.defect.citations.length, 8);
+  assert.equal(proposal.evidence.defect.citations.filter((citation) => citation.authority === "inferred").length, 1);
+});
+
+test("recurrence is measured on human turns, so toggling --infer-human does not change a ratified rule's measurement", async () => {
+  // Five human and five inferred recurrences after a ratification 21 days ago.
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), sdk(`[author:human] ${fix("fetch-main")}`)]));
+  const measure = async (inferHuman) => {
+    const ws = workspace();
+    seedLedger(ws, [decidedEntry("agents-md", "ratified", 21, 1)]);
+    await learn(sessions, { ws, inferHuman });
+    return ledgerLines(ws)[0].effect_observed;
+  };
+  const off = await measure(false);
+  const on = await measure(true);
+  assert.deepEqual([off.after_occurrences, off.measured_on], [5, "human"]);
+  assert.deepEqual([on.after_occurrences, on.measured_on, on.moved], [off.after_occurrences, "human", off.moved]);
+});
+
+test("a rule learned from inferred turns alone is measured on inferred turns, and only by a run that infers", async () => {
+  const inferredOnly = { ...decidedEntry("agents-md", "ratified", 21, 1) };
+  inferredOnly.evidence = { ...inferredOnly.evidence, cost: { ...inferredOnly.evidence.cost, human_occurrences: 0, inferred_occurrences: 6, window_days: 42 } };
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [sdk(`[author:human] ${fix("fetch-main")}`), "hello"]));
+  const ws = workspace();
+  seedLedger(ws, [inferredOnly]);
+  await learn(sessions, { ws });
+  assert.equal(ledgerLines(ws)[0].effect_observed, null, "not inferring: the inferred turns were not read, which is not a zero");
+  await learn(sessions, { ws, inferHuman: true });
+  const effect = ledgerLines(ws)[0].effect_observed;
+  assert.deepEqual([effect.measured_on, effect.after_occurrences, effect.before], ["inferred", 5, 1]);
+});
+
+test("the session minimum counts distinct sessions: one with both human and unknown turns is one session", async () => {
+  const sessions = sessionsWith([[fix("fetch-main"), sdk("prompt a")], [fix("fetch-main"), sdk("prompt b")]]);
+  const { document, runtime } = await learn(sessions, { inferHuman: true });
+  assert.equal(document.outcome, "insufficient-data", "two real sessions are under the minimum of three");
+  assert.equal(document.report.human_or_unknown_sessions_in_window, 2);
+  assert.equal(runtime.requests.length, 0);
+});
+
+test("Codex exec and MCP sessions carry delegated briefs and are excluded from inference; IDE sessions are not", async () => {
+  const root = fs.realpathSync(makeFixtureDir("learn-codex-src-"));
+  const dir = path.join(root, "2026", "11", "02");
+  fs.mkdirSync(dir, { recursive: true });
+  ["exec", "mcp", "vscode"].forEach((source, n) => {
+    fs.writeFileSync(path.join(dir, `rollout-${source}.jsonl`), codexSession(codexId(20 + n), NOW_MS - (9 - n) * DAY_MS, [{ text: `from ${source}` }], { source }));
+  });
+  const ws = workspace();
+  const runtime = recordingRuntime();
+  const document = await runLearn({ roots: [root], ledgerPath: ws.ledger, nowMs: NOW_MS, sinceMs: NOW_MS - 60 * DAY_MS, scope: ALL, inferHuman: true, invoke: toolInvoker(runtime), minWindowSessions: 1 });
+  assert.equal(document.report.user_messages_by_origin.unknown, 3, "all three are unknown to Ferry");
+  const judged = authorRequests(runtime).flatMap((request) => promptJson(request.messages[0].content, "MESSAGES_JSON:").map((item) => item.text));
+  assert.deepEqual(judged, ["from vscode"]);
+});
