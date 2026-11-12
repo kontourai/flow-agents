@@ -129,12 +129,15 @@ function setupError(code, message, role, cause) {
   return dreamError(code, message, { help: modelSetupHelp(role), ...(cause ? { cause } : {}) });
 }
 
-/** Wrap a Relay runtime in Dispatch, so the per-invocation token budget and the capability policy apply to every call. */
+/**
+ * Wrap a Relay runtime in Dispatch, so the per-invocation token budget and the capability policy apply to every call.
+ * The structured-tools fidelity Dispatch projects is the one the candidate declares, so the two never disagree.
+ */
 async function dispatchOver({ id, role, candidate, runtime, maxTotalTokens, onReceipt }) {
   const { createDispatchRuntime } = await import("@kontourai/dispatch");
   return createDispatchRuntime({
     id,
-    capabilities: { structuredTools: true, structuredToolsFidelity: "prompted", streaming: false, abort: true, usage: true },
+    capabilities: { structuredTools: true, structuredToolsFidelity: candidate.evidence.structuredToolsFidelity, streaming: false, abort: true, usage: true },
     plan: {
       schemaVersion: 1,
       role,
@@ -210,13 +213,20 @@ const isExecutableFile = (file) => {
  * `claude` on this process's PATH. Relay is given this path, so the file checked is the file started. A missing or
  * non-executable command is setup (exit 2), not a failed run.
  */
-export function resolveClaudeExecutable(executable, searchPath = process.env.PATH ?? "") {
-  const names = process.platform === "win32" ? ["claude.exe", "claude.cmd"] : ["claude"];
-  const candidates = executable
-    ? [executable]
-    : searchPath.split(path.delimiter).filter((dir) => path.isAbsolute(dir)).flatMap((dir) => names.map((name) => path.join(dir, name)));
+export function resolveClaudeExecutable(executable, searchPath = process.env.PATH ?? "", platform = process.platform) {
+  // Node cannot start a .cmd or .bat file without a shell, and Relay starts the command without one, so on Windows a
+  // claude.cmd shim (as npm installs) would fail only when the run spawns it. Refuse it here, as setup, and name the fix.
+  if (executable && /\.(cmd|bat)$/i.test(executable)) {
+    throw setupError("DREAM_MODEL_UNAVAILABLE", `runtime.executable is a Windows batch shim, which cannot be started without a shell: ${executable}; set runtime.executable to the real claude.exe (or the node script the shim runs)`, DEFAULT_ROLE);
+  }
+  const delimiter = platform === "win32" ? ";" : ":";
+  const dirs = searchPath.split(delimiter).filter((dir) => path.isAbsolute(dir) || path.win32.isAbsolute(dir));
+  const candidates = executable ? [executable] : dirs.map((dir) => path.join(dir, platform === "win32" ? "claude.exe" : "claude"));
   const found = candidates.find(isExecutableFile);
   if (found) return found;
+  if (!executable && platform === "win32" && dirs.some((dir) => isExecutableFile(path.join(dir, "claude.cmd")))) {
+    throw setupError("DREAM_MODEL_UNAVAILABLE", "only a claude.cmd shim is on PATH, which cannot be started without a shell; set runtime.executable to the real claude.exe (or the node script the shim runs)", DEFAULT_ROLE);
+  }
   throw setupError(
     "DREAM_MODEL_UNAVAILABLE",
     executable
@@ -248,12 +258,15 @@ function assertAbsoluteDir(dir) {
   return dir;
 }
 
-/** Give every call an abort signal: Relay has no default timeout, and a hook-started run has no one to press Ctrl-C. */
-function withTimeout(runtime, timeoutMs) {
+/**
+ * Give every call an abort signal: its own timeout (Relay has no default, and a hook-started run has no one to press
+ * Ctrl-C), the caller's signal, and `runSignal`, which cli.js aborts on SIGINT or SIGTERM.
+ */
+function withTimeout(runtime, timeoutMs, runSignal) {
   const bounded = Object.create(runtime);
   bounded.invoke = (request, options) => {
-    const timeout = AbortSignal.timeout(timeoutMs);
-    return runtime.invoke(request, { ...options, signal: options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout });
+    const signals = [AbortSignal.timeout(timeoutMs), options?.signal, runSignal].filter(Boolean);
+    return runtime.invoke(request, { ...options, signal: AbortSignal.any(signals) });
   };
   return bounded;
 }
@@ -274,14 +287,18 @@ function withTimeout(runtime, timeoutMs) {
  * - `cwd`: a private 0700 directory under dreamDir (`claudeWorkingDir`), never a shared one such as /tmp;
  * - the executable resolved and checked here (`resolveClaudeExecutable`): missing is setup, exit 2. A sign-in failure
  *   on every pass is also exit 2 (cli.js reads Relay's AUTHENTICATION_FAILED);
- * - an abort signal on every call (`runtime.timeoutMs`, default 10 minutes). Relay sends SIGTERM, then SIGKILL after
- *   2 s. The process stays in this process's group, so a terminal Ctrl-C still reaches it; with no hooks or MCP
- *   servers it starts no process tree of its own.
+ * - an abort signal on every call (`runtime.timeoutMs`, default 10 minutes), also aborted when cli.js receives SIGINT
+ *   or SIGTERM. claude runs in its own process group (`processGroup: "isolated"`, POSIX), so Relay's SIGTERM, then
+ *   SIGKILL after 2 s, reach the processes it started too: a `claude` that is a shell or version-manager wrapper
+ *   rather than the binary is stopped with its child. A terminal Ctrl-C no longer reaches the group directly, which is
+ *   why cli.js turns the signal into an abort. Not covered: a process that leaves the group (setsid), and this process
+ *   being killed by a signal it cannot handle (SIGKILL), which leaves the group running. On Windows the group is shared
+ *   and only the direct child is signalled.
  *
  * Like a Datum role, it is routed through Dispatch for the token budget and capability policy. Each result's
  * `execution` record (variable names, isolation flags, process group; never values) is what cli.js puts in the report.
  */
-export async function createCliRuntime(runtime, { dreamDir, maxTotalTokens = 64_000, onReceipt } = {}) {
+export async function createCliRuntime(runtime, { dreamDir, maxTotalTokens = 64_000, onReceipt, signal } = {}) {
   const { kind, model, executable, passEnv = [], timeoutMs = CLAUDE_CODE_DEFAULT_TIMEOUT_MS } = runtime ?? {};
   if (kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", `runtime.kind must be one of: ${RUNTIME_KINDS.join(", ")}`);
   const command = resolveClaudeExecutable(executable);
@@ -294,6 +311,7 @@ export async function createCliRuntime(runtime, { dreamDir, maxTotalTokens = 64_
     environmentInheritance: { inherit: "allowlist", allow: [...passEnv] },
     environment: { FLOW_AGENTS_DREAM_TRIGGER: "0" },
     isolation: "safe-mode",
+    processGroup: process.platform === "win32" ? "shared" : "isolated",
   });
   const candidate = {
     id: "claude-code",
@@ -301,7 +319,7 @@ export async function createCliRuntime(runtime, { dreamDir, maxTotalTokens = 64_
     evidence: { level: "declared", capabilities: ["structured-tools"], structuredToolsFidelity: "native", source: "knowledge.dream" },
     worstCaseUsage: { maxTokens: maxTotalTokens },
   };
-  return dispatchOver({ id: "dream:claude-code", role: "claude-code", candidate, runtime: withTimeout(claude, timeoutMs), maxTotalTokens, onReceipt });
+  return dispatchOver({ id: "dream:claude-code", role: "claude-code", candidate, runtime: withTimeout(claude, timeoutMs, signal), maxTotalTokens, onReceipt });
 }
 
 /**

@@ -246,6 +246,8 @@ export async function runDream(host, options = {}) {
     report.sittings.seen = ingest.residues.length;
     report.redaction_hits = redactionHits(ingest.residues);
 
+    // Why a sitting may hold only the assistant's side: user turns a person did not write, by origin kind.
+    report.ingest.dropped_user_turns = { ...(ingest.report.dropped_user_turns ?? {}) };
     // A rotated or unreadable telemetry file cannot make progress until an operator resets the cursor.
     if (ingest.report.blocked.some((entry) => BLOCKING.has(entry.reason))) {
       report.status = "blocked";
