@@ -215,6 +215,9 @@ test('a dream config that fails the run\'s own checks serves nothing, rather tha
  process.env.FLOW_AGENTS_DREAM_CONFIG = f.config;
  const out = await f.sessionStart();
  assert.doesNotMatch(out, /configured amber heron|violet kestrel/);
+ fs.chmodSync(f.config, 0o600);
+ fs.writeFileSync(f.config, JSON.stringify({ ...JSON.parse(fs.readFileSync(f.config, 'utf8')), enabled: false }), { mode: 0o600 });
+ assert.doesNotMatch(await f.sessionStart(), /configured amber heron|violet kestrel/, 'a disabled config serves nothing');
  process.env.FLOW_AGENTS_DREAM_CONFIG = path.join(f.temp, 'no-such-config.json');
  assert.doesNotMatch(await f.sessionStart(), /violet kestrel/);
  delete process.env.FLOW_AGENTS_DREAM_CONFIG;

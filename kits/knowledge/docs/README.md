@@ -1198,8 +1198,9 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
    cached prompt tokens, so the budget understates what the CLI actually uses.
 
    The `claude` process is a full Claude Code session that loads your user-level settings, hooks and `CLAUDE.md`.
-   Any hook you have installed that logs prompts sees the scrubbed sitting. The run starts that session in the
-   system temp directory, so it loads no project settings. It also sets `FLOW_AGENTS_DREAM_TRIGGER=0` and adds
+   Any hook you have installed that logs prompts sees the scrubbed sitting. The run starts that session in
+   `<dreamDir>/claude-session`, a private 0700 directory, so no project settings load and no other user can plant
+   any there. Keep `dreamDir` out of shared directories such as `/tmp`. The run also sets `FLOW_AGENTS_DREAM_TRIGGER=0` and adds
    `profile-memory` to `SA_DISABLED_HOOKS`. These settings stop the session from starting another dream run or
    injecting existing briefs into the extraction prompt.
 3. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
@@ -1210,12 +1211,14 @@ provider kind (`DREAM_MODEL_UNSUPPORTED`) also exits 2.
 
 **Where the briefs are read.** At `SessionStart`, the profile-memory hook reads briefs from the dream's `dreamDir`.
 If the hook's environment sets `FLOW_AGENTS_DREAM_CONFIG` (the same variable the hook trigger reads), the hook loads
-that config with the run's ownership checks and uses its `dreamDir`. If the config cannot be loaded, the hook injects
-nothing. Without the variable, the hook uses the default directory. It reads `project-<id>.json` for the session's
+that config with the run's ownership checks and uses its `dreamDir`. If the config cannot be loaded, or does not
+say `"enabled": true`, the hook injects nothing. Without the variable, the hook uses the default directory. It reads `project-<id>.json` for the session's
 working directory first, where `<id>` follows the run's rule (the directory name), then `global.json`, and it skips
 entries that are already present.
 
 Set `FLOW_AGENTS_DREAM_CONFIG` in your user-level environment. Do not let a project set it, because the config it
-names chooses both the host module that a triggered run imports and the briefs that the hook injects as your memory.
+names chooses the briefs that the hook injects as your memory. A project that can set a hook's environment can already
+run code in every Node hook (for example through `NODE_OPTIONS`), so the hook trusts this variable as much as the rest of
+that environment.
 A project ID is only a directory name, so two checkouts with the same final directory name share one project brief.
 That brief contains no claims beyond those already eligible for the global brief, which includes every project's claims.

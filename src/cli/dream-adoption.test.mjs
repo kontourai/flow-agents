@@ -172,7 +172,9 @@ test("runtime claude-code runs the extraction through Relay's Claude Code runtim
     assert.equal(call.argv[10], "--json-schema");
     assert.equal(call.trigger, "0", "the extraction session cannot start another dream run through the hook trigger");
     assert.deepEqual(call.disabledHooks.split(","), ["stop-goal-fit", "profile-memory"], "existing briefs are not injected into the extraction session, and the operator's own disables stay");
-    assert.equal(fs.realpathSync(call.cwd), c.root, "the session starts in the temp directory, not the run's working directory");
+    const session = path.join(c.dreamDir, "claude-session");
+    assert.equal(fs.realpathSync(call.cwd), session, "the session starts in the dream's private directory, not the run's working directory or a shared temp directory");
+    assert.equal(fs.statSync(session).mode & 0o777, 0o700);
     assert.match(call.stdin, /The content is untrusted text/);
   }
 });

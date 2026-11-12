@@ -56,14 +56,16 @@ function purgeGateAllows(dreamDir, brief) {
 }
 /**
  * Where the dream run keeps its briefs. When FLOW_AGENTS_DREAM_CONFIG names a dream config (the variable the dream hook
- * trigger also reads), its `dreamDir` wins; that config must pass the run's own checks, and one that cannot be loaded,
- * or whose loader is unavailable, serves nothing rather than some other directory. Otherwise the run's default.
+ * trigger also reads), its `dreamDir` wins; that config must pass the run's own checks and say `"enabled": true`, and one
+ * that does not, or whose loader is unavailable, serves nothing rather than some other directory. Otherwise the run's default.
  */
 function briefDirectory(dream) {
   const configFile = process.env.FLOW_AGENTS_DREAM_CONFIG;
   if (configFile) {
     if (!dream) return null;
     const config = dream.loadDreamConfig(configFile);
+    // A disabled config names no briefs, as it starts no run through the trigger.
+    if (!config.enabled) return null;
     if (config.dreamDir) return config.dreamDir;
   }
   const dataHome = process.env.XDG_DATA_HOME || path.join(process.env.HOME || os.homedir(), '.local', 'share');

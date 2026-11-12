@@ -23,11 +23,12 @@
  * @module dream/cli
  */
 
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { DEFAULT_ROLE, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
 import { createCliRuntime, createRoleRuntime, extractForRuntime } from "./model.js";
-import { runDream } from "./run.js";
+import { defaultDreamDir, runDream } from "./run.js";
 import { dreamError } from "./util.js";
 
 /** Errors that mean the operator has to change something before any run can work: exit 2, not a failed run. */
@@ -78,7 +79,9 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     }
     if (!host.extract && !args.dryRun) {
       const runtime = host.runtime
-        ?? (config.runtime ? await createCliRuntime(config.runtime) : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
+        ?? (config.runtime
+          ? await createCliRuntime({ ...config.runtime, workDir: path.join(config.dreamDir ?? defaultDreamDir(), "claude-session") })
+          : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
       host.extract = await extractForRuntime(runtime);
     }
     const report = await runDream(host, {

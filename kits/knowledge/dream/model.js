@@ -15,7 +15,8 @@
  * @module dream/model
  */
 
-import * as os from "node:os";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { ModelInvocationError } from "@kontourai/relay";
 
@@ -198,19 +199,26 @@ export const RUNTIME_KINDS = Object.freeze(["claude-code"]);
  * The `claude` process is still a full harness session, with the user's own settings and hooks. Three things keep the
  * dream out of its own way: `FLOW_AGENTS_DREAM_TRIGGER=0`, so a dream hook trigger does not start another run when the
  * session ends; `profile-memory` added to `SA_DISABLED_HOOKS`, so existing briefs are not injected into the prompt
- * that distils new ones; and the system temp directory as its working directory, so no project's settings, hooks or
- * CLAUDE.md are loaded from wherever the scheduler happened to start the run.
+ * that distils new ones; and `workDir`, a private (0700) directory the caller owns, as its working directory. Claude
+ * Code loads `.claude/settings.json` (hooks included) from its working directory and reads CLAUDE.md files above it,
+ * so neither the scheduler's directory nor a shared one such as /tmp, which another user can write, is safe there.
  *
- * @param {{ kind: "claude-code", model: string, executable?: string, maxTotalTokens?: number, onReceipt?: (receipt: object) => void }} options
+ * @param {{ kind: "claude-code", model: string, workDir: string, executable?: string, maxTotalTokens?: number, onReceipt?: (receipt: object) => void }} options
  */
-export async function createCliRuntime({ kind, model, executable, maxTotalTokens = 64_000, onReceipt }) {
+export async function createCliRuntime({ kind, model, workDir, executable, maxTotalTokens = 64_000, onReceipt }) {
   if (kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", `runtime.kind must be one of: ${RUNTIME_KINDS.join(", ")}`);
+  if (typeof workDir !== "string" || !path.isAbsolute(workDir)) throw dreamError("DREAM_CONFIG_INVALID", "the Claude Code runtime needs an absolute private working directory");
+  fs.mkdirSync(workDir, { recursive: true, mode: 0o700 });
+  const stat = fs.lstatSync(workDir);
+  const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  if (!stat.isDirectory() || (uid !== null && stat.uid !== uid)) throw dreamError("DREAM_CONFIG_INVALID", `the Claude Code working directory must be a directory you own: ${workDir}`);
+  fs.chmodSync(workDir, 0o700);
   const { createClaudeCodeRuntime } = await import("@kontourai/relay/claude-code");
   const disabled = [...new Set([...String(process.env.SA_DISABLED_HOOKS ?? "").split(",").map((id) => id.trim()).filter(Boolean), "profile-memory"])].join(",");
   const runtime = createClaudeCodeRuntime({
     model,
     ...(executable ? { executable } : {}),
-    cwd: os.tmpdir(),
+    cwd: workDir,
     environment: { FLOW_AGENTS_DREAM_TRIGGER: "0", SA_DISABLED_HOOKS: disabled },
   });
   const candidate = {
