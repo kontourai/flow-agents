@@ -261,6 +261,11 @@ are checked against the runtime exports by `src/cli/memory-host-subpaths.test.mj
 The host must pass only claims the reader is authorized to see and supply trusted review and routing records. These helpers do not authenticate callers or enforce restricted-audience membership. Ranking and recall exclude sealed claims; `compileBrief` expects already-ranked inputs. `rankItems` uses `now` for ranking, while `classifyCurrent` has no as-of input.
 Recall's current, contested and superseded labels use the brief's local rules. They are not Surface's protected accumulation projection; the authority input needed for that projection is tracked in flow-agents#1586.
 
+A host that runs the dream as a command instead of calling `runDream` uses `flow-agents dream run --config <abs>`.
+`src/cli/dream.ts` forwards that command to `kits/knowledge/dream/cli.js`, so the arguments, report and exit codes stay
+in the kit. [Dream run model setup](../kits/knowledge/docs/README.md#dream-run-model-setup) lists the model runtimes
+the command accepts.
+
 ## Delegation authority and bounded rounds
 
 The package exports separate `delegation-group-rounds` and
