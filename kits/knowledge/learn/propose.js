@@ -292,7 +292,7 @@ export function readLedger(file) {
     if (error?.code === "ENOENT") return { lines: [], entries: [] };
     throw error;
   }
-  const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((line) => line.trim() !== "");
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim() !== "");
   const entries = lines.map((line, index) => {
     let entry;
     try {

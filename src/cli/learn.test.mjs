@@ -266,7 +266,7 @@ test("ledger idempotence: a second identical run appends nothing, rewrites nothi
 test("a ledger with a byte-order mark and CRLF line ends is read", async () => {
   const ws = workspace();
   fs.mkdirSync(path.dirname(ws.ledger), { recursive: true });
-  fs.writeFileSync(ws.ledger, `﻿${JSON.stringify(decidedEntry("agents-md", "proposed", 0, 1))}\r\n{"proposal_id":"other","decision":{"status":"proposed"}}\r\n`);
+  fs.writeFileSync(ws.ledger, `\uFEFF${JSON.stringify(decidedEntry("agents-md", "proposed", 0, 1))}\r\n{"proposal_id":"other","decision":{"status":"proposed"}}\r\n`);
   assert.deepEqual(readLedger(ws.ledger).entries.map((entry) => entry.proposal_id), [`correction-recurrence-agents-md-${FETCH_ROOT}`, "other"]);
   const { document } = await learn(RECURRING(), { ws });
   assert.equal(document.report.themes_open, 1, "the BOM-prefixed entry was recognised as this theme's open proposal");
@@ -612,6 +612,12 @@ test("learn refuses to write its ledger where Git would track it", async () => {
   const ledger = path.join(repo, ".kontourai", "telemetry", "learning-review-proposals.jsonl");
   await assert.rejects(learn(RECURRING(), { ws: { ledger, reviewItems: "" }, scope: repoScope(repo) }), { code: "LEARN_LEDGER_TRACKED" });
   assert.equal(fs.existsSync(path.join(repo, ".kontourai")), false, "nothing was written");
+  // Each file is checked on its own: a tracked ledger with the queue elsewhere, and a tracked queue with the ledger elsewhere.
+  const outside = path.join(fs.realpathSync(makeFixtureDir("learn-outside-")), "q.json");
+  await assert.rejects(learn(RECURRING(), { ws: { ledger, reviewItems: "" }, scope: repoScope(repo), reviewItemsPath: outside }), { code: "LEARN_LEDGER_TRACKED" });
+  const outsideLedger = path.join(path.dirname(outside), "l.jsonl");
+  await assert.rejects(learn(RECURRING(), { ws: { ledger: outsideLedger, reviewItems: "" }, scope: repoScope(repo), reviewItemsPath: path.join(repo, "queue.json") }), { code: "LEARN_LEDGER_TRACKED" });
+  assert.equal(fs.existsSync(outside) || fs.existsSync(outsideLedger), false);
   const ignored = gitRepo();
   const ok = path.join(ignored, ".kontourai", "telemetry", "learning-review-proposals.jsonl");
   await learn(RECURRING({ cwd: ignored }), { ws: { ledger: ok, reviewItems: "" }, scope: repoScope(ignored) });
