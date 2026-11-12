@@ -16,7 +16,12 @@ const KEYS = new Set([
   "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs",
   "triggerMinIntervalMs", "proposerId", "visibility", "runtime",
 ]);
-const RUNTIME_KEYS = new Set(["kind", "model", "executable"]);
+const RUNTIME_KEYS = new Set(["kind", "model", "executable", "passEnv", "timeoutMs"]);
+/** `runtime.passEnv` names at most this many variables; one more is refused, not truncated. */
+export const MAX_PASS_ENV = 32;
+/** `runtime.timeoutMs` may not exceed a day: an unattended run must end. */
+export const MAX_RUNTIME_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const POSITIVE_INTEGERS = ["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "idleGapMs", "triggerMinIntervalMs"];
 
 export const DEFAULT_ROLE = "extraction-default";
@@ -78,6 +83,18 @@ function validateRuntime(runtime, role) {
   if (runtime.kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", 'runtime.kind must be "claude-code"');
   if (typeof runtime.model !== "string" || !runtime.model.trim()) throw dreamError("DREAM_CONFIG_INVALID", "runtime.model must name a model the claude command accepts, such as sonnet");
   if (runtime.executable !== undefined) assertAbsolute(runtime.executable, "runtime.executable");
+  // The claude process inherits only PATH, HOME, USER and TMPDIR, plus the variables named here (model.js).
+  if (runtime.passEnv !== undefined) {
+    if (!Array.isArray(runtime.passEnv)) throw dreamError("DREAM_CONFIG_INVALID", "runtime.passEnv must list environment variable names");
+    if (runtime.passEnv.length > MAX_PASS_ENV) throw dreamError("DREAM_CONFIG_INVALID", `runtime.passEnv may name at most ${MAX_PASS_ENV} variables`);
+    runtime.passEnv.forEach((name, i) => {
+      if (typeof name !== "string" || !ENV_NAME.test(name)) throw dreamError("DREAM_CONFIG_INVALID", `runtime.passEnv[${i}] must be an environment variable name`);
+    });
+    if (new Set(runtime.passEnv).size !== runtime.passEnv.length) throw dreamError("DREAM_CONFIG_INVALID", "runtime.passEnv names a variable twice");
+  }
+  if (runtime.timeoutMs !== undefined && !(Number.isSafeInteger(runtime.timeoutMs) && runtime.timeoutMs > 0 && runtime.timeoutMs <= MAX_RUNTIME_TIMEOUT_MS)) {
+    throw dreamError("DREAM_CONFIG_INVALID", `runtime.timeoutMs must be a positive integer of at most ${MAX_RUNTIME_TIMEOUT_MS}`);
+  }
   // Two sources for one model would leave the reader of the config guessing which one ran.
   if (role !== undefined) throw dreamError("DREAM_CONFIG_INVALID", "set role or runtime, not both");
 }

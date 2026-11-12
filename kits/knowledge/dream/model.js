@@ -15,9 +15,12 @@
  * @module dream/model
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { ModelInvocationError } from "@kontourai/relay";
 
+import { DEFAULT_ROLE, assertOwnerControlledDir } from "./config.js";
 import { dreamError } from "./util.js";
 
 const TRUNCATED = new Set(["max_tokens", "max_output_tokens"]);
@@ -115,7 +118,9 @@ export function modelSetupHelp(role) {
     `  1. A Datum role named "${role}" in ~/.config/kontour/datum.json (or .datum/config.json in the directory the run starts in), for example:`,
     `       ${JSON.stringify(datum)}`,
     "  2. A host runtime: return `runtime` (a Relay ModelRuntime) or `extract` from your host module's createDreamHost.",
-    '  (The "runtime": { "kind": "claude-code" } option is not available yet; see kontourai/relay#84.)',
+    '  3. The Claude Code CLI, signed in to a Claude subscription: set "runtime": { "kind": "claude-code", "model": "sonnet" } in the config instead of a role.',
+    "     claude runs without your hooks, MCP servers, CLAUDE.md or settings files, and with only PATH, HOME, USER and TMPDIR from this",
+    '     environment. Name any other variable it needs, such as an ANTHROPIC_BASE_URL gateway, in "runtime": { "passEnv": [...] }.',
     `See ${MODEL_SETUP_DOC}`,
   ].join("\n");
 }
@@ -187,31 +192,131 @@ export async function createRoleRuntime({ role, resolveOptions = {}, maxTotalTok
 
 export const RUNTIME_KINDS = Object.freeze(["claude-code"]);
 
+/** How long one claude call may run before it is stopped, when the config does not say. */
+export const CLAUDE_CODE_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+
+const isExecutableFile = (file) => {
+  try {
+    if (!fs.statSync(file).isFile()) return false;
+    fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The absolute path of the claude command: `runtime.executable` when the config names it, otherwise the first
+ * `claude` on this process's PATH. Relay is given this path, so the file checked is the file started. A missing or
+ * non-executable command is setup (exit 2), not a failed run.
+ */
+export function resolveClaudeExecutable(executable, searchPath = process.env.PATH ?? "") {
+  const names = process.platform === "win32" ? ["claude.exe", "claude.cmd"] : ["claude"];
+  const candidates = executable
+    ? [executable]
+    : searchPath.split(path.delimiter).filter((dir) => path.isAbsolute(dir)).flatMap((dir) => names.map((name) => path.join(dir, name)));
+  const found = candidates.find(isExecutableFile);
+  if (found) return found;
+  throw setupError(
+    "DREAM_MODEL_UNAVAILABLE",
+    executable
+      ? `runtime.executable is not an executable file: ${executable}`
+      : "the claude command is not on PATH; install Claude Code and sign in, or set runtime.executable to its absolute path",
+    DEFAULT_ROLE,
+  );
+}
+
+/**
+ * The claude process's working directory: `dreamDir/runtime/claude-code`, created 0700 and refused unless only this
+ * user can reach it. Checked before it is created (so a symlink on the path cannot redirect the mkdir) and after.
+ */
+export function claudeWorkingDir(dreamDir) {
+  const dir = path.join(assertAbsoluteDir(dreamDir), "runtime", "claude-code");
+  const label = "dreamDir/runtime/claude-code";
+  assertOwnerControlledDir(dir, label);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  assertOwnerControlledDir(dir, label);
+  const mode = fs.lstatSync(dir).mode & 0o777;
+  if (process.platform !== "win32" && mode !== 0o700) {
+    throw dreamError("DREAM_CONFIG_INVALID", `${label} must be private (mode 700), not ${mode.toString(8)}: ${dir}`);
+  }
+  return dir;
+}
+
+function assertAbsoluteDir(dir) {
+  if (typeof dir !== "string" || !path.isAbsolute(dir)) throw dreamError("DREAM_CONFIG_INVALID", "dreamDir must be an absolute path");
+  return dir;
+}
+
+/** Give every call an abort signal: Relay has no default timeout, and a hook-started run has no one to press Ctrl-C. */
+function withTimeout(runtime, timeoutMs) {
+  const bounded = Object.create(runtime);
+  bounded.invoke = (request, options) => {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    return runtime.invoke(request, { ...options, signal: options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout });
+  };
+  return bounded;
+}
+
 /**
  * `runtime: { kind: "claude-code" }`: the Claude Code CLI, for a machine whose Claude access is a subscription signed
- * in to the `claude` command rather than an API key. Not available yet: the config is accepted and validated, and the
- * run refuses it (exit 2) rather than start it unsafely.
+ * in to the `claude` command rather than an API key. The excerpt sent to it is transcript text, so the process is
+ * started with as little of this machine's configuration as Relay can give it:
  *
- * Relay's Claude Code runtime (`@kontourai/relay/claude-code`, 0.7.x) starts `claude` with this process's whole
- * environment merged under whatever it is given (provider keys, gateway URLs, tokens for other services), as a full
- * harness session that loads the user's hooks, MCP servers and CLAUDE.md. Any of those would see the transcript
- * excerpt, and Relay offers no option to prevent it.
+ * - environment: only Relay's base (PATH, HOME, USER, TMPDIR) plus the names the config lists in `runtime.passEnv`
+ *   (for example the user's own ANTHROPIC_BASE_URL gateway), and FLOW_AGENTS_DREAM_TRIGGER=0 so that the session
+ *   cannot start another run. Provider keys, gateway URLs and other services' tokens in this process's environment do
+ *   not reach it unless named;
+ * - `isolation: "safe-mode"`: `--safe-mode --setting-sources ""`, so no hooks, MCP servers, CLAUDE.md, skills, plugins,
+ *   or user, project or local settings files (and so no settings `env` or apiKeyHelper). What still applies: the
+ *   stored login (a stored API-key login, `primaryApiKey` in ~/.claude.json, is used instead of a subscription) and
+ *   admin-managed policy settings, including their env and apiKeyHelper;
+ * - `cwd`: a private 0700 directory under dreamDir (`claudeWorkingDir`), never a shared one such as /tmp;
+ * - the executable resolved and checked here (`resolveClaudeExecutable`): missing is setup, exit 2. A sign-in failure
+ *   on every pass is also exit 2 (cli.js reads Relay's AUTHENTICATION_FAILED);
+ * - an abort signal on every call (`runtime.timeoutMs`, default 10 minutes). Relay sends SIGTERM, then SIGKILL after
+ *   2 s. The process stays in this process's group, so a terminal Ctrl-C still reaches it; with no hooks or MCP
+ *   servers it starts no process tree of its own.
  *
- * TODO(relay#84): when Relay's Claude Code runtime takes an environment allowlist and an isolation option, bump Relay
- * and build the runtime here: `createClaudeCodeRuntime({ model, executable, cwd, environment, ...isolation })` with
- * - the allowlist: PATH and HOME, plus the names the config lists in a new `runtime.passEnv` (for example a user's
- *   ANTHROPIC_BASE_URL gateway), and FLOW_AGENTS_DREAM_TRIGGER=0 so the session cannot start another run;
- * - isolation on, so no user hooks, MCP servers or CLAUDE.md load;
- * - `cwd` a private 0700 directory under dreamDir, never a shared one such as /tmp;
- * - `executable` checked to exist and be executable, and a directory or auth failure reported as configuration
- *   (exit 2), not a failed run;
- * then wrap it with `dispatchOver`, as `createRoleRuntime` does, and test it against a dirty parent environment.
+ * Like a Datum role, it is routed through Dispatch for the token budget and capability policy. Each result's
+ * `execution` record (variable names, isolation flags, process group; never values) is what cli.js puts in the report.
  */
-export async function createCliRuntime({ kind }) {
+export async function createCliRuntime(runtime, { dreamDir, maxTotalTokens = 64_000, onReceipt } = {}) {
+  const { kind, model, executable, passEnv = [], timeoutMs = CLAUDE_CODE_DEFAULT_TIMEOUT_MS } = runtime ?? {};
   if (kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", `runtime.kind must be one of: ${RUNTIME_KINDS.join(", ")}`);
-  throw dreamError(
-    "DREAM_MODEL_UNSUPPORTED",
-    'runtime "claude-code" is not available yet: Relay cannot yet start the claude command with a restricted environment and without the user\'s hooks, MCP servers and CLAUDE.md (kontourai/relay#84), so the transcript excerpt could reach them',
-    { help: modelSetupHelp("extraction-default") },
-  );
+  const command = resolveClaudeExecutable(executable);
+  const cwd = claudeWorkingDir(dreamDir);
+  const { createClaudeCodeRuntime } = await import("@kontourai/relay/claude-code");
+  const claude = createClaudeCodeRuntime({
+    model,
+    executable: command,
+    cwd,
+    environmentInheritance: { inherit: "allowlist", allow: [...passEnv] },
+    environment: { FLOW_AGENTS_DREAM_TRIGGER: "0" },
+    isolation: "safe-mode",
+  });
+  const candidate = {
+    id: "claude-code",
+    runtimeId: "claude-code",
+    evidence: { level: "declared", capabilities: ["structured-tools"], structuredToolsFidelity: "native", source: "knowledge.dream" },
+    worstCaseUsage: { maxTokens: maxTotalTokens },
+  };
+  return dispatchOver({ id: "dream:claude-code", role: "claude-code", candidate, runtime: withTimeout(claude, timeoutMs), maxTotalTokens, onReceipt });
+}
+
+/**
+ * The report's copy of a Relay result's `execution` record: variable names, isolation flags and process group, and
+ * only the fields named here, so nothing Relay adds later (and no value) is copied. Null when the runtime gave none
+ * (an SDK runtime).
+ */
+export function executionEvidence(execution) {
+  if (!execution || typeof execution !== "object") return null;
+  const env = execution.environment;
+  return {
+    environment: env?.inherit === "allowlist" && Array.isArray(env.names)
+      ? { inherit: "allowlist", names: env.names.filter((name) => typeof name === "string").sort() }
+      : env?.inherit === "all" ? { inherit: "all" } : null,
+    isolation_flags: Array.isArray(execution.isolationFlags) ? execution.isolationFlags.filter((flag) => typeof flag === "string") : [],
+    process_group: execution.processGroup === "shared" || execution.processGroup === "isolated" ? execution.processGroup : null,
+  };
 }

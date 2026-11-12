@@ -1202,13 +1202,37 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
    The default runtime factory supports `anthropic-compatible` providers.
 2. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
 
-The Claude Code CLI (a Claude subscription without an API key) is **not available yet**. The config accepts
-`"runtime": { "kind": "claude-code", "model": "sonnet" }`, but a real run with it exits 2 with `DREAM_MODEL_UNSUPPORTED`
-and starts nothing. Relay's Claude Code runtime would start `claude` with this process's whole environment, including
-provider keys, gateway URLs and other services' tokens. It would also start a full session that loads your hooks, MCP
-servers and `CLAUDE.md`, and any of those would see the transcript excerpt. The option opens when Relay can restrict
-both ([relay#84](https://github.com/kontourai/relay/issues/84)). Until then, a host that wants the CLI builds that
-runtime itself and owns those risks.
+3. **The Claude Code CLI**, for a Claude subscription signed in to the `claude` command instead of an API key. Set
+   `runtime` in the config instead of `role`:
+
+   ```json
+   {"runtime":{"kind":"claude-code","model":"sonnet","passEnv":["ANTHROPIC_BASE_URL"]}}
+   ```
+
+   `model` is any model name `claude --model` accepts. `executable` (an absolute path) is optional; without it the
+   run uses the first `claude` on `PATH`. `passEnv` and `timeoutMs` are optional too.
+
+   The excerpt the run sends is transcript text, so `claude` starts with as little of your setup as possible:
+
+   - **Environment.** It gets only `PATH`, `HOME`, `USER` and `TMPDIR`, plus the variables you name in
+     `passEnv` (at most 32). Provider keys, gateway URLs and other services' tokens in the run's environment do not
+     reach it unless you name them. If you route Claude through your own gateway with `ANTHROPIC_BASE_URL`, name it,
+     as in the example.
+   - **Isolation.** It runs with `--safe-mode --setting-sources ""`, so it loads none of your hooks, MCP servers,
+     `CLAUDE.md` files, skills, plugins, or user, project and local settings files. That includes a settings file's
+     `env` block and `apiKeyHelper`, so a gateway or key set only in a settings file is not used. Put it in the
+     environment and name it in `passEnv`.
+   - **What still applies.** Isolation does not change your stored login. If `claude` is signed in with an API key
+     (`primaryApiKey` in `~/.claude.json`), that key is used rather than a subscription. Admin-managed policy
+     settings also still apply, including their `env` and `apiKeyHelper`; no flag can turn them off.
+   - **Working directory.** `dreamDir/runtime/claude-code`, created `0700` and refused if anyone else can reach it.
+   - **Timeout.** Each call is stopped after `timeoutMs` (default 10 minutes, at most a day), with `SIGTERM` and
+     then `SIGKILL` 2 seconds later, so an unattended, hook-started run cannot hang. A stopped call fails the run
+     (exit 1) and holds the cursor.
+
+   A `claude` that cannot be found or is not executable, and one that refuses its sign-in on every pass, exit 2 with
+   setup help. Run `claude` and sign in with `/login`. Each report records, under `runtime`, what Relay says it
+   passed: the variable names (never their values), the isolation flags and the process group.
 
 A run's token budget counts input and output tokens. Relay does not count cached prompt tokens, so the budget can
 understate what a provider charges.

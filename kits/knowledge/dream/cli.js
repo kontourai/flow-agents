@@ -29,7 +29,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { DEFAULT_ROLE, assertOwnerControlledDir, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
-import { createCliRuntime, createRoleRuntime, extractForRuntime, modelSetupHelp } from "./model.js";
+import { createCliRuntime, createRoleRuntime, executionEvidence, extractForRuntime, modelSetupHelp } from "./model.js";
 import { defaultDreamDir, runDream } from "./run.js";
 import { dreamError } from "./util.js";
 
@@ -93,6 +93,22 @@ function trackAuthentication(runtime) {
   return { runtime: watched, extract, onlyAuthentication };
 }
 
+/**
+ * Record each result's content-free execution evidence (model.js `executionEvidence`) into `evidence`, which the run
+ * writes into its report. Each distinct record is kept once, so a run whose calls all ran the same way shows one.
+ */
+function recordExecution(runtime, evidence) {
+  const recorded = Object.create(runtime);
+  recorded.invoke = async (...args) => {
+    const result = await runtime.invoke(...args);
+    evidence.results += 1;
+    const entry = executionEvidence(result?.execution);
+    if (entry && !evidence.execution.some((seen) => JSON.stringify(seen) === JSON.stringify(entry))) evidence.execution.push(entry);
+    return result;
+  };
+  return recorded;
+}
+
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (command !== "run") throw dreamError("DREAM_USAGE", "usage: dream run --config /abs/dream.config.json [--dry-run] [--trigger NAME]");
@@ -143,11 +159,13 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     }
     if (args.dryRun && host.store == null) host.store = storeForMissingRoot(host.root);
     let auth = null;
+    let runtimeEvidence;
     if (!host.extract && !args.dryRun) {
-      const runtime = host.runtime
+      runtimeEvidence = { kind: host.runtime ? "host" : config.runtime ? config.runtime.kind : "datum-role", results: 0, execution: [] };
+      const runtime = recordExecution(host.runtime
         ?? (config.runtime
-          ? await createCliRuntime(config.runtime)
-          : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
+          ? await createCliRuntime(config.runtime, { dreamDir })
+          : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE })), runtimeEvidence);
       auth = trackAuthentication(runtime);
       host.extract = auth.extract(await extractForRuntime(auth.runtime));
     }
@@ -158,6 +176,7 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       telemetryFile: config.telemetryFile,
       transcriptRoots: config.transcriptRoots,
       ...(config.dreamDir ? { dreamDir: config.dreamDir } : {}),
+      ...(runtimeEvidence ? { runtimeEvidence } : {}),
       ...Object.fromEntries(["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs", "proposerId", "visibility"].filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
     }).catch((error) => {
       // A sitting whose every pass failed because the runtime refused its credentials is a setup problem, not a failed run.
