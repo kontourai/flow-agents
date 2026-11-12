@@ -279,6 +279,26 @@
       "description": "Eval cases for consolidate: AC1 (related event -> proposal, not mutation); AC2 (apply updates exactly ONE snapshot, links supersedes refs, superseded sources still queryable); AC3 fixture (decision changed across 3 events -> snapshot reflects ONLY latest decision, provenance to all 3); exact-category and explicit-source selection; supersede-not-delete invariant; gate telemetry; contract suite extensions for snapshot semantics."
     },
     {
+      "id": "knowledge.consolidate-incremental-suite",
+      "path": "evals/consolidate-incremental/suite.test.js",
+      "description": "Adapter-parameterized conformance suite for append-mode incremental consolidation (store-contract Addendum L): an adapter conforms when it passes with KNOWLEDGE_ADAPTER set to its module."
+    },
+    {
+      "id": "knowledge.inbound-references-suite",
+      "path": "evals/inbound-references/suite.test.js",
+      "description": "Adapter-parameterized conformance suite for inbound-reference integrity (store-contract Addendum I): citation extraction and resolution, fail-closed on unknown ids, opt-in and read-only scanning."
+    },
+    {
+      "id": "knowledge.freshness-suite",
+      "path": "evals/freshness/suite.test.js",
+      "description": "Adapter-parameterized conformance suite for record freshness (store-contract Addendum J): expires_at / ttl_seconds round-trip, derived stale and superseded status, and the stale-listing query."
+    },
+    {
+      "id": "knowledge.supersede-propagation-suite",
+      "path": "evals/supersede-propagation/suite.test.js",
+      "description": "Adapter-parameterized conformance suite for supersede/retire citer propagation (store-contract Addendum K): one read-only flag per first-degree inbound citer, from store records and opt-in doc globs, carrying the superseding context."
+    },
+    {
       "id": "knowledge.similarity-vector-suite",
       "path": "evals/similarity-vector/suite.test.js",
       "description": "Eval cases for the vector similarity adapter: unit tests (cosineSimilarity math, injectable embed, threshold, fail-closed), drop-in proof (runner.synthesize with injected embed produces valid proposals), and live-gated tests (real ollama nomic-embed-text round-trip \u2014 skipped when ollama unavailable)."

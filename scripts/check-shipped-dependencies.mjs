@@ -161,10 +161,21 @@ export async function collectImports(root, files) {
   return edges;
 }
 
-// Kit asset classes, mirroring ASSET_CLASSES in src/runtime-adapters.ts (the installer's reader).
-const KIT_ASSET_CLASSES = ["flows", "skills", "docs", "adapters", "evals", "assets", "provisions"];
+// Kit asset classes come from the installer's own reader (src/runtime-adapters.ts, compiled), so
+// this check and kit installation cannot disagree about what a kit declares. The compiled module
+// must exist; the CI command builds before running this script.
+async function kitAssetClasses() {
+  const compiled = new URL("../build/src/runtime-adapters.js", import.meta.url);
+  try {
+    const { ASSET_CLASSES } = await import(compiled.href);
+    if (!Array.isArray(ASSET_CLASSES) || ASSET_CLASSES.length === 0) throw new Error("ASSET_CLASSES is not a non-empty array");
+    return ASSET_CLASSES;
+  } catch (error) {
+    throw new Error(`cannot load kit asset classes from ${fileURLToPath(compiled)} (run \`npm run build\` first): ${error.message}`);
+  }
+}
 
-function missingKitAssets(root, files, fileSet) {
+function missingKitAssets(root, files, fileSet, KIT_ASSET_CLASSES) {
   const missing = [];
   for (const manifest of files.filter((file) => /^kits\/[^/]+\/kit\.json$/.test(file))) {
     const kitDir = path.posix.dirname(manifest);
@@ -265,7 +276,7 @@ export async function checkShippedDependencies(root) {
     violations.push({ ...edge, name, why: devOnly.has(name) ? "only in devDependencies" : "not in package.json" });
   }
 
-  const missingAssets = missingKitAssets(root, files, fileSet);
+  const missingAssets = missingKitAssets(root, files, fileSet, await kitAssetClasses());
   const lines = [];
   if (missingAssets.length > 0) {
     lines.push(`shipped-dependencies: FAIL — ${missingAssets.length} asset(s) declared by a shipped kit.json are not in the pack.`);
