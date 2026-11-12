@@ -669,6 +669,15 @@ The following tables show the canonical Flow Agents events and their correspondi
 
 Harness adapters are file sets that the `npm run build:bundles` command generates and the host-specific install script places on disk. The bundle builder (`src/tools/build-universal-bundles.ts`) generates the host config files from the canonical manifest and policy scripts.
 
+Claude Code, Codex, OpenCode and Kiro bundles include standalone public runtime
+imports and owned runtime metadata. The installed Stop hook loads that resolver
+for active kit gate expectations. Kit discovery exempts only the executing
+package's exact physical kits root from artifact-storage refusal; a sibling kit
+in `.flow-agents/` cannot claim that identity through metadata or a symlink.
+Before this exemption, Claude Code global installs could return no active flow
+and fall back to the generic `workflow.*` floor rather than Builder expectations.
+The floor and other gate enforcement rules are unchanged.
+
 **What an adapter must implement**:
 
 1. **Event wiring config** — A host-specific configuration file (e.g., `.claude/settings.json` hooks object, `.codex/hooks.json`) that maps host event names to hook invocations of the canonical hook adapter wrapper — exec-form argv where the host supports it, otherwise a shell-neutral command string. Never a shell wrapper (see the generated pattern below).
