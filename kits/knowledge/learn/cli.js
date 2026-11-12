@@ -3,8 +3,12 @@
  * `flow-agents learn`: mine your existing coding-agent transcripts for corrections you keep repeating, and propose
  * (never apply) rules, skills, hooks or executable checks for a human to ratify. No Flow run or kit adoption needed.
  *
- *   flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--transcripts DIR]... [--ledger PATH]
- *                     [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]
+ *   flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--all-projects] [--transcripts DIR]...
+ *                     [--ledger PATH] [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]
+ *
+ * By default only sessions whose working directory is inside the current Git repository (any subdirectory or
+ * worktree of it) count; see learn/scope.js. `--all-projects` reads every project and warns that their excerpts
+ * will be written into this repository's ledger.
  *
  * The model is the Datum role named by --role (default: the dream run's `extraction-default`), routed through Relay
  * and Dispatch exactly as the dream run's is. --dry-run makes no model call and writes nothing.
@@ -25,14 +29,15 @@ import { modelJudge } from "./judge.js";
 import { learnError, toolInvoker } from "./model.js";
 import { DEFAULT_THRESHOLDS, SOURCE_FAMILY } from "./propose.js";
 import { DEFAULT_SINCE_DAYS, runLearn } from "./run.js";
+import { repoScope } from "./scope.js";
 import { defaultTranscriptRoots } from "./sessions.js";
 
 const CONFIGURATION_CODES = new Set([
-  "LEARN_USAGE", "LEARN_CONFIG_INVALID", "LEARN_ORIGIN_UNAVAILABLE", "LEARN_LEDGER_CORRUPT",
+  "LEARN_USAGE", "LEARN_CONFIG_INVALID", "LEARN_ORIGIN_UNAVAILABLE", "LEARN_LEDGER_CORRUPT", "LEARN_LEDGER_TRACKED", "LEARN_NOT_A_REPOSITORY",
   "DREAM_CONFIG_INVALID", "DREAM_MODEL_UNCONFIGURED", "DREAM_MODEL_UNAVAILABLE", "DREAM_MODEL_UNSUPPORTED",
 ]);
 const DAY_MS = 86_400_000;
-const USAGE = "usage: flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--transcripts DIR]... [--ledger PATH] [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]";
+const USAGE = "usage: flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--all-projects] [--transcripts DIR]... [--ledger PATH] [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]";
 
 /** `30d`, `YYYY-MM-DD` (UTC midnight) or a full ISO-8601 timestamp. Anything else is refused. */
 export function parseSince(value, nowMs) {
@@ -48,11 +53,12 @@ export function parseSince(value, nowMs) {
 const NUMERIC = { "--min-occurrences": "minOccurrences", "--min-sessions": "minSessions", "--min-high-pain": "minHighPain" };
 
 export function parseArgs(argv, nowMs = Date.now()) {
-  const out = { dryRun: false, json: false, transcripts: [], thresholds: {}, since: `${DEFAULT_SINCE_DAYS}d` };
+  const out = { dryRun: false, json: false, allProjects: false, transcripts: [], thresholds: {}, since: `${DEFAULT_SINCE_DAYS}d` };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (flag === "--dry-run") out.dryRun = true;
     else if (flag === "--json") out.json = true;
+    else if (flag === "--all-projects") out.allProjects = true;
     else if (flag === "-h" || flag === "--help") out.help = true;
     else if (["--since", "--transcripts", "--ledger", "--rules-file", "--role", ...Object.keys(NUMERIC)].includes(flag)) {
       const value = argv[(i += 1)];
@@ -78,12 +84,12 @@ export function defaultLedger(env = process.env, cwd = process.cwd()) {
     : path.join(env.TELEMETRY_DATA_DIR ? path.resolve(env.TELEMETRY_DATA_DIR) : cwd, ".kontourai", "telemetry", "learning-review-proposals.jsonl");
 }
 
-/** AGENTS.md, else CLAUDE.md, in the working directory. */
-export function defaultRulesFile(cwd = process.cwd()) {
+/** AGENTS.md, else CLAUDE.md, in `dir` (a symlink to a file counts; readRulesFile then checks its target). */
+export function defaultRulesFile(dir = process.cwd()) {
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const file = path.join(cwd, name);
+    const file = path.join(dir, name);
     try {
-      if (fs.lstatSync(file).isFile()) return file;
+      if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).isFile()) return file;
     } catch {
       // absent
     }
@@ -95,13 +101,14 @@ export function summarize(document) {
   const r = document.report;
   const lines = [
     `flow-agents learn (${SOURCE_FAMILY}, contract ${document.schema} v${document.version})${document.dry_run ? " [dry run: no model calls, nothing written]" : ""}`,
+    `  scope: ${document.scope.kind === "repo" ? `this repository (${document.scope.repo}); ${r.sessions_out_of_scope} sessions from other projects ignored` : "ALL projects"}`,
     `  transcripts: ${r.files_seen} seen, ${r.files_read} read, ${r.sessions_read} sessions${Object.keys(r.files_skipped).length ? `; skipped ${Object.entries(r.files_skipped).map(([k, v]) => `${k}=${v}`).join(", ")}` : ""}`,
     `  user messages: ${r.user_messages} (${Object.entries(r.user_messages_by_origin).sort().map(([k, v]) => `${k}=${v}`).join(", ") || "none"}); only origin human counts`,
     `  human turns in window: ${r.human_turns_in_window} across ${r.human_sessions_in_window} sessions; ${r.continuation_pings_excluded} continuation pings excluded; ${r.candidates} to classify${document.dry_run ? ` in ${r.classify_batches} model batch(es)` : ""}`,
   ];
   if (!document.dry_run && document.outcome === "ok") {
     lines.push(`  classified: ${r.occurrences} general corrections/nudges/frustrations (${r.classified_invalid} refused by validation); ${r.themes} themes, ${r.qualifying_themes} over threshold; ${r.model_calls} model calls`);
-    lines.push(`  effects measured on ratified proposals: ${r.effects_filled}`);
+    lines.push(`  effects measured on ratified proposals: ${r.effects_measured}; themes with an open proposal: ${r.themes_open}; themes held (ratified, not measured as failing): ${r.themes_held}`);
     for (const proposal of document.proposals) {
       const c = proposal.evidence.cost;
       lines.push(`  - [${proposal.already_proposed ? "already proposed" : "NEW"}] ${proposal.proposal_id}`);
@@ -139,7 +146,15 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     for (const root of roots) {
       if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw learnError("LEARN_CONFIG_INVALID", `transcript directory not found: ${root}`);
     }
-    const rulesFile = args.rulesFile ?? defaultRulesFile(cwd);
+    let scope;
+    if (args.allProjects) {
+      scope = { kind: "all-projects" };
+      stderr.write("WARNING: --all-projects reads sessions from every repository on this machine; excerpts of corrections made in other repositories will be written into this repository's ledger.\n");
+    } else {
+      scope = repoScope(cwd);
+      if (!scope) throw learnError("LEARN_NOT_A_REPOSITORY", `${cwd} is not inside a Git repository; run flow-agents learn in the repository to learn for, or pass --all-projects`);
+    }
+    const rulesFile = args.rulesFile ?? defaultRulesFile(scope.kind === "repo" ? scope.root : cwd);
     let invoke;
     if (!args.dryRun) {
       const role = args.role ?? DEFAULT_ROLE;
@@ -148,9 +163,11 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     }
     const document = await runLearn({
       roots,
-      ledgerPath: args.ledger ?? defaultLedger(env, cwd),
+      // The default ledger is at the root of the worktree the command runs in (not a subdirectory of it).
+      ledgerPath: args.ledger ?? defaultLedger(env, scope.kind === "repo" ? scope.root : cwd),
       sinceMs: args.sinceMs,
       nowMs,
+      scope,
       dryRun: args.dryRun,
       thresholds: { ...DEFAULT_THRESHOLDS, ...args.thresholds },
       rulesFile,

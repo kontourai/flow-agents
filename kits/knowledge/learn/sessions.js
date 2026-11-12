@@ -135,15 +135,20 @@ const bump = (counts, key, by = 1) => {
  * scrubbed tail of the assistant message just before it (`context`), which the classifier needs to tell a correction
  * from a factual answer. A message copied into a second transcript (a resumed session) is counted once.
  *
- * @param {{ roots: string[], sinceMs?: number | null, untilMs?: number | null, readMessages?: typeof readRuntimeMessages }} options
+ * `scope(cwd)` decides whether a session belongs to the repository being learned for (learn/scope.js); a session
+ * outside it is counted in `sessions_out_of_scope` and contributes nothing. `scope: null` reads every project.
+ *
+ * @param {{ roots: string[], sinceMs?: number | null, untilMs?: number | null, scope?: ((cwd: string | null) => boolean) | null,
+ *   readMessages?: typeof readRuntimeMessages }} options
  */
-export function readHumanTurns({ roots, sinceMs = null, untilMs = null, readMessages = readRuntimeMessages }) {
+export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = null, readMessages = readRuntimeMessages }) {
   const report = {
     roots: roots.length,
     files_seen: 0,
     files_read: 0,
     files_skipped: {},
     sessions_read: 0,
+    sessions_out_of_scope: 0,
     user_messages: 0,
     user_messages_by_origin: {},
     // Ferry's evidence string for each `unknown` origin (e.g. `claude-code:promptSource=sdk`): says which host
@@ -185,6 +190,10 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, readMess
         continue;
       }
       report.sessions_read += 1;
+      if (scope && !scope(parsed.cwd)) {
+        report.sessions_out_of_scope += 1;
+        continue;
+      }
       const threadId = `${parsed.harness}:${parsed.sessionId}`;
       let lastAssistant = "";
       for (const message of parsed.messages) {

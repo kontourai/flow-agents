@@ -12,8 +12,10 @@ export { clusterRules, parseClusters, slugify } from "./cluster.js";
 export { RELATIONS, modelJudge, parseJudgement, readRulesFile } from "./judge.js";
 export { toolInvoker } from "./model.js";
 export {
-  CONTRACT_VERSION, DEFAULT_THRESHOLDS, ENFORCEMENT_LADDER, SOURCE_FAMILY, aggregateThemes, buildProposal, fillEffects, proposalId, qualifies,
-  readLedger, recommendEnforcement, reviewItemFor,
+  CONTRACT_VERSION, DEFAULT_EFFECT, DEFAULT_THRESHOLDS, ENFORCEMENT_LADDER, SOURCE_FAMILY, aggregate, buildProposal, fillEffects, lineageRoot,
+  measureEffect, mergeIntoCurrent, proposalId, qualifies, readLedger, reviewItemFor, themeState,
 } from "./propose.js";
+export { acquireLedgerLock, ledgerLockPath } from "./ledger-lock.js";
+export { assertUntracked, repoScope } from "./scope.js";
 export { DEFAULT_SINCE_DAYS, runLearn } from "./run.js";
 export { defaultTranscriptRoots, humanTurns, isHumanTurn, readHumanTurns } from "./sessions.js";

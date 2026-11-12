@@ -48,6 +48,21 @@ command -v jq >/dev/null 2>&1 || {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
+LEDGER_LOCK_HELPER="$SCRIPT_DIR/ledger-lock.mjs"
+
+# The ledger lock (shared with flow-agents learn and the other script): taken for the whole
+# read-modify-write, owned by this script's pid, released on exit. A lock still held after
+# LEARNING_REVIEW_LOCK_TIMEOUT_MS (default 10000) refuses with nothing written.
+take_ledger_lock() {
+  local who="$1"
+  command -v node >/dev/null 2>&1 || { echo "$who: node is required for the ledger lock" >&2; exit 1; }
+  if ! ledger_lock="$(node "$LEDGER_LOCK_HELPER" acquire "$ledger_path" "$$")"; then
+    echo "$who: the ledger is locked by another writer ($ledger_path.lock); nothing was written" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2086 # epoch and token are two words on purpose
+  trap 'node "$LEDGER_LOCK_HELPER" release "$ledger_path" $ledger_lock >/dev/null 2>&1' EXIT
+}
 default_log="${TELEMETRY_ECONOMICS_LOG_FILE:-${TELEMETRY_DATA_DIR:-${SCRIPT_DIR}/../..}/.kontourai/telemetry/economics.jsonl}"
 default_sessions_root="${SCRIPT_DIR}/../../.kontourai/flow-agents"
 default_ledger="${LEARNING_REVIEW_PROPOSALS_LEDGER:-${TELEMETRY_DATA_DIR:-${SCRIPT_DIR}/../..}/.kontourai/telemetry/learning-review-proposals.jsonl}"
@@ -419,6 +434,7 @@ current_output="$(jq -c -n \
 # ---- Ledger read + de-dupe + effect-fill (shell + jq per-line, not a single jq pass) ----
 ledger_dir="$(dirname "$ledger_path")"
 mkdir -p "$ledger_dir" 2>/dev/null || true
+take_ledger_lock learning-review-proposals
 
 existing_ledger="[]"
 if [[ -s "$ledger_path" ]]; then

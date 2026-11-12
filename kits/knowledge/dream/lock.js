@@ -82,13 +82,16 @@ function epochHeld(lock, epoch) {
 
 /**
  * @param {string} lock absolute path of the lock directory
- * @param {{ now?: () => number }} [options]
- * @returns {() => void} release. Never throws.
+ * @param {{ now?: () => number, pid?: number, lockedCode?: string, holder?: string }} [options]
+ *   `pid` is the process the epoch names as owner (default this one): a short-lived helper can take the lock on behalf
+ *   of the shell script that started it, and the lock goes stale when that script exits.
+ * @returns {(() => void) & { epoch: number, token: string }} release (never throws), carrying the epoch and token so
+ *   another process can release it with `releaseLockEpoch`.
  */
-export function acquireDreamLock(lock, { now = Date.now } = {}) {
+export function acquireDreamLock(lock, { now = Date.now, pid = process.pid, lockedCode = "DREAM_LOCKED", holder = "another dream run" } = {}) {
   fs.mkdirSync(lock, { recursive: true, mode: 0o700 });
   const token = randomBytes(12).toString("hex");
-  const held = () => dreamError("DREAM_LOCKED", `another dream run holds the lock (${lock})`);
+  const held = () => dreamError(lockedCode, `${holder} holds the lock (${lock})`);
   const started = now();
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     const top = epochs(lock).at(-1) ?? 0;
@@ -99,7 +102,7 @@ export function acquireDreamLock(lock, { now = Date.now } = {}) {
     const staging = path.join(lock, `.stage-${token}-${attempt}`);
     fs.mkdirSync(staging, { mode: 0o700 });
     try {
-      fs.writeFileSync(path.join(staging, "owner.json"), `${JSON.stringify({ pid: process.pid, started_at: started, token })}\n`, { mode: 0o600 });
+      fs.writeFileSync(path.join(staging, "owner.json"), `${JSON.stringify({ pid, started_at: started, token })}\n`, { mode: 0o600 });
       fs.renameSync(staging, dir); // atomic, and fails if the epoch exists
     } catch (error) {
       fs.rmSync(staging, { recursive: true, force: true });
@@ -119,15 +122,20 @@ export function acquireDreamLock(lock, { now = Date.now } = {}) {
         // Old epochs are housekeeping. Failing to remove one never costs us the lock we already hold.
       }
     }
-    return () => {
-      // Mark, never delete: the highest epoch must stay so that numbers cannot be reused.
-      if (readJson(path.join(dir, "owner.json"))?.token !== token) return;
-      try {
-        fs.writeFileSync(path.join(dir, "released"), "\n", { mode: 0o600 });
-      } catch {
-        // An unreleased epoch names this process, so it goes stale the moment the process exits.
-      }
-    };
+    return Object.assign(() => releaseLockEpoch(lock, mine, token), { epoch: mine, token });
   }
   throw held();
+}
+
+/** Release epoch `epoch` of `lock` if `token` still owns it. Never throws. */
+export function releaseLockEpoch(lock, epoch, token) {
+  if (!EPOCH.test(String(epoch))) return;
+  const dir = path.join(lock, String(epoch));
+  // Mark, never delete: the highest epoch must stay so that numbers cannot be reused.
+  if (readJson(path.join(dir, "owner.json"))?.token !== token) return;
+  try {
+    fs.writeFileSync(path.join(dir, "released"), "\n", { mode: 0o600 });
+  } catch {
+    // An unreleased epoch names its owner pid, so it goes stale the moment that process exits.
+  }
 }

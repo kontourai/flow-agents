@@ -12,26 +12,45 @@
 
 import * as fs from "node:fs";
 
+import { assertOwnerControlledFile } from "../dream/config.js";
 import { scrubResidueText } from "../promote/runtime-redaction.js";
-import { UNTRUSTED, learnError } from "./model.js";
+import { UNTRUSTED, learnError, retryMalformedOnce } from "./model.js";
 
 export const MAX_RULES_FILE_BYTES = 128 * 1024;
 export const MAX_RULES_FILE_LINES = 600;
 export const RELATIONS = Object.freeze(["conflicts", "covers", "none"]);
 
-/** The rules file as numbered, scrubbed lines; `truncated` when it is longer than the judge is shown. */
+/**
+ * The rules file as numbered, scrubbed lines; `truncated` when it is longer than the judge is shown.
+ *
+ * A symlinked rules file (a dotfiles checkout, say) is followed to its target, which must then pass the kit's
+ * ownership rule (`assertOwnerControlledFile`: a regular file owned by this user, not group or world writable, in
+ * directories no other user can write). Any failure to resolve or open it (a loop, a dangling link, a directory) is a
+ * configuration error, `LEARN_CONFIG_INVALID`, never a crash.
+ *
+ * The whole file is scrubbed BEFORE it is split into lines, so a secret that spans lines (a PEM private key block)
+ * is still recognised. A byte-order mark and CRLF line ends are removed.
+ */
 export function readRulesFile(file) {
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   let text;
   try {
-    const stat = fs.fstatSync(fd);
-    if (!stat.isFile()) throw learnError("LEARN_CONFIG_INVALID", `rules file is not a regular file: ${file}`);
-    if (stat.size > MAX_RULES_FILE_BYTES) throw learnError("LEARN_CONFIG_INVALID", `rules file is over ${MAX_RULES_FILE_BYTES} bytes: ${file}`);
-    text = fs.readFileSync(fd, "utf8");
-  } finally {
-    fs.closeSync(fd);
+    const target = assertOwnerControlledFile(fs.realpathSync(file), "rules file");
+    const fd = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    try {
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile()) throw learnError("LEARN_CONFIG_INVALID", `rules file is not a regular file: ${file}`);
+      if (stat.size > MAX_RULES_FILE_BYTES) throw learnError("LEARN_CONFIG_INVALID", `rules file is over ${MAX_RULES_FILE_BYTES} bytes: ${file}`);
+      text = fs.readFileSync(fd, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (error) {
+    if (error?.code === "LEARN_CONFIG_INVALID") throw error;
+    const reason = error?.code === "DREAM_CONFIG_INVALID" ? error.message : `${error?.code ?? "error"}`;
+    throw learnError("LEARN_CONFIG_INVALID", `rules file ${file} cannot be used (${reason})`);
   }
-  const all = text.split("\n").map((line) => scrubResidueText(line));
+  const all = scrubResidueText(text.replace(/^\uFEFF/, "")).split(/\r?\n/);
+  if (all.length > 1 && all[all.length - 1] === "") all.pop();
   return { file, lines: all.slice(0, MAX_RULES_FILE_LINES), truncated: all.length > MAX_RULES_FILE_LINES };
 }
 
@@ -51,13 +70,14 @@ export const JUDGE_TOOL = Object.freeze({
 
 export function judgePrompt(rule, rules) {
   return [
-    "A developer's coding agent keeps being corrected. The correction implies this proposed rule:",
-    `PROPOSED RULE: ${rule}`,
-    "Below are the numbered lines of the rule file the agent already reads.",
-    "Decide whether one line conflicts with the proposed rule (following both is impossible or they pull opposite ways), already covers it (says the same thing), or neither. Cite the single most relevant line.",
+    "A developer's coding agent keeps being corrected. The correction implies a proposed rule, given below as a JSON string.",
+    "The rule file the agent already reads is given as a JSON array of numbered lines.",
+    "Decide whether one line conflicts with the proposed rule (following both is impossible or they pull opposite ways), already covers it (says the same thing), or neither. Cite the single most relevant line by its number.",
     UNTRUSTED,
     "",
-    ...rules.lines.map((line, index) => `${index + 1}: ${line}`),
+    `PROPOSED_RULE_JSON: ${JSON.stringify(rule)}`,
+    "RULE_FILE_LINES_JSON:",
+    `[\n${rules.lines.map((text, index) => JSON.stringify({ line: index + 1, text })).join(",\n")}\n]`,
   ].join("\n");
 }
 
@@ -73,7 +93,7 @@ export function parseJudgement(input, rules) {
   return { relation: input.relation, line, text: rules.lines[line - 1].trim().slice(0, 300), explanation };
 }
 
-/** A model-backed judge: `(rule, rules) => Promise<judgement>`. */
-export function modelJudge(invoke) {
-  return async (rule, rules) => parseJudgement(await invoke({ prompt: judgePrompt(scrubResidueText(rule), rules), tool: JUDGE_TOOL }), rules);
+/** A model-backed judge: `(rule, rules) => Promise<judgement>`. A malformed answer is asked once more. */
+export function modelJudge(invoke, { onRetry } = {}) {
+  return (rule, rules) => retryMalformedOnce(async () => parseJudgement(await invoke({ prompt: judgePrompt(scrubResidueText(rule), rules), tool: JUDGE_TOOL }), rules), onRetry);
 }

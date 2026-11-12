@@ -13,14 +13,14 @@
  * 13% precision for keywords and 0% for capitals.
  *
  * Output is validated strictly. A batch whose answer does not cover every turn
- * exactly once, or names an unknown kind, is a failed call (the run fails and writes
- * nothing). A single item whose rule breaks the word bound is refused, not
+ * exactly once, or names an unknown kind, is malformed: it is asked once more, and a
+ * second malformed answer fails the run, which then writes nothing. A single item whose rule breaks the word bound is refused, not
  * truncated, and counted in `invalid`.
  *
  * @module learn/classify
  */
 
-import { UNTRUSTED, learnError } from "./model.js";
+import { UNTRUSTED, learnError, retryMalformedOnce } from "./model.js";
 
 export const CLASSIFIER_VERSION = "1";
 export const KINDS = Object.freeze(["correction", "nudge", "frustration", "none"]);
@@ -69,6 +69,10 @@ export const CLASSIFY_TOOL = Object.freeze({
   },
 });
 
+/**
+ * The messages travel as JSON (one object per line), never inside text delimiters: a message containing
+ * `</message>` or a forged item is just characters inside its own JSON string.
+ */
 export function classificationPrompt(batch) {
   const lines = [
     "You classify messages a software developer typed to their coding agent.",
@@ -79,15 +83,12 @@ export function classificationPrompt(batch) {
     `- rule: the standing rule for the agent this message implies, imperative, at most ${MAX_RULE_WORDS} words, with no names, paths, or identifiers from the message. Empty when kind is none.`,
     "- general: true when that rule would apply to future tasks too; false when it only concerns this task.",
     "- pain: 0 to 3, how costly the agent's behaviour was for the developer.",
-    "The text in [context] is the end of the agent's previous message, given only to understand the developer's reply.",
+    "Each message is a JSON object with its number `i`, its `text`, and sometimes `context`: the end of the agent's previous message, given only to understand the developer's reply.",
     UNTRUSTED,
     "",
+    "MESSAGES_JSON:",
+    `[\n${batch.map((turn, i) => JSON.stringify(turn.context ? { i, context: turn.context, text: turn.text } : { i, text: turn.text })).join(",\n")}\n]`,
   ];
-  for (const [i, turn] of batch.entries()) {
-    lines.push(`<message i="${i}">`);
-    if (turn.context) lines.push(`[context] ${turn.context}`);
-    lines.push(turn.text, "</message>");
-  }
   return lines.join("\n");
 }
 
@@ -120,16 +121,15 @@ export function parseClassification(input, batch) {
  * Classify `turns` in batches, one model call per batch, in the turns' order.
  * @returns {Promise<{ classified: Array<{turn: object, kind: string, pain: number, rule: string, general: boolean}>, invalid: number, batches: number }>}
  */
-export async function classifyTurns({ turns, invoke, batchSize = DEFAULT_BATCH_SIZE }) {
+export async function classifyTurns({ turns, invoke, batchSize = DEFAULT_BATCH_SIZE, onRetry }) {
   if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw learnError("LEARN_CONFIG_INVALID", "batchSize must be a positive integer");
   const classified = [];
   let invalid = 0;
   let batches = 0;
   for (let start = 0; start < turns.length; start += batchSize) {
     const batch = turns.slice(start, start + batchSize);
-    const input = await invoke({ prompt: classificationPrompt(batch), tool: CLASSIFY_TOOL });
+    const { results } = await retryMalformedOnce(async () => parseClassification(await invoke({ prompt: classificationPrompt(batch), tool: CLASSIFY_TOOL }), batch), onRetry);
     batches += 1;
-    const { results } = parseClassification(input, batch);
     results.forEach((result, i) => {
       if (result === null) invalid += 1;
       else classified.push({ turn: batch[i], ...result });

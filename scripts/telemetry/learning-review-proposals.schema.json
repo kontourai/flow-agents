@@ -6,6 +6,19 @@
   "type": "object",
   "additionalProperties": true,
   "required": ["schema", "version", "window", "outcome", "aggregates", "proposals"],
+  "allOf": [
+    {
+      "description": "A v0.1 document is exactly what v0.1 allowed: no source family, no v0.2 outcome, and only v0.1 patterns.",
+      "if": { "properties": { "version": { "const": "0.1" } }, "required": ["version"] },
+      "then": {
+        "not": { "required": ["source_family"] },
+        "properties": {
+          "outcome": { "enum": ["ok", "insufficient-data"] },
+          "proposals": { "items": { "properties": { "pattern": { "enum": ["kit-review-cost-inflation", "gate-false-block-review", "gate-well-calibrated"] } } } }
+        }
+      }
+    }
+  ],
   "properties": {
     "schema": { "const": "kontour.learning-review-proposals" },
     "version": { "type": "string", "enum": ["0.1", "0.2"] },
@@ -82,6 +95,7 @@
             "properties": {
               "theme_id": { "type": "string" },
               "label": { "type": "string" },
+              "state": { "enum": ["propose", "open", "hold"] },
               "occurrences": { "type": "integer", "minimum": 1 },
               "sessions": { "type": "integer", "minimum": 1 },
               "high_pain": { "type": "integer", "minimum": 0 },
@@ -172,12 +186,22 @@
             "metric": { "type": "string" },
             "before": { "type": ["number", "null"] },
             "after": { "type": ["number", "null"] },
-            "moved": { "type": "string", "enum": ["improved", "worsened", "unchanged"] }
+            "moved": { "type": "string", "enum": ["improved", "worsened", "unchanged", "insufficient-data"] }
           }
         },
         "already_proposed": { "type": "boolean" }
       },
-      "allOf": [{ "$ref": "#/$defs/correctionRecurrence" }]
+      "allOf": [
+        { "$ref": "#/$defs/correctionRecurrence" },
+        {
+          "if": { "properties": { "pattern": { "const": "kit-review-cost-inflation" } }, "required": ["pattern"] },
+          "then": { "properties": { "target": { "properties": { "kind": { "const": "kit" } } } } }
+        },
+        {
+          "if": { "properties": { "pattern": { "enum": ["gate-false-block-review", "gate-well-calibrated"] } }, "required": ["pattern"] },
+          "then": { "properties": { "target": { "properties": { "kind": { "const": "gate" } } } } }
+        }
+      ]
     },
     "ruleLine": {
       "type": "object",
@@ -195,7 +219,7 @@
       "description": "v0.2: a correction-recurrence proposal (flow-agents learn) cites Thread messages (never raw transcripts), recommends an enforcement rung, and records whether a model judge found a conflicting or covering line in the target rule file.",
       "if": { "properties": { "pattern": { "const": "correction-recurrence" } }, "required": ["pattern"] },
       "then": {
-        "required": ["source", "theme", "rule", "severity", "enforcement", "conflict", "conflict_check"],
+        "required": ["source", "scope", "theme", "rule", "severity", "enforcement", "conflict", "conflict_check"],
         "properties": {
           "severity": { "const": "advisory" },
           "source": {
@@ -206,6 +230,13 @@
               "producer": { "type": "string" },
               "contract_version": { "const": "0.2" }
             }
+          },
+          "scope": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": { "kind": { "enum": ["repo", "all-projects"] }, "repo": { "type": "string" } },
+            "if": { "properties": { "kind": { "const": "repo" } } },
+            "then": { "required": ["repo"] }
           },
           "target": { "properties": { "kind": { "enum": ["agents-md", "skill", "hook", "veritas-check"] } } },
           "theme": {

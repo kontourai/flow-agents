@@ -23,6 +23,7 @@ export const THEME_RULES = {
   "act-on-recommendation": "Act on your own recommendation instead of stopping to ask",
   "batch-prs": "Batch related changes into the fewest pull requests",
   "pin-sha": "Pin commit SHAs in permalinks instead of branch names",
+  "fetch-rebase": "Fetch and rebase on main before starting work",
 };
 
 const uuidFor = (session, n) => `${session.slice(0, 8)}-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -32,13 +33,13 @@ const uuidFor = (session, n) => `${session.slice(0, 8)}-0000-4000-8000-${String(
  * A plain `{ text }` is a person typing in the composer (`promptSource: "typed"`, `origin.kind: "human"`); `bare: true`
  * writes the record with no origin signal.
  */
-export function claudeSession(sessionId, startMs, turns) {
+export function claudeSession(sessionId, startMs, turns, { cwd = CWD } = {}) {
   const lines = [];
   let parent = null;
   turns.forEach((turn, n) => {
     const uuid = uuidFor(sessionId, n + 1);
     const timestamp = new Date(startMs + n * 60_000).toISOString();
-    const common = { parentUuid: parent, isSidechain: turn.isSidechain === true, uuid, timestamp, cwd: CWD, sessionId, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "cli" };
+    const common = { parentUuid: parent, isSidechain: turn.isSidechain === true, uuid, timestamp, cwd, sessionId, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "cli" };
     if (turn.role === "assistant") {
       lines.push({ ...common, message: { model: "claude-opus-5-5", id: `msg_${n}`, type: "message", role: "assistant", content: [{ type: "text", text: turn.text }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 5 } }, requestId: `req_${n}`, type: "assistant" });
     } else {
@@ -63,7 +64,7 @@ export function transcriptRoot(sessions) {
   const root = makeFixtureDir("learn-transcripts-");
   const dir = path.join(root, "-Users-fixture-user-dev-widget-service");
   fs.mkdirSync(dir, { recursive: true });
-  for (const { id, startMs, turns } of sessions) fs.writeFileSync(path.join(dir, `${id}.jsonl`), claudeSession(id, startMs, turns));
+  for (const { id, startMs, turns, cwd } of sessions) fs.writeFileSync(path.join(dir, `${id}.jsonl`), claudeSession(id, startMs, turns, { cwd }));
   return root;
 }
 
@@ -113,14 +114,29 @@ export const testReader = () => (ferryDerivesOrigin() ? undefined : readMessages
 export const fix = (theme, pain = 1, kind = "correction", words = "please do this differently next time") => `${words} [fix:${theme}:${kind}:${pain}]`;
 
 /**
+ * The JSON that follows `marker` in a prompt. The learn prompts put each block's JSON on the next line: either a
+ * one-line array, or `[`, one item per line, `]`.
+ */
+export function promptJson(prompt, marker) {
+  const at = prompt.indexOf(`${marker}\n`);
+  if (at === -1) return null;
+  const rest = prompt.slice(at + marker.length + 1);
+  const block = rest.startsWith("[\n") ? rest.slice(0, rest.indexOf("\n]") + 2) : rest.split("\n")[0];
+  return JSON.parse(block);
+}
+
+/**
  * A recording Relay ModelRuntime. It answers each forced tool call deterministically from the fixture tags, and keeps
  * every request it was sent (the privacy proof reads them).
  *  - classify: `[fix:<theme>:<kind>:<pain>]` -> that kind/pain and THEME_RULES[theme]; `[oneoff:<theme>]` -> general false; else none
- *  - cluster: a rule equal to an existing theme label joins it; otherwise one new theme per distinct rule
+ *  - cluster: a rule equal to an existing theme label joins it; otherwise one new theme per distinct rule, with
+ *    `parents[rule]` (a label) naming its parent theme when that label is an existing theme
  *  - judge: `judgements[rule] = { relation, needle }` -> the first line containing needle
+ *  - `failOn: tool` answers that tool with no tool call every time; `failOnce: tool` only the first time
  */
-export function recordingRuntime({ judgements = {}, failOn = null } = {}) {
+export function recordingRuntime({ judgements = {}, parents = {}, failOn = null, failOnce = null } = {}) {
   const requests = [];
+  const failedOnce = new Set();
   const result = (name, input, stopReason = "tool_use") => ({ provider: "fake", model: "fake-model", modelSource: "configured", outputText: "", toolCalls: name ? [{ id: `call-${requests.length}`, name, input }] : [], usage: { totalTokens: 1 }, latencyMs: 1, stopReason });
   return {
     id: "recording-runtime",
@@ -131,33 +147,37 @@ export function recordingRuntime({ judgements = {}, failOn = null } = {}) {
       const tool = request.tools[0].name;
       const prompt = request.messages[0].content;
       if (failOn === tool) return result(null, null);
+      if (failOnce === tool && !failedOnce.has(tool)) {
+        failedOnce.add(tool);
+        return result(null, null);
+      }
       if (tool === "record_turn_classifications") {
-        const items = [...prompt.matchAll(/<message i="(\d+)">([\s\S]*?)<\/message>/g)].map(([, i, body]) => {
-          const tag = /\[fix:([a-z-]+):([a-z]+):(\d)\]/.exec(body);
-          const oneoff = /\[oneoff:([a-z-]+)\]/.exec(body);
-          if (tag) return { i: Number(i), kind: tag[2], pain: Number(tag[3]), rule: THEME_RULES[tag[1]], general: true };
-          if (oneoff) return { i: Number(i), kind: "correction", pain: 1, rule: THEME_RULES[oneoff[1]], general: false };
-          return { i: Number(i), kind: "none", pain: 0, rule: "", general: false };
+        const items = promptJson(prompt, "MESSAGES_JSON:").map(({ i, text }) => {
+          const tag = /\[fix:([a-z-]+):([a-z]+):(\d)\]/.exec(text);
+          const oneoff = /\[oneoff:([a-z-]+)\]/.exec(text);
+          if (tag) return { i, kind: tag[2], pain: Number(tag[3]), rule: THEME_RULES[tag[1]], general: true };
+          if (oneoff) return { i, kind: "correction", pain: 1, rule: THEME_RULES[oneoff[1]], general: false };
+          return { i, kind: "none", pain: 0, rule: "", general: false };
         });
         return result(tool, { items });
       }
       if (tool === "assign_rule_themes") {
-        const existing = new Map([...prompt.matchAll(/^- ([a-z0-9-]+): (.+)$/gm)].map(([, id, label]) => [label, id]));
-        const rules = [...prompt.matchAll(/^(\d+)\. (.+)$/gm)].map(([, i, rule]) => ({ i: Number(i), rule }));
+        const existing = new Map(promptJson(prompt, "EXISTING_THEMES_JSON:").map(({ id, label }) => [label, id]));
+        const rules = promptJson(prompt, "RULES_JSON:");
         const created = new Map();
         const assignments = rules.map(({ i, rule }) => {
           if (existing.has(rule)) return { i, theme: existing.get(rule) };
           if (!created.has(rule)) created.set(rule, `new${created.size}`);
           return { i, theme: created.get(rule) };
         });
-        return result(tool, { new_themes: [...created].map(([label, key]) => ({ key, label })), assignments });
+        return result(tool, { new_themes: [...created].map(([label, key]) => ({ key, label, parent: existing.get(parents[label]) ?? null })), assignments });
       }
       if (tool === "judge_rule_against_file") {
-        const rule = /PROPOSED RULE: (.+)/.exec(prompt)[1];
+        const rule = JSON.parse(/PROPOSED_RULE_JSON: (.+)/.exec(prompt)[1]);
         const wanted = judgements[rule];
         if (!wanted) return result(tool, { relation: "none", line: null, explanation: "unrelated" });
-        const line = [...prompt.matchAll(/^(\d+): (.*)$/gm)].find(([, , text]) => text.includes(wanted.needle));
-        return result(tool, { relation: wanted.relation, line: wanted.line ?? (line ? Number(line[1]) : 9999), explanation: `${wanted.relation} by fixture` });
+        const line = promptJson(prompt, "RULE_FILE_LINES_JSON:").find(({ text }) => text.includes(wanted.needle));
+        return result(tool, { relation: wanted.relation, line: wanted.line ?? (line ? line.line : 9999), explanation: `${wanted.relation} by fixture` });
       }
       throw new Error(`unexpected tool ${tool}`);
     },
@@ -165,9 +185,10 @@ export function recordingRuntime({ judgements = {}, failOn = null } = {}) {
 }
 
 /** `n` sessions, each with the given human turns between assistant replies, one day apart, ending before NOW_MS. */
-export function sessionsWith(perSession, { firstDay = 20, idOffset = 0 } = {}) {
+export function sessionsWith(perSession, { firstDay = 20, idOffset = 0, cwd } = {}) {
   return perSession.map((texts, n) => ({
     id: sessionId(idOffset + n + 1),
+    ...(cwd ? { cwd } : {}),
     startMs: NOW_MS - (firstDay - n) * DAY_MS,
     turns: texts.flatMap((text) => (typeof text === "string" ? [{ role: "assistant", text: "Here is what I did." }, { text }] : [{ role: "assistant", text: "Here is what I did." }, text])),
   }));

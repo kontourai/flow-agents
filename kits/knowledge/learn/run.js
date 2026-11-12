@@ -1,13 +1,14 @@
 /**
  * The correction-recurrence learning loop:
  *
- *   transcripts -> human turns only (origin.kind === "human") -> drop continuation pings
+ *   transcripts of this repository's sessions -> human turns only (origin.kind === "human") -> drop continuation pings
  *     -> classify (model) -> keep general corrections/nudges/frustration -> cluster into themes (model)
- *     -> threshold -> enforcement rung + conflict judge (model) -> proposals
- *     -> effect-fill ratified proposals -> ledger + Survey review items
+ *     -> measure ratified proposals -> per theme: history decides what may be proposed and from when occurrences count
+ *     -> threshold -> conflict judge (model) -> proposals
+ *     -> under the ledger lock: re-read, merge by proposal_id, write the review queue, then the ledger
  *
- * All model work happens before the first write, so a failed call leaves the ledger as it was. A dry run reads,
- * counts, and returns; it makes no model call and writes nothing.
+ * All model work happens before the lock is taken and before the first write, so a failed call leaves everything as
+ * it was. A dry run reads, counts, and returns; it makes no model call and writes nothing.
  *
  * @module learn/run
  */
@@ -17,11 +18,13 @@ import * as path from "node:path";
 import { CLASSIFIER_VERSION, DEFAULT_BATCH_SIZE, batchCount, classifyTurns, isContinuationPing } from "./classify.js";
 import { clusterRules } from "./cluster.js";
 import { readRulesFile } from "./judge.js";
+import { acquireLedgerLock, DEFAULT_LOCK_TIMEOUT_MS } from "./ledger-lock.js";
 import { learnError } from "./model.js";
 import {
-  CONTRACT, CONTRACT_VERSION, DEFAULT_EFFECT_MIN_DAYS, DEFAULT_THRESHOLDS, SOURCE_FAMILY, aggregateThemes, buildProposal, fillEffects,
-  highPainCount, isCorrectionEntry, ledgerThemes, qualifies, readLedger, reviewItemsPath, writeLedger, writeReviewItems,
+  CONTRACT, CONTRACT_VERSION, DEFAULT_EFFECT, DEFAULT_THRESHOLDS, SOURCE_FAMILY, aggregate, buildProposal, fillEffects, isCorrectionEntry,
+  ledgerThemes, lineageRoot, mergeIntoCurrent, qualifies, readLedger, reviewItemsPath, themeState, writeMergedLedger, writeReviewItems,
 } from "./propose.js";
+import { assertUntracked, scopeRecord } from "./scope.js";
 import { readHumanTurns } from "./sessions.js";
 
 export const DEFAULT_MIN_WINDOW_SESSIONS = 3;
@@ -31,14 +34,17 @@ export const DEFAULT_SINCE_DAYS = 30;
  * @param {object} options
  * @param {string[]} options.roots  transcript roots to read
  * @param {string} options.ledgerPath  the learning-review-proposals ledger
+ * @param {{kind: "repo", repo: string, matches: Function} | {kind: "all-projects"}} options.scope  which sessions count
  * @param {number|null} [options.sinceMs]
  * @param {number} [options.nowMs]
  * @param {boolean} [options.dryRun]
  * @param {(request: {prompt: string, tool: object}) => Promise<object>} [options.invoke]  the model; required unless dryRun
- * @param {(rule: string, rules: object) => Promise<object>} [options.judge]  the conflict judge; defaults to none (unchecked)
+ * @param {(rule: string, rules: object) => Promise<object>} [options.judge]  the conflict judge
  * @param {string|null} [options.rulesFile]  the rule file proposals target and are judged against
  * @param {object} [options.thresholds]
+ * @param {object} [options.effect]  effect statistics (`minDays`, `minExpected`, `tolerance`)
  * @param {Function} [options.readMessages]  transcript reader seam (tests)
+ * @param {(stage: string) => void | Promise<void>} [options.onStage]  called at stage boundaries (tests inject here)
  */
 export async function runLearn(options) {
   const nowMs = options.nowMs ?? Date.now();
@@ -48,12 +54,26 @@ export async function runLearn(options) {
   for (const [key, value] of Object.entries(thresholds)) {
     if (!Number.isSafeInteger(value) || value < 0) throw learnError("LEARN_CONFIG_INVALID", `threshold ${key} must be a non-negative integer`);
   }
+  const effect = { ...DEFAULT_EFFECT, ...(options.effect ?? {}) };
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
   const minWindowSessions = options.minWindowSessions ?? DEFAULT_MIN_WINDOW_SESSIONS;
+  const stage = async (name) => options.onStage?.(name);
   if (!options.ledgerPath || !path.isAbsolute(options.ledgerPath)) throw learnError("LEARN_CONFIG_INVALID", "ledgerPath must be an absolute path");
+  if (options.scope?.kind !== "repo" && options.scope?.kind !== "all-projects") throw learnError("LEARN_CONFIG_INVALID", "a scope (this repository, or all projects) is required");
   if (!dryRun && typeof options.invoke !== "function") throw learnError("LEARN_CONFIG_INVALID", "a model (invoke) is required unless dryRun");
+  const queuePath = options.reviewItemsPath ?? reviewItemsPath(options.ledgerPath);
+  if (!dryRun) {
+    // Excerpts of transcripts must never land where Git would commit them.
+    assertUntracked(options.ledgerPath);
+    assertUntracked(queuePath);
+  }
+  const scope = scopeRecord(options.scope);
 
-  const { turns, report: read } = readHumanTurns({ roots: options.roots, sinceMs, untilMs: nowMs, ...(options.readMessages ? { readMessages: options.readMessages } : {}) });
+  const { turns, report: read } = readHumanTurns({
+    roots: options.roots, sinceMs, untilMs: nowMs,
+    scope: options.scope.kind === "repo" ? options.scope.matches : null,
+    ...(options.readMessages ? { readMessages: options.readMessages } : {}),
+  });
   const candidates = turns.filter((turn) => !isContinuationPing(turn.text));
   const ledger = readLedger(options.ledgerPath); // strict, read-only: a corrupt ledger stops the run here
   const report = {
@@ -66,16 +86,20 @@ export async function runLearn(options) {
     themes: 0,
     themes_created: 0,
     qualifying_themes: 0,
+    themes_held: 0,
+    themes_open: 0,
     ledger_entries: ledger.entries.length,
     ledger_correction_entries: ledger.entries.filter(isCorrectionEntry).length,
-    effects_filled: 0,
+    effects_measured: 0,
     model_calls: 0,
+    model_retries: 0,
   };
   const window = { since: sinceMs, until: nowMs };
   const document = {
     schema: CONTRACT,
     version: CONTRACT_VERSION,
     source_family: SOURCE_FAMILY,
+    scope,
     window,
     records_considered: candidates.length,
     outcome: "ok",
@@ -85,6 +109,7 @@ export async function runLearn(options) {
     report,
     dry_run: dryRun,
   };
+  if (scope.kind === "all-projects") document.notes.push("all projects: sessions from every repository were read, and their excerpts are written into this ledger");
 
   // Ferry derives origin from 0.8.0. A reader that sees user messages but none with an origin cannot tell a person
   // from an agent, and must not report "no corrections" as if it had looked.
@@ -109,36 +134,37 @@ export async function runLearn(options) {
   }
   if (dryRun) return document;
 
-  // ── model work (nothing is written until all of it has succeeded) ────────────────────────────────────────────────
+  // ── model work (nothing is locked or written until all of it has succeeded) ──────────────────────────────────────
   const invoke = async (request) => {
     report.model_calls += 1;
     return options.invoke(request);
   };
-  const { classified, invalid } = await classifyTurns({ turns: candidates, invoke, batchSize });
+  const onRetry = () => {
+    report.model_retries += 1;
+  };
+  const { classified, invalid } = await classifyTurns({ turns: candidates, invoke, batchSize, onRetry });
   report.classified_invalid = invalid;
   const occurrences = classified.filter((item) => item.kind !== "none" && item.general);
   report.occurrences = occurrences.length;
 
-  const { themeOf, themes, created } = occurrences.length
-    ? await clusterRules({ rules: occurrences.map((item) => ({ key: item.turn.key, rule: item.rule })), existingThemes: ledgerThemes(ledger.entries), invoke })
-    : { themeOf: new Map(), themes: new Map(), created: [] };
+  const existingThemes = ledgerThemes(ledger.entries);
+  const { themeOf, themes, parents, created } = occurrences.length
+    ? await clusterRules({ rules: occurrences.map((item) => ({ key: item.turn.key, rule: item.rule })), existingThemes, invoke, onRetry })
+    : { themeOf: new Map(), themes: new Map(existingThemes.map((theme) => [theme.id, theme.label])), parents: new Map(existingThemes.filter((theme) => theme.parent).map((theme) => [theme.id, theme.parent])), created: [] };
   report.themes_created = created.length;
-  const rows = aggregateThemes(occurrences, themeOf, themes);
-  report.themes = rows.length;
-  document.aggregates.by_theme = rows.map(({ items, pain_levels, ...row }) => ({ ...row, high_pain: highPainCount({ pain_levels }, thresholds), qualifies: qualifies({ ...row, pain_levels }, thresholds) }));
-  const qualifying = rows.filter((row) => qualifies(row, thresholds));
-  report.qualifying_themes = qualifying.length;
-
-  // Effect-fill comes before the proposals: a ratified rule measured now as not working moves this run's
-  // proposal for the same theme up the enforcement ladder.
-  const entries = [...ledger.entries];
-  const occurrencesByTheme = new Map();
+  const rootOf = (themeId) => lineageRoot(themeId, parents);
+  const byRoot = new Map();
   for (const item of occurrences) {
-    const themeId = themeOf.get(item.turn.key);
-    occurrencesByTheme.set(themeId, [...(occurrencesByTheme.get(themeId) ?? []), item.turn.atMs]);
+    const root = rootOf(themeOf.get(item.turn.key));
+    byRoot.set(root, [...(byRoot.get(root) ?? []), item]);
   }
-  const filled = fillEffects(entries, { occurrencesByTheme, windowSinceMs: sinceMs, nowMs, minDays: options.effectMinDays ?? DEFAULT_EFFECT_MIN_DAYS, measuredAt: new Date(nowMs).toISOString() });
-  report.effects_filled = filled.length;
+  report.themes = byRoot.size;
+
+  // Measure first: a ratified rung measured now as not working is what allows this run to propose the next rung.
+  const entries = [...ledger.entries];
+  const occurrencesByRoot = new Map([...byRoot].map(([root, items]) => [root, items.map((item) => item.turn.atMs)]));
+  const measured = fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs: sinceMs, nowMs, measuredAt: new Date(nowMs).toISOString(), effect });
+  report.effects_measured = measured.length;
 
   let rules = null;
   if (options.rulesFile) {
@@ -148,21 +174,47 @@ export async function runLearn(options) {
     document.notes.push("no rule file was found or named, so proposals were not checked for conflicts (conflict_check.status = skipped)");
   }
   const rulesFileName = options.rulesFile ? path.basename(options.rulesFile) : null;
-  const proposals = [];
-  for (const row of qualifying) {
+  const planned = [];
+  for (const root of [...byRoot.keys()].sort()) {
+    const state = themeState({ rootId: root, entries, rootOf, scope });
+    const items = state.action === "propose" && state.baselineMs !== null
+      ? byRoot.get(root).filter((item) => item.turn.atMs > state.baselineMs)
+      : byRoot.get(root);
+    const row = aggregate(root, themes.get(root), items, thresholds);
+    const ok = items.length > 0 && qualifies(row, thresholds);
+    const { items: _items, ...visible } = row;
+    document.aggregates.by_theme.push({
+      ...visible,
+      occurrences_in_window: byRoot.get(root).length,
+      state: state.action,
+      ...(state.action === "propose" ? { counted_since: state.baselineMs === null ? null : new Date(state.baselineMs).toISOString() } : {}),
+      ...(state.reason ? { state_reason: state.reason } : {}),
+      qualifies: ok,
+    });
+    if (state.action === "open") {
+      report.themes_open += 1;
+      document.proposals.push({ ...state.entry, already_proposed: true });
+      continue;
+    }
+    if (state.action === "hold") {
+      report.themes_held += 1;
+      continue;
+    }
+    if (ok) planned.push({ row, state });
+  }
+  document.aggregates.by_theme = document.aggregates.by_theme.filter((row) => row.occurrences > 0);
+  report.qualifying_themes = planned.length;
+
+  const known = new Set(entries.map((entry) => entry.proposal_id));
+  const appended = [];
+  for (const { row, state } of planned) {
     let judgement = null;
     let conflictCheck = { status: "skipped", file: rulesFileName };
     if (rules && typeof options.judge === "function") {
       judgement = await options.judge(row.label, rules);
       conflictCheck = { status: "checked", file: rulesFileName };
     }
-    proposals.push(buildProposal(row, { window, entries, judgement, conflictCheck, rulesFileName, thresholds, classifierVersion: CLASSIFIER_VERSION }));
-  }
-
-  // ── ledger ───────────────────────────────────────────────────────────────────────────────────────────────────────
-  const known = new Set(entries.map((entry) => entry.proposal_id));
-  const appended = [];
-  for (const proposal of proposals) {
+    const proposal = buildProposal(row, { state, window, judgement, conflictCheck, rulesFileName, scope, classifierVersion: CLASSIFIER_VERSION });
     const already = known.has(proposal.proposal_id);
     if (!already) {
       appended.push(proposal);
@@ -170,9 +222,22 @@ export async function runLearn(options) {
     }
     document.proposals.push({ ...proposal, already_proposed: already });
   }
-  writeLedger(options.ledgerPath, ledger, entries, filled, appended);
-  const queue = writeReviewItems(options.reviewItemsPath ?? reviewItemsPath(options.ledgerPath), [...entries, ...appended]);
-  report.review_items = queue.count;
-  document.review_items_path = options.reviewItemsPath ?? reviewItemsPath(options.ledgerPath);
+
+  // ── commit: re-read under the lock, merge by proposal_id, write the queue, then the ledger ─────────────────────
+  await stage("commit");
+  const release = acquireLedgerLock(options.ledgerPath, { timeoutMs: options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS });
+  try {
+    const current = readLedger(options.ledgerPath);
+    const merged = mergeIntoCurrent(ledger, current, entries, measured, appended);
+    // The queue first: a ledger write that then fails leaves a queue the next run regenerates, never a ledger whose
+    // new proposals no queue shows.
+    const queue = writeReviewItems(queuePath, merged.entries);
+    await stage("queue-written");
+    writeMergedLedger(options.ledgerPath, current, merged);
+    report.review_items = queue.count;
+  } finally {
+    release();
+  }
+  document.review_items_path = queuePath;
   return document;
 }
