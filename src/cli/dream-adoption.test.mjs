@@ -368,9 +368,10 @@ test("each run-side directory check stands on its own: a world-writable briefs d
   assert.equal(open.status, 2, open.stderr);
   assert.match(open.stderr, /dreamDir\/briefs must not be group or world writable/);
   fs.chmodSync(path.join(c.dreamDir, "briefs"), 0o700);
-  const linked = path.join(c.root, "linked-dream");
-  fs.symlinkSync(c.dreamDir, linked);
-  fs.writeFileSync(c.configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(c.configFile, "utf8")), dreamDir: linked }), { mode: 0o600 });
+  // The link sits above dreamDir, so only the symlink check can refuse it.
+  const link = path.join(c.root, "linked-parent");
+  fs.symlinkSync(c.root, link);
+  fs.writeFileSync(c.configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(c.configFile, "utf8")), dreamDir: path.join(link, "dream") }), { mode: 0o600 });
   const viaLink = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
   assert.equal(viaLink.status, 2, viaLink.stderr);
   assert.match(viaLink.stderr, /^DREAM_CONFIG_INVALID: dreamDir path must not contain a symlink/m);

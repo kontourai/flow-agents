@@ -248,10 +248,11 @@ test('each directory check stands on its own: a world-writable briefs directory,
  assert.doesNotMatch(await f.sessionStart(), /configured amber heron/, 'a world-writable briefs directory is refused');
  fs.chmodSync(path.join(f.dir, 'briefs'), 0o700);
  assert.match(await f.sessionStart(), /configured amber heron/);
- // Only the realpath check can catch this: every directory reached through the link is private and owned by the user.
- const linked = path.join(f.temp, 'linked-dream');
- fs.symlinkSync(f.dir, linked);
- fs.writeFileSync(f.config, JSON.stringify({ ...JSON.parse(fs.readFileSync(f.config, 'utf8')), dreamDir: linked }), { mode: 0o600 });
+ // Only the realpath check can catch this: the link sits above dreamDir, so dreamDir and briefs are real private
+ // directories, and the link itself is owned by the user.
+ const link = path.join(f.temp, 'linked-parent');
+ fs.symlinkSync(f.temp, link);
+ fs.writeFileSync(f.config, JSON.stringify({ ...JSON.parse(fs.readFileSync(f.config, 'utf8')), dreamDir: path.join(link, path.basename(f.dir)) }), { mode: 0o600 });
  assert.doesNotMatch(await f.sessionStart(), /configured amber heron/, 'a dreamDir reached through a symlink is refused');
  delete process.env.FLOW_AGENTS_DREAM_CONFIG;
 });
