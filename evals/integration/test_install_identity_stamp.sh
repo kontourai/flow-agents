@@ -170,6 +170,27 @@ else
   fail "package.json restore left the fingerprint at $(fingerprint), expected $baseline"
 fi
 
+# ── 7. the fingerprint covers exactly what npm packs under its roots ──────────────────────────────
+# package.json `files` excludes *.test.* files and then re-includes the kit evals kit.json
+# declares by path. The fingerprint models both (suffix negation, ordered re-include), so its file
+# set must equal the `npm pack --dry-run` file set under FINGERPRINT_ROOTS, in both directions.
+# The module path goes through the environment, not argv: the generator runs main() (and rewrites
+# the stamp) when argv[1] is its own path.
+parity_out=$( (cd "$ROOT" && npm pack --dry-run --json --ignore-scripts 2>/dev/null | FINGERPRINT_MODULE="$ROOT/build/src/tools/generate-install-identity.js" node --input-type=module -e '
+  let raw = ""; for await (const chunk of process.stdin) raw += chunk;
+  const { fingerprintLines, FINGERPRINT_ROOTS } = await import(process.env.FINGERPRINT_MODULE);
+  const covered = new Set(fingerprintLines().map((line) => line.split("\0")[0]));
+  const packed = new Set(JSON.parse(raw)[0].files.map((f) => f.path).filter((p) => FINGERPRINT_ROOTS.some((r) => p.startsWith(`${r}/`))));
+  const extra = [...covered].filter((p) => !packed.has(p)), missing = [...packed].filter((p) => !covered.has(p));
+  if (packed.size === 0 || extra.length || missing.length) { console.log(JSON.stringify({ packed: packed.size, extra: extra.slice(0, 5), missing: missing.slice(0, 5) })); process.exit(1); }
+  console.log(`${covered.size} files`);
+') 2>&1 )
+if [[ $? -eq 0 ]]; then
+  pass "fingerprint file set equals the packed file set under its roots ($parity_out)"
+else
+  fail "fingerprint and npm pack disagree: $parity_out"
+fi
+
 echo ""
 if [[ $errors -eq 0 ]]; then
   echo "install identity stamp: all checks passed"
