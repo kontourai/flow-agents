@@ -399,7 +399,7 @@
     "@kontourai/relay": "0.8.0",
     "@kontourai/surface": "5.0.0",
     "@kontourai/surface-knowledge": "npm:@kontourai/surface@6.3.0",
-    "@kontourai/survey": "8.4.0",
+    "@kontourai/survey": "9.0.0",
     "@kontourai/thread": "0.7.0",
     "esbuild": "0.28.2"
   },

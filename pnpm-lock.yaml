@@ -33,8 +33,8 @@ importers:
         specifier: npm:@kontourai/surface@6.3.0
         version: '@kontourai/surface@6.3.0'
       '@kontourai/survey':
-        specifier: 8.4.0
-        version: 8.4.0(typescript@7.0.2)
+        specifier: 9.0.0
+        version: 9.0.0(typescript@7.0.2)
       '@kontourai/thread':
         specifier: 0.7.0
         version: 0.7.0
@@ -56,7 +56,7 @@ importers:
         version: 5.0.3(@anthropic-ai/sdk@1.4.0(zod@4.6.7))(@kontourai/relay@0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.4.0(zod@4.6.7)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.6.7))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/veritas':
         specifier: 1.12.1
-        version: 1.12.1(@kontourai/survey@8.4.0(typescript@7.0.2))(zod@4.6.7)
+        version: 1.12.1(@kontourai/survey@9.0.0(typescript@7.0.2))(zod@4.6.7)
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
@@ -1178,8 +1178,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/survey@8.4.0':
-    resolution: {integrity: sha512-ziY5IbQGw1TSLiLqv7GTxDTdd8PdssKZOQW/iHBLLnTJwSYi9gXuOq3No9hs+e1uOU37ZI+fnZtswXYUDS0HIQ==}
+  '@kontourai/survey@9.0.0':
+    resolution: {integrity: sha512-Ao3wgabAhxfEcdjE+/FcmN+Y2w7OIA8+EZOh5s188ajVaFDwEExLzNhhEOtS9lIuJzY2+k5efTk0AHBh5sSyNQ==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -1310,8 +1310,8 @@ packages:
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
 
-  '@modelcontextprotocol/core@2.0.0':
-    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+  '@modelcontextprotocol/core@2.4.0':
+    resolution: {integrity: sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q==}
     engines: {node: '>=20'}
 
   '@modelcontextprotocol/sdk@1.32.1':
@@ -1329,8 +1329,8 @@ packages:
     deprecated: 'Date-based versions are no longer published. This package has resumed semantic versioning at 1.0.0: install the latest version.'
     hasBin: true
 
-  '@modelcontextprotocol/server@2.0.0':
-    resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
+  '@modelcontextprotocol/server@2.4.0':
+    resolution: {integrity: sha512-rgR9yxSaAJ+bcsi/XroT/S2AfPiIWloXAnrdfYSCms9ivVju0ishu/wW0J21Ho6+ZOR1r7RyeRbjiRuF87ix5Q==}
     engines: {node: '>=20'}
 
   '@mongodb-js/saslprep@1.6.1':
@@ -4122,9 +4122,6 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
-
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -5384,11 +5381,11 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/survey@8.4.0(typescript@7.0.2)':
+  '@kontourai/survey@9.0.0(typescript@7.0.2)':
     dependencies:
-      '@kontourai/surface': 2.17.0
-      '@modelcontextprotocol/server': 2.0.0
-      zod: 4.4.3
+      '@kontourai/surface': 5.0.0
+      '@modelcontextprotocol/server': 2.4.0
+      zod: 4.6.7
     optionalDependencies:
       typescript: 7.0.2
     transitivePeerDependencies:
@@ -5427,7 +5424,7 @@ snapshots:
       - canvas
       - playwright
 
-  '@kontourai/veritas@1.12.1(@kontourai/survey@8.4.0(typescript@7.0.2))(zod@4.6.7)':
+  '@kontourai/veritas@1.12.1(@kontourai/survey@9.0.0(typescript@7.0.2))(zod@4.6.7)':
     dependencies:
       '@kontourai/plumb': 0.2.0
       '@kontourai/surface': 2.17.0
@@ -5438,7 +5435,7 @@ snapshots:
       hachure: 0.15.0
       picomatch: 4.0.7
     optionalDependencies:
-      '@kontourai/survey': 8.4.0(typescript@7.0.2)
+      '@kontourai/survey': 9.0.0(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - kerberos
@@ -5513,7 +5510,7 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
-  '@modelcontextprotocol/core@2.0.0':
+  '@modelcontextprotocol/core@2.4.0':
     dependencies:
       zod: 4.6.7
 
@@ -5551,10 +5548,10 @@ snapshots:
       - zod
     optional: true
 
-  '@modelcontextprotocol/server@2.0.0':
+  '@modelcontextprotocol/server@2.4.0':
     dependencies:
-      '@modelcontextprotocol/core': 2.0.0
-      zod: 4.4.3
+      '@modelcontextprotocol/core': 2.4.0
+      zod: 4.6.7
 
   '@mongodb-js/saslprep@1.6.1':
     dependencies:
@@ -8666,7 +8663,5 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
       zod: 4.6.7
-
-  zod@4.4.3: {}
 
   zod@4.6.7: {}
