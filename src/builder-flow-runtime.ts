@@ -5,7 +5,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
-import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapshot, installedBuilderImplementationAllowed, type GateActionEnvelope, type GateActionProgressSnapshot } from "./builder-gate-action-envelope.js";
+import { declaredCritiqueReviewerAssurance, deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapshot, installedBuilderImplementationAllowed, type GateActionEnvelope, type GateActionProgressSnapshot } from "./builder-gate-action-envelope.js";
+import { describeReviewerAssurance, reviewerAssuranceMeets, type ReviewerAssuranceLevel } from "./lib/reviewer-assurance.js";
 import {
   evaluateGate,
   expectationsForGate,
@@ -2031,7 +2032,9 @@ export async function bundleGateEvidence(
   }
   if (relevant.some((claim) => testsEvidenceClaimTypes.has(String(claim.claimType)) && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified, testsEvidenceClaimTypes);
+    // #1092: the declaring kit owns the reviewer-assurance policy; an unreadable declaration throws.
+    const requiredReviewerAssurance = declaredCritiqueReviewerAssurance(state.definition_id, String((gate as AnyRecord).step), projectRoot);
+    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified, testsEvidenceClaimTypes, requiredReviewerAssurance);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -2544,7 +2547,7 @@ function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { e
   return { events, verified: true };
 }
 
-async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean, testsEvidenceClaimTypes: ReadonlySet<string>): Promise<void> {
+async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean, testsEvidenceClaimTypes: ReadonlySet<string>, requiredReviewerAssurance: ReviewerAssuranceLevel | null): Promise<void> {
   const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && testsEvidenceClaimTypes.has(String(claim.claimType))
     && claim.value === "pass"
@@ -2571,8 +2574,9 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
     throw new BuilderBuildRunInputError(
       "evidence.critique",
       "a passing tests-evidence claim requires a current clean critique, and this gate visit has none. "
-        + "Record one with `workflow critique` under a reviewer identity distinct from the implementation "
-        + "actor (set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process). Note that a route-back "
+        + "Record one with `workflow critique` from a separate reviewer runtime session (its own runtime "
+        + "session id, FLOW_AGENTS_ACTOR unset); relabelling the implementing process is not independent "
+        + "review, and without a reviewer runtime the review stays NOT_VERIFIED. Note that a route-back "
         + "starts a new gate visit: critiques from a previous visit remain as audit history but do not "
         + "satisfy this one.",
     );
@@ -2610,6 +2614,21 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   const implementationActors = new Set(testClaims.map((claim) => claim.metadata.recorded_by).filter((actor): actor is string => typeof actor === "string" && actor.length > 0));
   if (implementationActors.size !== 1 || currentCritiques.some(({ claim }) => typeof claim.metadata.reviewer !== "string" || implementationActors.has(claim.metadata.reviewer))) {
     throw new BuilderBuildRunInputError("evidence.critique.reviewer", "must identify a reviewer distinct from the tests-evidence implementation actor");
+  }
+  // #1092: a distinct reviewer NAME is not enough when the kit requires the identity to be
+  // established by the runtime. The decision is computed from the recorded inputs (reviewer and
+  // implementer session refs and how each was established), never from a stored label. A critique
+  // recorded before those inputs were captured has none and fails.
+  if (requiredReviewerAssurance) {
+    const unmet = currentCritiques.find(({ claim }) => !reviewerAssuranceMeets(claim.metadata.reviewer_assurance, requiredReviewerAssurance));
+    if (unmet) {
+      throw new BuilderBuildRunInputError(
+        "evidence.critique.reviewer_assurance",
+        `requires ${requiredReviewerAssurance} reviewer identity outside the implementer's session; critique '${String(unmet.claim.metadata.critique_record_id)}' `
+          + `has ${describeReviewerAssurance(unmet.claim.metadata.reviewer_assurance)}. A self_declared reviewer identity, such as a FLOW_AGENTS_ACTOR override or a sidecar --reviewer label, `
+          + "does not establish independent review. Record the review from a separate reviewer runtime session, or leave it NOT_VERIFIED.",
+      );
+    }
   }
   const criteria = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
   if (criteria.length === 0 || criteria.some((claim) => {

@@ -51,6 +51,7 @@ import {
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import type { ReviewerAssurance } from "../lib/reviewer-assurance.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
@@ -1752,6 +1753,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // Absent on any bundle written before this change — those critiques are treated as
       // unnamed, which is exactly what they were: no verifier was ever recorded for them.
       ...(critiqueReviewerSource ? { reviewer_source: critiqueReviewerSource } : {}),
+      // #1092: absent on critiques written before reviewer assurance was recorded; a gate that
+      // requires an assurance level treats that absence as unmet.
+      ...(c.reviewer_assurance && typeof c.reviewer_assurance === "object" && !Array.isArray(c.reviewer_assurance)
+        ? { reviewer_assurance: c.reviewer_assurance }
+        : {}),
       reviewed_at: critiqueReviewedAt,
       ...(critiqueIdentityVersion === 2 ? { identity_version: 2 } : {}),
       critique_sequence: c.critique_sequence,
@@ -4816,8 +4822,9 @@ function passingTestsCritiquePreconditionProblems(dir: string, critiques: AnyObj
   const liveCritiques = critiques.filter((critique) => !critique.superseded_by);
   if (liveCritiques.length === 0) {
     return ["a passing tests-evidence claim requires a current clean critique first, and this run has no critique yet. "
-      + "Record one with `workflow critique` under a reviewer identity distinct from the implementation actor: "
-      + "set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process."];
+      + "Record one with `workflow critique` from a separate reviewer runtime session (its own runtime session id, "
+      + "FLOW_AGENTS_ACTOR unset). Relabelling the implementing process does not count as independent review; "
+      + "without a reviewer runtime the review stays NOT_VERIFIED."];
   }
   if (liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique))) {
     return ["a passing tests-evidence claim requires a current clean critique first, and this gate visit has a live "
@@ -6862,7 +6869,7 @@ export function normalizeFinding(raw: AnyObj, projectRoot = process.cwd()): AnyO
   return raw;
 }
 
-async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
+async function recordCritique(p: ReturnType<typeof parseArgs>, resolvedReviewerAssurance?: ReviewerAssurance): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const projectRoot = canonicalProjectRootForSession(dir);
@@ -6931,6 +6938,18 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     // discard the prescribed reviewer to avoid publishing an unclaimed one. Not part of
     // critiqueRecordHash's field list, so the critique chain is unaffected.
     reviewer_source: opts(p, "reviewer").length > 0 ? "explicit" : "default",
+    // #1092: how the reviewer identity was established. Only the public `workflow critique` path
+    // resolves it from the runtime; a `--reviewer` label (or the default) on this writer is a
+    // name the caller chose, so it is self_declared and no implementer identity is bound. Outside
+    // critiqueRecordHash's field list, like reviewer_source.
+    reviewer_assurance: resolvedReviewerAssurance ?? {
+      reviewer: {
+        session_ref: opt(p, "reviewer", DEFAULT_CRITIQUE_REVIEWER),
+        session_ref_source: "self_declared",
+        resolved_by: opts(p, "reviewer").length > 0 ? "sidecar-reviewer-label" : "sidecar-default-reviewer",
+      },
+      implementer: null,
+    },
     reviewed_at: opt(p, "timestamp", new Date().toISOString()),
     identity_version: 2,
     verdict,
@@ -9861,7 +9880,12 @@ Available claim ids:
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-export type PublicWorkflowInvocation = { writerTransactionId?: string; writerTarget?: TrustBundleWriterTarget };
+export type PublicWorkflowInvocation = {
+  writerTransactionId?: string;
+  writerTarget?: TrustBundleWriterTarget;
+  /** #1092: how `workflow critique` established the reviewer identity. Honored only from the public workflow authority. */
+  reviewerAssurance?: ReviewerAssurance;
+};
 
 export function mainFromPublicWorkflow(argv: string[], invocation?: PublicWorkflowInvocation): Promise<number> {
   if (argv[0] === "resolve-critique") throw new Error("critique resolution mutation is owned by the external lifecycle authority helper");
@@ -10044,7 +10068,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
-      case "record-critique": return recordCritique(p);
+      case "record-critique": return recordCritique(p, authority === PUBLIC_WORKFLOW_AUTHORITY ? invocation?.reviewerAssurance : undefined);
       // Critique resolution is a lifecycle-authority mutation (packaging/lifecycle-authority): it
       // writes the protected external resolution-event ledger and signs a completion over it. The
       // sidecar never mutates resolution state; mainFromPublicWorkflow refuses the verb as well.

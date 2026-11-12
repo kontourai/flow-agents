@@ -37,9 +37,10 @@ public() {
   printf '%s\t%s\t%s\n' "$verb" "$key" "$rc" >> "$VERBS"
   return "$rc"
 }
-public_as() {
-  local actor="$1" verb="$2" key="$3"; shift 3
-  (cd "$PROJECT" && FLOW_AGENTS_ACTOR="$actor" node "$ROOT/build/src/cli.js" workflow "$verb" "$@")
+# #1092: an independent reviewer is a separate runtime session, not a FLOW_AGENTS_ACTOR relabel.
+public_reviewer() {
+  local session="$1" verb="$2" key="$3"; shift 3
+  (cd "$PROJECT" && env -u FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID="$session" node "$ROOT/build/src/cli.js" workflow "$verb" "$@")
   local rc=$?
   printf '%s\t%s\t%s\n' "$verb" "$key" "$rc" >> "$VERBS"
   return "$rc"
@@ -104,7 +105,7 @@ record implementation-plan "$SESSION/$SLUG--plan-work.md" 'Reviewable implementa
 assert_step execute
 record implementation-scope "$SESSION/$SLUG--deliver.md" 'Implemented fixture scope.'
 assert_step verify
-if public_as demo-reviewer critique critique --session-dir "$SESSION" --id demo-review --verdict pass --summary 'Independent fixture review is clean.' \
+if public_reviewer demo-reviewer critique critique --session-dir "$SESSION" --id demo-review --verdict pass --summary 'Independent fixture review is clean.' \
   --artifact-ref "$SESSION/$SLUG--deliver.md" \
   --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Fixture review completed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION/$SLUG--deliver.md\",\"summary\":\"Reviewed fixture delivery artifact.\"}]}" >>"$LOG" 2>&1; then
   pass 'public critique records clean review'

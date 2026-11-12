@@ -171,11 +171,21 @@ function loadActorStruct(args: ParsedArgs): { actor: ActorStruct; actorKey?: str
 }
 
 export function resolveCurrentAssignmentActor(): { actor: ActorStruct; actorKey: string } {
+  const { actor, actorKey } = resolveCurrentActorWithSource();
+  return { actor, actorKey };
+}
+
+/**
+ * #1092: the current actor plus the resolver `source` that says how its identity was established
+ * (an explicit override or a runtime derivation). Kept separate so callers that serialize the
+ * actor do not publish the provenance field.
+ */
+export function resolveCurrentActorWithSource(): { actor: ActorStruct; actorKey: string; source: string } {
   const helper = loadActorIdentityHelper();
   const resolved = helper.resolveActorIdentity(process.env);
   if (helper.isUnresolvedActor(resolved.actor)) throw new Error("could not resolve an actor identity (no --actor-json and no resolvable environment actor); pass --actor-json explicitly");
   if (!resolved.actorStruct) throw new Error("actor identity resolved without a canonical actor struct");
-  return { actor: { ...resolved.actorStruct, human: resolved.actorStruct.human ?? null }, actorKey: resolved.actor };
+  return { actor: { ...resolved.actorStruct, human: resolved.actorStruct.human ?? null }, actorKey: resolved.actor, source: resolved.source };
 }
 
 function loadLivenessInputs(args: ParsedArgs): { events: AnyObj[] | null; selfActor: string | undefined } {
