@@ -1200,7 +1200,8 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
    The `claude` process is a full Claude Code session that loads your user-level settings, hooks and `CLAUDE.md`.
    Any hook you have installed that logs prompts sees the scrubbed sitting. The run starts that session in
    `<dreamDir>/claude-session`, a private 0700 directory, so no project settings load and no other user can plant
-   any there. Keep `dreamDir` out of shared directories such as `/tmp`. The run also sets `FLOW_AGENTS_DREAM_TRIGGER=0` and adds
+   any there. Claude Code also reads `CLAUDE.md` from every directory above that one, so keep `dreamDir` outside any
+project checkout and out of shared directories such as `/tmp`; the default under your home directory is both. The run also sets `FLOW_AGENTS_DREAM_TRIGGER=0` and adds
    `profile-memory` to `SA_DISABLED_HOOKS`. These settings stop the session from starting another dream run or
    injecting existing briefs into the extraction prompt.
 3. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
