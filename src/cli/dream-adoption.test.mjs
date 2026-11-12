@@ -2,13 +2,14 @@
 // Claude Code subscription instead of an API key, a config under macOS /tmp, and the installed command. Every run here
 // is a child process with a clean environment, so the exit code is the real one and no operator setting leaks in.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { resolveRef } from "@kontourai/datum";
-import { validateDreamConfig } from "../../kits/knowledge/dream/config.js";
-import { MODEL_SETUP_DOC } from "../../kits/knowledge/dream/model.js";
+import { MAX_ENV_NAME_LENGTH, MAX_PASS_ENV, MAX_RUNTIME_TIMEOUT_MS, PASS_ENV_REFUSED, validateDreamConfig } from "../../kits/knowledge/dream/config.js";
+import { MODEL_SETUP_DOC, resolveClaudeExecutable } from "../../kits/knowledge/dream/model.js";
 import { telemetryLine, tempDir } from "./dream-support.mjs";
 
 const REPO = path.resolve(import.meta.dirname, "..", "..");
@@ -23,33 +24,51 @@ const MARKER = "quokka-marker-7f3a";
 const QUOTE = `I pinned the ledger rounding to half-even under ${MARKER}.`;
 const SESSION = "7d3e1a20-0000-4000-8000-0000000000a1";
 
-/** A Claude Code project transcript in the shape Claude Code writes: a user turn carrying the token, an assistant turn carrying the marker. */
+/** A Claude Code project transcript in the shape Claude Code writes: a typed user turn carrying the token, an assistant turn carrying the marker. */
 function transcript(cwd = "/Users/fixture-user/dev/ledger") {
   const base = { isSidechain: false, cwd, sessionId: SESSION, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "cli" };
   return [
-    { ...base, parentUuid: null, promptId: "p-1", message: { role: "user", content: `Please pin the ledger rounding. The registry deploy token is ${SECRET} if you need it.` }, permissionMode: "default", type: "user", uuid: "00000000-0000-4000-8000-0000000000b1", timestamp: "2026-10-30T09:00:02.000Z" },
+    { ...base, parentUuid: null, promptId: "p-1", origin: { kind: "human" }, promptSource: "typed", message: { role: "user", content: `Please pin the ledger rounding. The registry deploy token is ${SECRET} if you need it.` }, permissionMode: "default", type: "user", uuid: "00000000-0000-4000-8000-0000000000b1", timestamp: "2026-10-30T09:00:02.000Z" },
     { ...base, parentUuid: "00000000-0000-4000-8000-0000000000b1", message: { model: "claude-opus-5-5", id: "msg_b1", type: "message", role: "assistant", content: [{ type: "text", text: `Done. ${QUOTE}` }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 5 } }, requestId: "req_msg_b1", type: "assistant", uuid: "00000000-0000-4000-8000-0000000000b2", timestamp: "2026-10-30T09:00:06.000Z" },
   ].map((line) => JSON.stringify(line)).join("\n").concat("\n");
 }
 
 /**
  * A stand-in for the `claude` command that Relay's Claude Code runtime spawns. It records what it was given (argv,
- * working directory, two environment values and stdin) and answers in the CLI's `--output-format json` shape, with the
- * structured output the forced tool asks for: one claim, grounded in QUOTE, when the content holds it.
+ * working directory, the names of every environment variable it received, the values of the variables a dirty parent
+ * environment plants, and stdin) and answers in the CLI's `--output-format json` shape, with the structured output the
+ * forced tool asks for: one claim, grounded in QUOTE, when the content holds it. The executable is a node script with
+ * no shell in between, so the environment it records is exactly the one Relay passed.
+ *
+ * `log` and `statuses` are baked in when given, because a child started with an allowlisted environment does not
+ * see FAKE_CLAUDE_*; otherwise they come from the environment (a host runtime passes the whole environment). `hang`
+ * makes it read its input and then never answer, ignoring SIGTERM, so only a timeout and SIGKILL can end it.
+ * `hangFrom: n` answers calls before the nth normally and hangs from the nth on.
+ * `wrapper` makes the executable a `/bin/sh` script that runs the fake as its child without `exec`, as a version
+ * manager's shim does: signalling only the direct child would leave the fake running and holding the pipes.
  */
-function fakeClaude(dir) {
+function fakeClaude(dir, { log, statuses, hang = false, hangFrom = null, wrapper = false } = {}) {
   const script = path.join(dir, "fake-claude.mjs");
   fs.writeFileSync(script, `
     import fs from "node:fs";
+    const LOG = ${JSON.stringify(log ?? null)} ?? process.env.FAKE_CLAUDE_LOG;
+    const STATUSES = ${JSON.stringify(statuses ?? null)} ?? process.env.FAKE_CLAUDE_STATUSES ?? "";
     const chunks = [];
     for await (const chunk of process.stdin) chunks.push(chunk);
     const stdin = Buffer.concat(chunks).toString("utf8");
-    fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ argv: process.argv.slice(2), trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), stdin }) + "\\n");
-    // FAKE_CLAUDE_STATUSES: one HTTP status per call, in order (the last repeats); 200 answers normally. A 401 is what
+    const callNo = (fs.existsSync(LOG) ? fs.readFileSync(LOG, "utf8").split("\\n").filter(Boolean).length : 0) + 1;
+    const planted = Object.fromEntries(["ANTHROPIC_BASE_URL", "GH_TOKEN", "ANTHROPIC_API_KEY"].map((name) => [name, process.env[name] ?? null]));
+    fs.appendFileSync(LOG, JSON.stringify({ argv: process.argv.slice(2), envNames: Object.keys(process.env).sort(), planted, trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), pid: process.pid, wrapperPid: process.env.FAKE_WRAPPER_PID ? Number(process.env.FAKE_WRAPPER_PID) : null, stdin }) + "\\n");
+    if (${JSON.stringify(hang)} || (${JSON.stringify(hangFrom)} !== null && callNo >= ${JSON.stringify(hangFrom)})) {
+      process.on("SIGTERM", () => {});
+      setInterval(() => {}, 1000);
+      await new Promise(() => {});
+    }
+    // STATUSES: one HTTP status per call, in order (the last repeats); 200 answers normally. A 401 is what
     // the CLI prints when its sign-in is missing or expired, a 529 an overloaded API.
-    const statuses = (process.env.FAKE_CLAUDE_STATUSES ?? "").split(",").filter(Boolean).map(Number);
+    const statuses = STATUSES.split(",").filter(Boolean).map(Number);
     if (statuses.length) {
-      const counter = process.env.FAKE_CLAUDE_LOG + ".calls";
+      const counter = LOG + ".calls";
       const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0;
       fs.writeFileSync(counter, String(n + 1));
       const status = statuses[Math.min(n, statuses.length - 1)];
@@ -64,7 +83,10 @@ function fakeClaude(dir) {
     process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "", structured_output: { proposals }, usage: { input_tokens: 12, output_tokens: 7 }, stop_reason: "end_turn" }));
   `, { mode: 0o600 });
   const executable = path.join(dir, "claude");
-  fs.writeFileSync(executable, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`, { mode: 0o700 });
+  const body = wrapper
+    ? `#!/bin/sh\nFAKE_WRAPPER_PID=$$ ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\nexit $?\n`
+    : `#!${process.execPath}\nimport(${JSON.stringify(pathToFileURL(script).href)});\n`;
+  fs.writeFileSync(executable, body, { mode: 0o700 });
   return executable;
 }
 
@@ -126,7 +148,7 @@ function consumer(t, { config = {} } = {}) {
   // Only what a fresh shell would have: no DATUM_* overrides, no provider keys, nothing from the operator's own setup.
   const env = { PATH: process.env.PATH, HOME: home, XDG_CONFIG_HOME: path.join(home, ".config"), XDG_DATA_HOME: path.join(home, ".local", "share"), TMPDIR: root };
   const run = (command, args, extraEnv = {}, nodeArgs = []) => spawnSync(process.execPath, [...nodeArgs, command, ...args], { cwd: work, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 60_000 });
-  return { root, home, work, transcripts, memoryRoot, published, dreamDir, configFile, run };
+  return { root, home, work, transcripts, memoryRoot, published, dreamDir, configFile, run, env };
 }
 
 function filesUnder(dir) {
@@ -144,7 +166,9 @@ test("with no host runtime and no Datum config, the run exits 2 and says how to 
   assert.match(result.stderr, /^DREAM_MODEL_UNCONFIGURED: .*"extraction-default"/m, "names the missing role");
   assert.match(result.stderr, /Datum UNKNOWN_ROLE/);
   assert.match(result.stderr, /~\/\.config\/kontour\/datum\.json/);
-  assert.match(result.stderr, /"runtime": \{ "kind": "claude-code" \} option is not available yet; see kontourai\/relay#84/, "says the subscription path is not open yet, and why");
+  assert.match(result.stderr, /3\. The Claude Code CLI, signed in to a Claude subscription: set "runtime": \{ "kind": "claude-code", "model": "sonnet" \}/, "offers the subscription path");
+  assert.match(result.stderr, /without your hooks, MCP servers, CLAUDE\.md or settings files/, "and says what the isolated claude process does not load");
+  assert.match(result.stderr, /"passEnv"/, "and how to pass a variable it needs");
   assert.match(result.stderr, /return `runtime`.*createDreamHost/, "offers the host path");
   assert.ok(result.stderr.includes(`See ${MODEL_SETUP_DOC}`), "links the doc");
   assert.equal(fs.existsSync(c.dreamDir), false, "nothing ran");
@@ -164,7 +188,7 @@ test("a configured role names itself in the message", (t) => {
   assert.match(result.stderr, /"roles":\{"memory-extraction":/);
 });
 
-// ── 2. The Claude Code CLI as the model: refused until Relay can isolate it ─────────────────────────────────
+// ── 2. The Claude Code CLI as the model ──────────────────────────────────────────────────────────────────────
 
 /** A host module whose model is Relay's own Claude Code runtime over `executable`: the host's choice, in the host's code. */
 function relayHost(c, executable) {
@@ -186,20 +210,294 @@ function relayHost(c, executable) {
   fs.writeFileSync(c.configFile, JSON.stringify({ ...config, host: file }), { mode: 0o600 });
 }
 
-test("runtime claude-code is refused with exit 2 and starts nothing, because Relay cannot yet isolate the claude process", (t) => {
+// Synthetic, assembled from fragments so no detector-shaped literal is committed: what a dirty shell might hold.
+const PLANTED = {
+  ANTHROPIC_BASE_URL: "https://gateway.fixture.invalid/v1",
+  GH_TOKEN: ["gh", "o_", "Z1y2X3w4V5u6T7s8R9q0P1o2N3m4L5k6J7i8"].join(""),
+  ANTHROPIC_API_KEY: ["sk-", "ant-", "fixture-", "0000000000000000"].join(""),
+};
+const SAFE_MODE_FLAGS = ["--safe-mode", "--setting-sources", ""];
+// macOS adds this one to a process's environment when it is started without it; it is not inherited from the run.
+const PLATFORM_ADDED = new Set(process.platform === "darwin" ? ["__CF_USER_TEXT_ENCODING"] : []);
+
+/** A consumer whose config names the claude-code runtime over a fake claude, which logs to `log`. */
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+/** Every process a fake claude logged: the fake and, for a wrapper, the shell that started it (never its parent run). */
+const loggedPids = (log) => readLines(log).flatMap((call) => [call.pid, call.wrapperPid]).filter(Number.isInteger);
+/** A wrapper fake records its shell's pid; without it the wrapper could survive unseen. */
+const assertWrapperRecorded = (log) => {
+  const calls = readLines(log);
+  assert.ok(calls.length > 0, "claude was started");
+  for (const call of calls) assert.ok(Number.isInteger(call.wrapperPid) && call.wrapperPid > 0, `the wrapper shell's pid was recorded (got ${call.wrapperPid})`);
+};
+
+/**
+ * A consumer whose config names the claude-code runtime over a fake claude, which logs to `log`. The log lives in its
+ * own directory, removed by the same hook that first SIGKILLs every process the fake logged, so no test leaves a fake
+ * running, even one that fails before it checks.
+ */
+function claudeConsumer(t, { runtime = {}, fake = {} } = {}) {
+  const logDir = tempDir("dream-claude-log-");
+  const log = path.join(logDir, "claude.jsonl");
+  t.after(() => {
+    for (const pid of loggedPids(log)) if (alive(pid)) process.kill(pid, "SIGKILL");
+    fs.rmSync(logDir, { recursive: true, force: true });
+  });
   const c0 = consumer(t);
-  const executable = fakeClaude(c0.root);
-  const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable } } });
-  const log = path.join(c.root, "claude.jsonl");
-  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log });
+  const executable = fakeClaude(c0.root, { log, ...fake });
+  const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable, ...runtime } } });
+  return { c, c0, log, executable };
+}
+
+/** Start the dream command as a child; resolves its exit, or kills it after `limitMs`. Killed in `t.after` if still running. */
+function startDream(t, c) {
+  const child = spawn(process.execPath, [KIT_CLI, "run", "--config", c.configFile], { cwd: c.work, env: c.env, stdio: ["ignore", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  const out = { stdout: "", stderr: "" };
+  child.stdout.on("data", (chunk) => { out.stdout += chunk; });
+  child.stderr.on("data", (chunk) => { out.stderr += chunk; });
+  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+  const exit = (limitMs) => Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), limitMs))]);
+  return { child, out, exit };
+}
+const until = async (condition, limitMs = 30_000) => {
+  const deadline = Date.now() + limitMs;
+  while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+  return condition();
+};
+const onDiskReport = (c, runId) => JSON.parse(fs.readFileSync(path.join(c.dreamDir, "reports", `${runId}.json`), "utf8"));
+
+test("runtime claude-code: a dirty parent environment reaches claude only through passEnv, and claude runs in safe mode", (t) => {
+  const c0 = consumer(t);
+  const guard = egressGuard(c0.root);
+  for (const passEnv of [[], ["ANTHROPIC_BASE_URL"]]) {
+    const { c, log, executable } = claudeConsumer(t, { runtime: { passEnv } });
+    const egress = path.join(c.root, "egress.jsonl");
+    const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { ...PLANTED, USER: "fixture-user", EGRESS_LOG: egress, EGRESS_ALLOWED_EXEC: executable }, ["--require", guard]);
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.claims.created, 1, "the sitting was distilled through claude");
+    assert.deepEqual(readLines(egress), [{ exec: "spawn", command: executable }, { exec: "spawn", command: executable }], "claude, once per pass, and nothing else");
+
+    // Exactly Relay's base (PATH, HOME, USER, TMPDIR), the names in passEnv, and the trigger guard. XDG_* from the
+    // parent are not in it either.
+    const names = ["FLOW_AGENTS_DREAM_TRIGGER", "HOME", "PATH", "TMPDIR", "USER", ...passEnv].sort();
+    const calls = readLines(log);
+    assert.equal(calls.length, 2);
+    for (const call of calls) {
+      assert.deepEqual(call.envNames.filter((name) => !PLATFORM_ADDED.has(name)), names, `passEnv ${JSON.stringify(passEnv)}`);
+      assert.deepEqual(call.planted, { ANTHROPIC_BASE_URL: passEnv.length ? PLANTED.ANTHROPIC_BASE_URL : null, GH_TOKEN: null, ANTHROPIC_API_KEY: null });
+      assert.equal(call.trigger, "0", "the session cannot start another dream run");
+      const at = call.argv.indexOf("--safe-mode");
+      assert.ok(at >= 0, "--safe-mode is passed");
+      assert.deepEqual(call.argv.slice(at, at + 3), SAFE_MODE_FLAGS, "--setting-sources is given an empty list");
+      assert.equal(call.cwd, path.join(c.dreamDir, "runtime", "claude-code"), "claude runs in the private directory under dreamDir");
+    }
+    assert.equal(fs.statSync(path.join(c.dreamDir, "runtime", "claude-code")).mode & 0o777, 0o700);
+
+    // The report on disk records what Relay says it passed: names and flags, never a value.
+    const written = onDiskReport(c, report.run_id);
+    assert.deepEqual(written.runtime, {
+      kind: "claude-code",
+      results: 2,
+      execution: [{ environment: { inherit: "allowlist", names }, isolation_flags: SAFE_MODE_FLAGS, process_group: process.platform === "win32" ? "shared" : "isolated" }],
+    });
+    for (const value of Object.values(PLANTED)) {
+      for (const [name, text] of [["stdout", result.stdout], ["stderr", result.stderr], ["report", JSON.stringify(written)]]) {
+        assert.equal(text.includes(value), false, `a planted value reached ${name}`);
+      }
+    }
+  }
+});
+
+test("runtime claude-code: a missing claude is setup (exit 2) and starts nothing; without runtime.executable, claude is found on PATH", (t) => {
+  const notExecutable = claudeConsumer(t);
+  fs.chmodSync(JSON.parse(fs.readFileSync(notExecutable.c.configFile, "utf8")).runtime.executable, 0o600);
+  const refused = notExecutable.c.run(KIT_CLI, ["run", "--config", notExecutable.c.configFile]);
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.match(refused.stderr, /^DREAM_MODEL_UNAVAILABLE: runtime\.executable is not an executable file/m);
+  assert.match(refused.stderr, /3\. The Claude Code CLI/, "with setup help");
+  assert.equal(fs.existsSync(notExecutable.log), false, "claude was never started");
+  assert.equal(fs.existsSync(notExecutable.c.dreamDir), false, "no run started and no working directory was made");
+
+  const { c, c0, log } = claudeConsumer(t);
+  const config = JSON.parse(fs.readFileSync(c.configFile, "utf8"));
+  delete config.runtime.executable;
+  fs.writeFileSync(c.configFile, JSON.stringify(config), { mode: 0o600 });
+  const empty = path.join(c.root, "empty-bin");
+  fs.mkdirSync(empty);
+  const missing = c.run(KIT_CLI, ["run", "--config", c.configFile], { PATH: empty });
+  assert.equal(missing.status, 2, missing.stderr);
+  assert.match(missing.stderr, /^DREAM_MODEL_UNAVAILABLE: the claude command is not on PATH/m);
+  assert.equal(fs.existsSync(log), false);
+  const found = c.run(KIT_CLI, ["run", "--config", c.configFile], { PATH: `${empty}${path.delimiter}${c0.root}` });
+  assert.equal(found.status, 0, found.stderr);
+  assert.equal(readLines(log).length, 2, "the claude found on PATH ran once per pass");
+});
+
+test("runtime claude-code: claude refusing its sign-in on every pass is setup (exit 2), through Dispatch", (t) => {
+  const { c, log } = claudeConsumer(t, { fake: { statuses: "401,401" } });
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
+  assert.equal(readLines(log).length, 2, "both passes reached claude");
   assert.equal(result.status, 2, result.stderr);
-  assert.match(result.stderr, /^DREAM_MODEL_UNSUPPORTED: runtime "claude-code" is not available yet/m);
-  assert.match(result.stderr, /kontourai\/relay#84/);
-  assert.match(result.stderr, /Give the dream run a model in one of these ways/, "and says what does work");
-  assert.equal(fs.existsSync(log), false, "the claude command was never started");
-  assert.equal(fs.existsSync(path.join(c.dreamDir, "reports")), false, "no run started");
-  const dry = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
-  assert.equal(dry.status, 0, "a dry run needs no model, so the option does not block it");
+  assert.match(result.stderr, /^DREAM_MODEL_UNAVAILABLE: the model runtime refused its credentials on every pass/m);
+  assert.match(result.stderr, /sign in with \/login/);
+  assert.equal(JSON.parse(result.stdout).status, "failed");
+});
+
+test("runtime claude-code: a claude that never answers is stopped at runtime.timeoutMs, wrapper and child, SIGKILL included", (t) => {
+  // claude is a non-exec /bin/sh wrapper around a child that ignores SIGTERM.
+  const { c, log } = claudeConsumer(t, { runtime: { timeoutMs: 1000 }, fake: { hang: true, wrapper: true } });
+  const pids = () => loggedPids(log);
+  const started = Date.now();
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
+  assert.equal(result.status, 1, `${result.stderr} (status ${result.status}, signal ${result.signal})`);
+  assert.match(result.stderr, /^DREAM_DISTILL_FAILED/m);
+  assert.ok(Date.now() - started < 30_000, "both passes were stopped, not left to the test's 60 s limit");
+  assert.equal(readLines(log).length, 2, "each pass started claude");
+  assertWrapperRecorded(log);
+  for (const pid of pids()) assert.equal(alive(pid), false, `claude process ${pid} (wrapper or its child) is still running`);
+  assert.equal(fs.existsSync(path.join(c.dreamDir, "cursors", "runtime-session.cursor.json")), false, "the cursor is held");
+});
+
+const proposalsIn = (c) => filesUnder(path.join(c.memoryRoot, ".corpus-proposals"));
+const cursorOf = (c) => path.join(c.dreamDir, "cursors", "runtime-session.cursor.json");
+
+test("runtime claude-code: SIGINT to the run (a terminal's Ctrl-C) stops claude, wrapper and child, and the run exits 130", async (t) => {
+  const { c, log } = claudeConsumer(t, { fake: { hang: true, wrapper: true } });
+  const run = startDream(t, c);
+  assert.ok(await until(() => readLines(log).length === 1), "claude started and is hanging");
+  assertWrapperRecorded(log);
+  const started = Date.now();
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.ok(Date.now() - started < 10_000, "the run exited promptly");
+  assert.match(run.out.stderr, /^DREAM_INTERRUPTED: stopped by SIGINT/m);
+  assert.ok(await until(() => loggedPids(log).every((pid) => !alive(pid)), 2_000), "claude, wrapper and child, survived the interrupt");
+  assert.equal(fs.existsSync(cursorOf(c)), false, "the cursor is held");
+});
+
+test("SIGINT during the last model call: the half-answered sitting is not proposed, the cursor is held, exit 130", async (t) => {
+  // Pass 1 answers; pass 2 hangs. Without the interrupt check, one good pass of two would be proposed and committed.
+  const { c, log } = claudeConsumer(t, { fake: { hangFrom: 2 } });
+  const run = startDream(t, c);
+  assert.ok(await until(() => readLines(log).length === 2), "pass 1 answered and pass 2 started");
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.deepEqual(proposalsIn(c), [], "nothing was proposed");
+  assert.equal(fs.existsSync(c.published), false, "nothing was published");
+  assert.equal(fs.existsSync(cursorOf(c)), false, "the cursor is held");
+  const report = JSON.parse(run.out.stdout);
+  assert.equal(report.status, "failed");
+  assert.equal(report.error.code, "DREAM_INTERRUPTED");
+});
+
+test("SIGINT after the last model call (while the host publishes): the run stops before briefs and the cursor, exit 130", async (t) => {
+  const { c } = claudeConsumer(t);
+  const marker = path.join(c.root, "publishing");
+  const host = path.join(c.root, "slow-host.mjs");
+  fs.writeFileSync(host, `
+    import fs from "node:fs";
+    import { FakeCorpusStore } from ${JSON.stringify(SUPPORT)};
+    export async function createDreamHost({ dryRun }) {
+      if (!dryRun) fs.mkdirSync(${JSON.stringify(c.memoryRoot)}, { recursive: true });
+      return {
+        store: new FakeCorpusStore(${JSON.stringify(c.memoryRoot)}), registerRoot() {}, root: ${JSON.stringify(c.memoryRoot)}, rootName: "memory",
+        async publish(batch) {
+          fs.writeFileSync(${JSON.stringify(marker)}, "");
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          fs.appendFileSync(${JSON.stringify(c.published)}, JSON.stringify(batch) + "\\n");
+        },
+      };
+    }
+  `, { mode: 0o600 });
+  fs.writeFileSync(c.configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(c.configFile, "utf8")), host }), { mode: 0o600 });
+  const run = startDream(t, c);
+  assert.ok(await until(() => fs.existsSync(marker)), "the model calls are done and the host is publishing");
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.equal(fs.existsSync(cursorOf(c)), false, "the cursor is held");
+  assert.deepEqual(filesUnder(path.join(c.dreamDir, "briefs")), [], "no briefs were written");
+  assert.equal(JSON.parse(run.out.stdout).error.code, "DREAM_INTERRUPTED");
+});
+
+test("a second SIGINT within Relay's grace period still kills claude's SIGTERM-ignoring child, and the run exits 130", async (t) => {
+  const { c, log } = claudeConsumer(t, { fake: { hang: true, wrapper: true } });
+  const run = startDream(t, c);
+  assert.ok(await until(() => readLines(log).length === 1), "claude started and is hanging");
+  assertWrapperRecorded(log);
+  run.child.kill("SIGINT");
+  // The first SIGINT sends the group SIGTERM: the wrapper exits, its child ignores it and keeps the pipes, so the run
+  // waits on Relay's 2 s SIGKILL. A second signal inside that window must not let this process die before it.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  run.child.kill("SIGINT");
+  assert.deepEqual(await run.exit(20_000), { code: 130, signal: null }, run.out.stderr);
+  assert.match(run.out.stderr, /^dream: interrupted twice; stopping claude processes$/m, "the second signal says what it does");
+  assert.ok(await until(() => loggedPids(log).every((pid) => !alive(pid)), 1_000), `a claude process survived: ${loggedPids(log).filter(alive)}`);
+});
+
+test("signal handlers: none when main() runs in a host's process; with handleSignals they are removed after the grace period", async (t) => {
+  const { main } = await import(KIT_CLI);
+  const sink = { write() { return true; } };
+  const counts = () => [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  const baseline = counts();
+  const { c } = claudeConsumer(t);
+  assert.equal(await main(["run", "--config", c.configFile], { stdout: sink, stderr: sink }), 0);
+  assert.deepEqual(counts(), baseline, "an in-process run installs no handlers");
+  const { c: c2 } = claudeConsumer(t);
+  assert.equal(await main(["run", "--config", c2.configFile], { stdout: sink, stderr: sink, handleSignals: true }), 0);
+  assert.deepEqual(counts(), baseline.map((n) => n + 1), "the command keeps its handlers through the grace period");
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  assert.deepEqual(counts(), baseline, "and then removes them");
+});
+
+test("user turns a person did not write are counted in the report, and the command says so", (t) => {
+  const { c } = claudeConsumer(t);
+  // An SDK client's prompt in the same sitting: Ferry reads it as unknown, so it is left out and counted.
+  const session = path.join(c.transcripts, "session.jsonl");
+  const base = { isSidechain: false, cwd: "/Users/fixture-user/dev/ledger", sessionId: SESSION, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "sdk-cli" };
+  fs.appendFileSync(session, JSON.stringify({ ...base, parentUuid: "00000000-0000-4000-8000-0000000000b2", promptSource: "sdk", message: { role: "user", content: "SDK_BRIEF: also bump the version." }, type: "user", uuid: "00000000-0000-4000-8000-0000000000b3", timestamp: "2026-10-30T09:00:09.000Z" }) + "\n");
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.ingest.dropped_user_turns, { unknown: 1 });
+  assert.deepEqual(onDiskReport(c, report.run_id).ingest.dropped_user_turns, { unknown: 1 });
+  assert.match(result.stderr, /^note: 1 user turn\(s\) were not read as yours \(unknown 1\)/m);
+});
+
+test("Windows: a claude.cmd shim is refused as setup, configured or found on PATH, with the fix named", (t) => {
+  const dir = tempDir("dream-win-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, "claude.cmd"), "@echo off\r\n", { mode: 0o700 });
+  const refused = (fn, pattern) => assert.throws(fn, (error) => error.code === "DREAM_MODEL_UNAVAILABLE" && pattern.test(error.message) && /claude\.exe/.test(error.message));
+  refused(() => resolveClaudeExecutable(path.join(dir, "claude.cmd"), "", "win32"), /batch shim/);
+  refused(() => resolveClaudeExecutable(path.join(dir, "CLAUDE.BAT"), "", "linux"), /batch shim/);
+  refused(() => resolveClaudeExecutable(undefined, dir, "win32"), /only a claude\.cmd shim is on PATH/);
+  fs.writeFileSync(path.join(dir, "claude.exe"), "", { mode: 0o700 });
+  assert.equal(resolveClaudeExecutable(undefined, dir, "win32"), path.join(dir, "claude.exe"));
+});
+
+test("config: runtime.passEnv and runtime.timeoutMs are bounded, and refused past the bound", () => {
+  const base = { telemetryFile: "/t.jsonl", transcriptRoots: ["/r"], host: "/h.mjs" };
+  const runtime = (extra) => ({ ...base, runtime: { kind: "claude-code", model: "sonnet", ...extra } });
+  const names = (n) => Array.from({ length: n }, (_, i) => `VAR_${i}`);
+  assert.deepEqual(validateDreamConfig(runtime({ passEnv: names(MAX_PASS_ENV) })).runtime.passEnv, names(MAX_PASS_ENV));
+  assert.equal(validateDreamConfig(runtime({ timeoutMs: MAX_RUNTIME_TIMEOUT_MS })).runtime.timeoutMs, MAX_RUNTIME_TIMEOUT_MS);
+  assert.equal(validateDreamConfig(runtime({ passEnv: ["A".repeat(MAX_ENV_NAME_LENGTH)] })).runtime.passEnv[0].length, MAX_ENV_NAME_LENGTH);
+  const allowed = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CONFIG_DIR"];
+  assert.deepEqual(validateDreamConfig(runtime({ passEnv: allowed })).runtime.passEnv, allowed, "the gateway, provider and config-dir names stay allowed");
+  for (const name of [...PASS_ENV_REFUSED, "DYLD_INSERT_LIBRARIES", "dyld_library_path", "node_options", "Path",
+    "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_PARAMETERS", "git_ssh_command"]) {
+    assert.throws(() => validateDreamConfig(runtime({ passEnv: ["ANTHROPIC_BASE_URL", name] })), (error) => error.code === "DREAM_CONFIG_INVALID" && /may not name/.test(error.message), name);
+  }
+  for (const extra of [
+    { passEnv: ["A".repeat(MAX_ENV_NAME_LENGTH + 1)] },
+    { passEnv: names(MAX_PASS_ENV + 1) }, { passEnv: "ANTHROPIC_BASE_URL" }, { passEnv: ["ANTHROPIC_BASE_URL", "ANTHROPIC_BASE_URL"] },
+    { passEnv: ["1BAD"] }, { passEnv: ["A=B"] }, { passEnv: [""] }, { passEnv: [7] },
+    { timeoutMs: 0 }, { timeoutMs: -1 }, { timeoutMs: 1.5 }, { timeoutMs: MAX_RUNTIME_TIMEOUT_MS + 1 }, { timeoutMs: "1000" },
+  ]) {
+    assert.throws(() => validateDreamConfig(runtime(extra)), (error) => error.code === "DREAM_CONFIG_INVALID", JSON.stringify(extra).slice(0, 80));
+  }
 });
 
 function authRun(t, statuses) {
@@ -236,6 +534,15 @@ test("config: runtime is validated, and cannot be combined with role", () => {
     assert.throws(() => validateDreamConfig({ ...base, runtime }), (error) => error.code === "DREAM_CONFIG_INVALID", JSON.stringify(runtime));
   }
   assert.throws(() => validateDreamConfig({ ...base, role: "r", runtime: { kind: "claude-code", model: "sonnet" } }), /role or runtime, not both/);
+});
+
+test("the dream command run through a symlinked path still runs (it compares real paths)", (t) => {
+  const c = consumer(t);
+  const link = path.join(c.root, "linked-dream-cli.js");
+  fs.symlinkSync(KIT_CLI, link);
+  const result = c.run(link, ["run", "--config", c.configFile]);
+  assert.equal(result.status, 2, `the command did not run: status ${result.status}, stderr ${result.stderr}`);
+  assert.match(result.stderr, /^DREAM_MODEL_UNCONFIGURED/m);
 });
 
 // ── 3. A symlinked config path names the path to use ─────────────────────────────────────────────────────────

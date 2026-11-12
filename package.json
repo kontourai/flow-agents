@@ -405,7 +405,7 @@
     "test:delegation-rounds": "npm run build --silent && node --test src/cli/delegation-group-rounds.test.mjs src/cli/delegation-flow-runtime.test.mjs"
   },
   "devDependencies": {
-    "@kontourai/corpus-store": "0.1.0-next.0",
+    "@kontourai/corpus-store": "0.1.0-next.5",
     "@kontourai/forage": "1.0.2",
     "@kontourai/lookout": "0.8.9",
     "@kontourai/veritas": "1.12.1",
@@ -417,16 +417,16 @@
     "yaml": "2.9.1"
   },
   "dependencies": {
-    "@kontourai/conduit": "0.7.1",
+    "@kontourai/conduit": "0.8.0",
     "@kontourai/datum": "0.8.1",
-    "@kontourai/dispatch": "0.8.0",
-    "@kontourai/ferry": "0.6.0",
+    "@kontourai/dispatch": "0.8.1",
+    "@kontourai/ferry": "0.8.0",
     "@kontourai/flow": "5.4.0",
-    "@kontourai/relay": "0.7.1",
+    "@kontourai/relay": "0.8.0",
     "@kontourai/surface": "5.0.0",
     "@kontourai/surface-knowledge": "npm:@kontourai/surface@6.3.0",
-    "@kontourai/survey": "8.4.0",
-    "@kontourai/thread": "0.5.0",
+    "@kontourai/survey": "9.0.0",
+    "@kontourai/thread": "0.7.0",
     "@kontourai/traverse": "5.0.3",
     "esbuild": "0.28.2"
   },

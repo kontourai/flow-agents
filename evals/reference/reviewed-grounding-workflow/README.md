@@ -1,7 +1,7 @@
 # Reviewed grounding reference workflow
 
 This deterministic reference composes Forage 1.0.2, Traverse 5.0.3, Survey
-8.4.0, Lookout 0.8.9, and Surface 5.0.0 through their public contracts. The
+9.0.0, Lookout 0.8.9, and Surface 5.0.0 through their public contracts. The
 returned revision record and integration test bind these manifest pins.
 Forage, Traverse, and Lookout are exact development dependencies; Survey and
 Surface use the existing runtime pins. The fixture adds no runtime dependency.

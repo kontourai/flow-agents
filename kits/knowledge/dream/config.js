@@ -16,7 +16,38 @@ const KEYS = new Set([
   "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs",
   "triggerMinIntervalMs", "proposerId", "visibility", "runtime",
 ]);
-const RUNTIME_KEYS = new Set(["kind", "model", "executable"]);
+const RUNTIME_KEYS = new Set(["kind", "model", "executable", "passEnv", "timeoutMs"]);
+/** `runtime.passEnv` names at most this many variables; one more is refused, not truncated. */
+export const MAX_PASS_ENV = 32;
+/** `runtime.timeoutMs` may not exceed a day: an unattended run must end. */
+export const MAX_RUNTIME_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** A `runtime.passEnv` name longer than this is refused. */
+export const MAX_ENV_NAME_LENGTH = 128;
+/**
+ * Names `runtime.passEnv` refuses (compared without case). The base names are already passed. The rest make a loader,
+ * shell or interpreter run code or load libraries the run did not choose, inside the claude process or what it starts.
+ */
+export const PASS_ENV_REFUSED = Object.freeze([
+  "PATH", "HOME", "USER", "TMPDIR",
+  "NODE_OPTIONS", "NODE_PATH", "NODE_REPL_EXTERNAL_MODULE",
+  "BASH_ENV", "ENV", "BASHOPTS", "SHELLOPTS", "PROMPT_COMMAND", "PS4",
+  "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+  "PYTHONSTARTUP", "PYTHONPATH", "PYTHONHOME",
+  "PERL5OPT", "PERL5LIB", "PERLLIB", "RUBYOPT", "RUBYLIB",
+  "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS",
+  "GIT_CONFIG", "GIT_SSH_COMMAND", "GIT_SSH", "GIT_EXEC_PATH", "GIT_ASKPASS", "SSH_ASKPASS", "GCONV_PATH",
+]);
+/**
+ * Name prefixes `runtime.passEnv` refuses: the macOS dynamic loader's variables, and git's environment configuration
+ * (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n/VALUE_n, GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM, GIT_CONFIG_PARAMETERS, ...), which can
+ * set any git option, including commands git runs.
+ */
+export const PASS_ENV_REFUSED_PREFIXES = Object.freeze(["DYLD_", "GIT_CONFIG_"]);
+const refusedPassEnv = (name) => {
+  const upper = name.toUpperCase();
+  return PASS_ENV_REFUSED.includes(upper) || PASS_ENV_REFUSED_PREFIXES.some((prefix) => upper.startsWith(prefix));
+};
 const POSITIVE_INTEGERS = ["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "idleGapMs", "triggerMinIntervalMs"];
 
 export const DEFAULT_ROLE = "extraction-default";
@@ -78,6 +109,20 @@ function validateRuntime(runtime, role) {
   if (runtime.kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", 'runtime.kind must be "claude-code"');
   if (typeof runtime.model !== "string" || !runtime.model.trim()) throw dreamError("DREAM_CONFIG_INVALID", "runtime.model must name a model the claude command accepts, such as sonnet");
   if (runtime.executable !== undefined) assertAbsolute(runtime.executable, "runtime.executable");
+  // The claude process inherits only PATH, HOME, USER and TMPDIR, plus the variables named here (model.js).
+  if (runtime.passEnv !== undefined) {
+    if (!Array.isArray(runtime.passEnv)) throw dreamError("DREAM_CONFIG_INVALID", "runtime.passEnv must list environment variable names");
+    if (runtime.passEnv.length > MAX_PASS_ENV) throw dreamError("DREAM_CONFIG_INVALID", `runtime.passEnv may name at most ${MAX_PASS_ENV} variables`);
+    runtime.passEnv.forEach((name, i) => {
+      if (typeof name !== "string" || !ENV_NAME.test(name)) throw dreamError("DREAM_CONFIG_INVALID", `runtime.passEnv[${i}] must be an environment variable name`);
+      if (name.length > MAX_ENV_NAME_LENGTH) throw dreamError("DREAM_CONFIG_INVALID", `runtime.passEnv[${i}] is longer than ${MAX_ENV_NAME_LENGTH} characters`);
+      if (refusedPassEnv(name)) throw dreamError("DREAM_CONFIG_INVALID", `runtime.passEnv may not name ${name}: it is already passed, or it makes a loader or interpreter run code the run did not choose`);
+    });
+    if (new Set(runtime.passEnv).size !== runtime.passEnv.length) throw dreamError("DREAM_CONFIG_INVALID", "runtime.passEnv names a variable twice");
+  }
+  if (runtime.timeoutMs !== undefined && !(Number.isSafeInteger(runtime.timeoutMs) && runtime.timeoutMs > 0 && runtime.timeoutMs <= MAX_RUNTIME_TIMEOUT_MS)) {
+    throw dreamError("DREAM_CONFIG_INVALID", `runtime.timeoutMs must be a positive integer of at most ${MAX_RUNTIME_TIMEOUT_MS}`);
+  }
   // Two sources for one model would leave the reader of the config guessing which one ran.
   if (role !== undefined) throw dreamError("DREAM_CONFIG_INVALID", "set role or runtime, not both");
 }

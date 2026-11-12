@@ -29,7 +29,8 @@ import {
   scrubResidueText,
   SESSION_SOURCE_IDS,
 } from "./index.js";
-import { stripInjectedContent } from "./runtime-transcript.js";
+import { createClaudeCodeImporter, createCodexImporter } from "@kontourai/ferry";
+import { conversationFromThread, readConversation, stripInjectedContent, TranscriptFormatError } from "./runtime-transcript.js";
 import { validate } from "../providers/lib/schema-validate.js";
 
 // The CJS fs object: the one whose methods can be hooked (an ESM namespace is read-only).
@@ -183,11 +184,24 @@ describe("AC1 residue contract and workflow-sidecar compatibility", () => {
 });
 
 describe("AC2 runtime-session parsing, sittings and provenance", () => {
+  test("dropped user turns are summed across the transcripts a run reads, not overwritten", () => {
+    const box = sandbox();
+    const other = "5b1f2c3d-0000-4000-8000-00000000c1a1";
+    const copy = path.join(path.dirname(box.claudeTranscript), `${other}.jsonl`);
+    fs.writeFileSync(copy, fs.readFileSync(box.claudeTranscript, "utf8").replaceAll(CLAUDE_SESSION, other));
+    appendTelemetry(box, event("claude-code", box.claudeTranscript), event("claude-code", copy));
+    const { report } = run(box);
+    assert.equal(report.blocked.length, 0);
+    assert.deepEqual(report.dropped_user_turns, { unknown: 4 }, "two transcripts with two each");
+  });
+
   test("Claude Code project JSONL yields user/assistant text sittings with provenance", () => {
     const box = sandbox();
     appendTelemetry(box, event("claude-code", box.claudeTranscript));
     const { residues, report } = run(box);
     assert.equal(report.blocked.length, 0);
+    // The peer message and the task notification carry a non-human raw origin: removed before import, counted unknown.
+    assert.deepEqual(report.dropped_user_turns, { unknown: 2 });
     assert.deepEqual(residues.map((r) => r.sittingId), [`claude-code:${CLAUDE_SESSION}:0`, `claude-code:${CLAUDE_SESSION}:1`]);
     const [first, second] = residues;
     assert.deepEqual(first.provenance, {
@@ -233,6 +247,7 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
     const box = sandbox();
     appendTelemetry(box, event("codex", box.codexRollout), event("codex", box.codexSubagent));
     const { residues, report, candidateCursor } = run(box);
+    assert.deepEqual(report.dropped_user_turns, { agent: 1 }, "the inter-agent message");
     assert.deepEqual(residues.map((r) => r.sittingId), [`codex:${CODEX_SESSION}:0`, `codex:${CODEX_SESSION}:1`]);
     assert.deepEqual(residues[0].provenance, {
       harness: "codex",
@@ -303,7 +318,7 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
   test("transcript drift and shape faults block with a reason instead of yielding residue", () => {
     const claudeLine = (extra = {}) =>
       JSON.stringify({
-        parentUuid: null, isSidechain: false, type: "user", uuid: "u", timestamp: "2026-10-30T09:00:01.000Z",
+        parentUuid: null, isSidechain: false, type: "user", uuid: "u", timestamp: "2026-10-30T09:00:01.000Z", origin: { kind: "human" }, promptSource: "typed",
         cwd: "/w", sessionId: CLAUDE_SESSION, version: "9.0.0", gitBranch: "main",
         message: { role: "user", content: "hello there" }, ...extra,
       });
@@ -453,7 +468,7 @@ describe("AC2 watermark cursor", () => {
     fs.appendFileSync(
       box.claudeTranscript,
       `${JSON.stringify({
-        parentUuid: null, isSidechain: false, type: "user", uuid: "late", timestamp: "2026-10-30T10:35:00.000Z",
+        parentUuid: null, isSidechain: false, type: "user", uuid: "late", timestamp: "2026-10-30T10:35:00.000Z", origin: { kind: "human" }, promptSource: "typed",
         cwd: "/Users/fixture-user/dev/widget-service", sessionId: CLAUDE_SESSION, version: "2.1.316", gitBranch: "feat/retry-budget-test",
         message: { role: "user", content: "Also cover the jitter path." },
       })}\n`,
@@ -517,7 +532,7 @@ describe("review round 1 regressions (PR #1575)", () => {
   const UID = "5b1f2c3d-0000-4000-8000-00000000f001";
   const STAMP = "2026-10-30T09:00:00.000Z";
   const claudeRec = (text, extra = {}) => ({
-    parentUuid: null, isSidechain: false, type: "user", uuid: "u1", timestamp: STAMP, cwd: "/w",
+    parentUuid: null, isSidechain: false, type: "user", uuid: "u1", timestamp: STAMP, cwd: "/w", origin: { kind: "human" }, promptSource: "typed",
     sessionId: UID, version: "2.1.0", gitBranch: "main", message: { role: "user", content: text }, ...extra,
   });
   const codexMeta = (extra = {}) => ({
@@ -1260,5 +1275,154 @@ describe("injected-memory marker", () => {
     );
     assert.equal(stripInjectedContent(`keep ${INJECTED_MEMORY_OPEN} memory with no close`), "keep");
     assert.equal(stripInjectedContent("<system-reminder>x</system-reminder>hi"), "hi");
+  });
+});
+
+// Ferry 0.8 / Thread 0.7 record who wrote each user message in `origin.kind`. A kept user turn is the person speaking
+// (it becomes a claim's speaker), so only `human` is kept. The records below are in the shapes Claude Code and Codex
+// write (keys and enumerated values as in Ferry's own provenance fixtures; every text, id and time is synthetic), and
+// each test first imports them with Ferry itself, so the Threads are exactly what Ferry 0.8 produces and each case is
+// shown to reach the origin kind it is named for. The cases that matter most are those the line-level shims in
+// runtime-ferry-shims.js do not remove, so only the origin filter can keep them out of a sitting.
+describe("Thread origin: only human-authored user messages reach a sitting", () => {
+  const CLAUDE_UID = "5b1f2c3d-0000-4000-8000-00000000e001";
+  const CODEX_UID = "019a0000-0000-7000-8000-00000000e002";
+  const at = (s) => `2026-11-01T09:00:${String(s).padStart(2, "0")}.000Z`;
+  const claudeUser = (n, text, extra = {}) => ({
+    parentUuid: null, isSidechain: false, type: "user", uuid: `00000000-0000-4000-8000-0000000e00${String(n).padStart(2, "0")}`,
+    timestamp: at(n), cwd: "/w", sessionId: CLAUDE_UID, version: "2.1.321", gitBranch: "main", userType: "external",
+    message: { role: "user", content: text }, ...extra,
+  });
+  const claudeAssistant = (n, text) => ({
+    parentUuid: null, isSidechain: false, type: "assistant", uuid: `00000000-0000-4000-8000-0000000e00${String(n).padStart(2, "0")}`,
+    timestamp: at(n), cwd: "/w", sessionId: CLAUDE_UID, version: "2.1.321", gitBranch: "main",
+    message: { model: "claude-opus-5-5", id: `msg_${n}`, type: "message", role: "assistant", content: [{ type: "text", text }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } },
+    requestId: `req_${n}`,
+  });
+  const codexMeta = (source) => ({ timestamp: at(0), ordinal: 0, type: "session_meta", payload: { id: CODEX_UID, session_id: CODEX_UID, timestamp: at(0), cwd: "/w", originator: "codex-tui", cli_version: "0.164.0", source, thread_source: "user", model_provider: "openai" } });
+  const codexUser = (n, text, passthrough) => ({
+    timestamp: at(n), ordinal: n, type: "response_item",
+    payload: { type: "message", id: `msg_e${n}`, role: "user", content: [{ type: "input_text", text }], ...(passthrough ? { internal_chat_message_metadata_passthrough: { turn_id: "t", ...passthrough } } : {}) },
+  });
+  const codexAgentMessage = (n, text) => ({
+    timestamp: at(n), ordinal: n, type: "response_item",
+    payload: { type: "agent_message", id: `am${n}`, author: "/root/worker", recipient: "/root", content: [{ type: "input_text", text }], internal_chat_message_metadata_passthrough: { turn_id: "t", content_item_metadata: [{ provenance: { type: "tool", namespace: "collaboration" } }] } },
+  });
+  const codexAssistant = (n, text) => ({
+    timestamp: at(n), ordinal: n, type: "response_item",
+    payload: { type: "message", status: "completed", id: `msg_e${n}`, role: "assistant", phase: "final_answer", content: [{ type: "output_text", text, annotations: [] }] },
+  });
+  const lines = (records) => records.map((record) => JSON.stringify(record));
+  const buffer = (records) => Buffer.from(`${lines(records).join("\n")}\n`);
+  /** The Thread Ferry 0.8 imports from these records, unfiltered. */
+  const ferryThread = (create, records) => {
+    const importer = create({});
+    importer.pushLines(lines(records));
+    importer.finalize();
+    return importer.thread();
+  };
+  /** Each user message's first text, mapped to the origin kind Ferry derived for it. */
+  const userOrigins = (thread) => Object.fromEntries(thread.messages.filter((m) => m.role === "user").map((m) => [m.content.find((p) => p.type === "text")?.text, m.origin?.kind]));
+  const kept = (conversation) => conversation.messages.map((m) => `${m.role}:${m.text}`);
+
+  const CLAUDE = [
+    claudeUser(1, "TYPED_HUMAN_PROMPT", { origin: { kind: "human" }, promptSource: "typed" }),
+    claudeAssistant(2, "CLAUDE_REPLY_ONE"),
+    // An SDK client submitted it: a person or an orchestrator. Claude Code stamps origin human on these too.
+    claudeUser(3, "SDK_BRIEF_MARKER", { promptSource: "sdk" }),
+    claudeUser(4, "SDK_HUMAN_LABEL_MARKER", { origin: { kind: "human" }, promptSource: "sdk" }),
+    // The model wrote it and a person only accepted it.
+    claudeUser(5, "ACCEPTED_SUGGESTION_MARKER", { origin: { kind: "human" }, promptSource: "suggestion_accepted" }),
+    // A record with neither field, as Claude Code wrote before it recorded them.
+    claudeUser(6, "NO_SIGNAL_MARKER"),
+    claudeUser(7, "PEER_AGENT_MARKER", { origin: { kind: "peer", from: "fixture-id-1" }, promptSource: "system" }),
+    claudeAssistant(8, "CLAUDE_REPLY_TWO"),
+  ];
+
+  test("Claude Code: a typed prompt is kept; SDK, accepted-suggestion and unsignalled prompts are unknown and dropped", () => {
+    assert.deepEqual(userOrigins(ferryThread(createClaudeCodeImporter, CLAUDE)), {
+      TYPED_HUMAN_PROMPT: "human",
+      SDK_BRIEF_MARKER: "unknown",
+      SDK_HUMAN_LABEL_MARKER: "unknown",
+      ACCEPTED_SUGGESTION_MARKER: "unknown",
+      NO_SIGNAL_MARKER: "unknown",
+      PEER_AGENT_MARKER: "agent",
+    });
+    const conversation = readConversation("claude-code", buffer(CLAUDE));
+    assert.equal(conversation.sessionId, CLAUDE_UID);
+    assert.deepEqual(kept(conversation), ["user:TYPED_HUMAN_PROMPT", "assistant:CLAUDE_REPLY_ONE", "assistant:CLAUDE_REPLY_TWO"]);
+    // The peer record's raw origin is not human, so the line shim removes it before import and it counts as unknown.
+    assert.deepEqual(conversation.droppedUserTurns, { unknown: 5 }, "each dropped user turn is counted");
+  });
+
+  const CODEX = [
+    codexMeta("cli"),
+    codexUser(1, "CLI_HUMAN_PROMPT", { content_item_kinds: ["user.text"], content_item_metadata: [{ provenance: { type: "user" } }] }),
+    codexAssistant(2, "CODEX_REPLY_ONE"),
+    // An inter-agent message delivered to this session: Ferry 0.6 dropped it, Ferry 0.8 imports it as a user message.
+    codexAgentMessage(3, "AGENT_BRIEF_MARKER"),
+    // Harness provenance on plain text: no wrapper tag the tag list could strip.
+    codexUser(4, "HARNESS_PROVENANCE_MARKER", { content_item_kinds: ["generic.turn_aborted"], content_item_metadata: [{ provenance: { type: "harness", hook: false } }] }),
+    codexUser(5, "UNKNOWN_KIND_MARKER", { content_item_kinds: ["unknown"] }),
+    codexAssistant(6, "CODEX_REPLY_TWO"),
+  ];
+
+  test("Codex: a cli prompt is kept; an agent_message, harness provenance and an unknown item are dropped", () => {
+    assert.deepEqual(userOrigins(ferryThread(createCodexImporter, CODEX)), {
+      CLI_HUMAN_PROMPT: "human",
+      AGENT_BRIEF_MARKER: "agent",
+      HARNESS_PROVENANCE_MARKER: "harness",
+      UNKNOWN_KIND_MARKER: "unknown",
+    });
+    const conversation = readConversation("codex", buffer(CODEX));
+    assert.deepEqual(kept(conversation), ["user:CLI_HUMAN_PROMPT", "assistant:CODEX_REPLY_ONE", "assistant:CODEX_REPLY_TWO"]);
+    assert.deepEqual(conversation.droppedUserTurns, { agent: 1, harness: 1, unknown: 1 });
+  });
+
+  test("Codex: a session started by a client that relays people and orchestrators (exec) has no human turns", () => {
+    const records = [codexMeta("exec"), codexUser(1, "EXEC_PROMPT_MARKER"), codexAssistant(2, "EXEC_REPLY")];
+    assert.deepEqual(userOrigins(ferryThread(createCodexImporter, records)), { EXEC_PROMPT_MARKER: "unknown" });
+    const conversation = readConversation("codex", buffer(records));
+    assert.deepEqual(kept(conversation), ["assistant:EXEC_REPLY"]);
+    assert.deepEqual(conversation.droppedUserTurns, { unknown: 1 });
+  });
+
+  // Ferry 0.8 reads Claude Code's own origin.kind first but trusts promptSource typed/queued over an origin it does not
+  // map, so each record below would import as human. The line shim removes any record whose raw origin is not
+  // { kind: "human" }, and the run counts it as unknown.
+  for (const [name, extra] of [
+    ["an unclassified origin.kind", { origin: { kind: "unclassified" }, promptSource: "typed" }],
+    ["an origin.kind Ferry does not know yet", { origin: { kind: "observer" }, promptSource: "queued" }],
+    ["a non-object origin", { origin: "peer", promptSource: "typed" }],
+  ]) {
+    test(`Claude Code: ${name} with a typed prompt source is not read as the person`, () => {
+      const records = [claudeUser(1, "UNMAPPED_ORIGIN_MARKER", extra), claudeAssistant(2, "UNMAPPED_REPLY")];
+      assert.deepEqual(userOrigins(ferryThread(createClaudeCodeImporter, records)), { UNMAPPED_ORIGIN_MARKER: "human" }, "Ferry alone reads it as human");
+      const conversation = readConversation("claude-code", buffer(records));
+      assert.deepEqual(kept(conversation), ["assistant:UNMAPPED_REPLY"]);
+      assert.deepEqual(conversation.droppedUserTurns, { unknown: 1 });
+    });
+  }
+
+  test("a user message with no origin is drift: the importer did not derive one, so nothing says a person wrote it", () => {
+    const thread = ferryThread(createCodexImporter, CODEX);
+    assert.deepEqual(kept(conversationFromThread(thread)), ["user:CLI_HUMAN_PROMPT", "assistant:CODEX_REPLY_ONE", "assistant:CODEX_REPLY_TWO"]);
+    const human = thread.messages.find((m) => m.role === "user" && m.origin?.kind === "human");
+    delete human.origin;
+    assert.throws(() => conversationFromThread(thread), (error) => error instanceof TranscriptFormatError && error.reason === "UNKNOWN_TRANSCRIPT_FORMAT" && /no origin/.test(error.message));
+  });
+
+  test("a Claude Code subagent's own transcript is a sidechain, as a Codex subagent rollout is", () => {
+    // As Claude Code writes a subagent's transcript: every record a sidechain carrying the agent id, and the brief a
+    // user record with no origin or promptSource (the parent agent wrote it).
+    const sub = (record) => ({ ...record, isSidechain: true, agentId: "a0e1" });
+    const records = [sub(claudeUser(1, "SUBAGENT_BRIEF_MARKER")), sub(claudeAssistant(2, "SUBAGENT_REPLY_MARKER"))];
+    const thread = ferryThread(createClaudeCodeImporter, records);
+    assert.equal(thread.metadata.custom.claudeSubagent.parentSessionId, CLAUDE_UID, "Ferry 0.8 imports it as a subagent thread");
+    assert.deepEqual(userOrigins(thread), { SUBAGENT_BRIEF_MARKER: "agent" });
+    const conversation = readConversation("claude-code", buffer(records));
+    assert.equal(conversation.sidechain, true);
+    assert.equal(conversation.sessionId, CLAUDE_UID);
+    assert.deepEqual(conversation.messages, []);
   });
 });

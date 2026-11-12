@@ -964,8 +964,23 @@ cursor. It needs the full channel, because the analytics channel redacts
 `hook.transcript_path`. For each `claude-code` or `codex` event it reads the
 referenced Claude Code project JSONL or Codex rollout. Then it:
 
-- keeps only user and assistant **text**. It drops tool calls and results,
-  thinking and reasoning, images, sidechains and subagent rollouts, meta and
+- keeps only assistant **text** and the text of user messages a person wrote.
+  A kept user turn becomes the speaker of the claims distilled from it, so it
+  carries the person's authority. Ferry records who wrote each user message in
+  the Thread's `origin.kind`, and only `human` is kept. `agent` (a subagent
+  brief, a peer or coordinator message, a Codex `agent_message`), `harness`,
+  `hook`, `compaction` and `task-notification` are dropped. So is `unknown`:
+  the transcript cannot say who wrote it. That covers a prompt submitted
+  through an SDK or IDE client (Claude Code `promptSource: "sdk"`, a Codex
+  session whose `session_meta.source` is not `cli`), an accepted suggestion,
+  and a Claude Code record from before Claude Code wrote `origin` and
+  `promptSource`. From such a session only the assistant's side is
+  distilled. Each dream report counts the user turns left out this way, by
+  kind, in `ingest.dropped_user_turns`, and the command prints a one-line note
+  when there are any. An opt-in that reads some of these turns as yours is
+  planned; until it ships, the default is the only behaviour. A user message with no `origin` at all is drift, because Ferry's
+  Claude Code and Codex importers always derive one. It also drops tool calls and results,
+  thinking and reasoning, images, sidechains and subagent transcripts, meta and
   compact-summary entries, and harness-originated entries such as task
   notifications. It also drops harness tags, such as `<system-reminder>` and
   `<environment_context>`, Codex developer instructions, and any block wrapped in the injected-memory marker
@@ -1044,8 +1059,10 @@ Ownership boundaries:
   rollout does not open with a `session_meta`. Drift is reported as `UNKNOWN_TRANSCRIPT_FORMAT`, holds the
   cursor, and never crashes the run.
 - **Temporary shims** (`promote/runtime-ferry-shims.js`) cover what the Thread
-  does not carry yet, each tied to an upstream issue and to be deleted when it
-  ships. Each reads one record-level fact from one raw line, and the flagged
+  did not carry, each tied to an upstream issue and to be deleted when it
+  ships. Thread 0.7 now carries `origin` and imports Codex `developer` items as
+  `system` messages, and the user-turn filter above reads them. The line-level
+  shims stay as a second layer. Each reads one record-level fact from one raw line, and the flagged
   *line* is removed before Ferry imports the rest, so there is no join on ids,
   text or time: Claude `origin.kind` other than `human`, compact summaries and
   transcript-only entries ([thread#76](https://github.com/kontourai/thread/issues/76));
@@ -1188,16 +1205,61 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
    The default runtime factory supports `anthropic-compatible` providers.
 2. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
 
-The Claude Code CLI (a Claude subscription without an API key) is **not available yet**. The config accepts
-`"runtime": { "kind": "claude-code", "model": "sonnet" }`, but a real run with it exits 2 with `DREAM_MODEL_UNSUPPORTED`
-and starts nothing. Relay's Claude Code runtime would start `claude` with this process's whole environment, including
-provider keys, gateway URLs and other services' tokens. It would also start a full session that loads your hooks, MCP
-servers and `CLAUDE.md`, and any of those would see the transcript excerpt. The option opens when Relay can restrict
-both ([relay#84](https://github.com/kontourai/relay/issues/84)). Until then, a host that wants the CLI builds that
-runtime itself and owns those risks.
+3. **The Claude Code CLI**, for a Claude subscription signed in to the `claude` command instead of an API key. Set
+   `runtime` in the config instead of `role`:
+
+   ```json
+   {"runtime":{"kind":"claude-code","model":"sonnet","passEnv":["ANTHROPIC_BASE_URL"]}}
+   ```
+
+   `model` is any model name `claude --model` accepts. `executable` (an absolute path) is optional; without it the
+   run uses the first `claude` on `PATH`. `passEnv` and `timeoutMs` are optional too.
+
+   The excerpt the run sends is transcript text, so `claude` starts with as little of your setup as possible:
+
+   - **Environment.** It gets only `PATH`, `HOME`, `USER` and `TMPDIR`, plus the variables you name in
+     `passEnv` (at most 32). Provider keys, gateway URLs and other services' tokens in the run's environment do not
+     reach it unless you name them. If you route Claude through your own gateway with `ANTHROPIC_BASE_URL`, name it,
+     as in the example. `passEnv` refuses the base names, which are already passed, and names that make a loader,
+     shell or interpreter run code the run did not choose: `NODE_OPTIONS`, `NODE_PATH`, `NODE_REPL_EXTERNAL_MODULE`,
+     `BASH_ENV`, `ENV`, `BASHOPTS`, `SHELLOPTS`, `PROMPT_COMMAND`, `PS4`, `LD_PRELOAD`, `LD_LIBRARY_PATH`,
+     `LD_AUDIT`, any `DYLD_*`, `PYTHONSTARTUP`, `PYTHONPATH`, `PYTHONHOME`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`,
+     `RUBYOPT`, `RUBYLIB`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`, `GIT_CONFIG` and any
+     `GIT_CONFIG_*`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_EXEC_PATH`, `GIT_ASKPASS`, `SSH_ASKPASS` and `GCONV_PATH`
+     (without regard to case). `ANTHROPIC_*`, `CLAUDE_CODE_USE_*` and `CLAUDE_CONFIG_DIR` may be named.
+     A name may be at most 128 characters.
+   - **Isolation.** It runs with `--safe-mode --setting-sources ""`, so it loads none of your hooks, MCP servers,
+     `CLAUDE.md` files, skills, plugins, or user, project and local settings files. That includes a settings file's
+     `env` block and `apiKeyHelper`, so a gateway or key set only in a settings file is not used. Put it in the
+     environment and name it in `passEnv`.
+   - **What still applies.** Isolation does not change your stored login. If `claude` is signed in with an API key
+     (`primaryApiKey` in `~/.claude.json`), that key is used rather than a subscription. Admin-managed policy
+     settings also still apply, including their `env` and `apiKeyHelper`; no flag can turn them off.
+   - **Working directory.** `dreamDir/runtime/claude-code`, created `0700` and refused if anyone else can reach it.
+   - **Timeout and signals.** Each call is stopped after `timeoutMs` (default 10 minutes, at most a day). On macOS
+     and Linux `claude` runs in its own process group, and Relay sends the group `SIGTERM`, then `SIGKILL`
+     2 seconds later. That also stops a `claude` that is a shell or version-manager wrapper with the binary as its
+     child. A stopped call fails the run (exit 1) and holds the cursor. Because the group no longer receives a
+     terminal's Ctrl-C directly, the command catches `SIGINT` and `SIGTERM`. It stops `claude` the same way,
+     stops at the next step without proposing, publishing, writing briefs or committing the cursor (a sitting whose
+     pass was interrupted is never proposed), and exits 130 or 143. A second signal ends the run at once and first
+     sends `SIGKILL` to any `claude` group still running. Not covered: a process that leaves the group (`setsid`),
+     and the run itself being killed with `SIGKILL`, which leaves `claude` running until it ends. On Windows only
+     the direct child is signalled. A host that calls the dream in its own process gets none of this signal handling
+     unless it asks for it.
+   - **Windows.** A `claude.cmd` shim cannot be started without a shell, so the run refuses it (exit 2). Set
+     `executable` to the real `claude.exe`, or to the node script the shim runs.
+
+   A `claude` that cannot be found or is not executable, and one that refuses its sign-in on every pass, exit 2 with
+   setup help. Run `claude` and sign in with `/login`. Each report records, under `runtime`, what Relay says it
+   passed: the variable names (never their values), the isolation flags and the process group.
 
 A run's token budget counts input and output tokens. Relay does not count cached prompt tokens, so the budget can
 understate what a provider charges.
+
+**`publish` must be idempotent.** The host's `publish` delivers routed-review items. A run that is interrupted or
+crashes after it publishes does not commit its cursor, so the next run publishes the same batch again. Deliver it so
+that a repeat changes nothing, for example keyed by claim id (the next run has a new run id).
 
 **Dry runs and a new memory root.** `--dry-run` creates nothing. Constructing a Corpus store over a memory root
 that does not exist yet creates that root, because Corpus binds a root to a stable identity at construction. So when
