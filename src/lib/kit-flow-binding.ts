@@ -153,6 +153,21 @@ export function packagedKitRoot(startDir: string = path.dirname(fileURLToPath(im
 }
 
 /**
+ * Identity comes from THIS module's installation, never a caller, cwd, manifest, or env var.
+ * Resolve the package root, then require its own physical kits directory (not a symlink out).
+ * A sibling artifact kit cannot acquire this identity by copying package metadata. An alias
+ * to these exact bytes is safe; replacing the executing installation itself is code tampering,
+ * already outside the local same-uid bar-raiser's security boundary (ADR 0017).
+ */
+function executingPackageKitsRoot(): string | null {
+  const ownRoot = packagedKitRoot();
+  if (!ownRoot) return null;
+  const realRoot = canonicalPathOrNull(ownRoot);
+  const expected = realRoot && path.join(realRoot, KITS_DIR);
+  return expected && canonicalPathOrNull(expected) === expected ? expected : null;
+}
+
+/**
  * THE root order, for every surface that asks a kit tree a question (#1316 review FIX-2).
  *
  * PACKAGED FIRST — see `kitFlowSourceRoots`. What matters here is that DECLARATION ENUMERATION
@@ -176,16 +191,18 @@ export function canonicalKitFlowSourceRoots(projectRoot?: string, startDir?: str
  * in behavior, including its lexical fallback — and flow-resolver.ts now imports it.
  *
  * Refused when the resolved kits root escapes its own root (a symlink out of the tree), when it
- * is not a directory, or when it lands inside runtime artifact storage. Returns the REALPATH, so
+ * is not a directory, or when it lands inside runtime artifact storage other than this executing package's exact
+ * physical kits root. Returns the REALPATH, so
  * every later containment comparison is against a boundary the tree owner controls rather than
  * one a symlink under test chose — #1315 review FIX-1.
  */
-export function canonicalKitsRoot(root: string): string | null {
+export function canonicalKitsRoot(root: string, onRefusal?: (reason: string) => void): string | null {
+  const refuse = (reason: string): null => { onRefusal?.(reason); return null; };
   const lexicalKitsRoot = path.resolve(root, KITS_DIR);
   try {
     const realRoot = (fs.realpathSync.native ?? fs.realpathSync)(path.resolve(root));
     const realKitsRoot = (fs.realpathSync.native ?? fs.realpathSync)(lexicalKitsRoot);
-    if (!fs.statSync(realKitsRoot).isDirectory()) return null;
+    if (!fs.statSync(realKitsRoot).isDirectory()) return refuse("kits root is not a directory");
     // The threat is a kits root that resolves into AGENT-WRITABLE runtime artifact storage
     // (`kits -> .kontourai/flow-agents/.../kits`), which would let a runtime-authored definition
     // pose as a packaged declaration. That is what this refuses.
@@ -197,14 +214,17 @@ export function canonicalKitsRoot(root: string): string | null {
     // <package>/kits`). Escaping the repo is not the attack; landing somewhere the agent can
     // write is. Containment of individual DEFINITION paths is still enforced against the
     // resolved kits root by every caller, so a link cannot widen what is reachable beneath it.
-    if (isWithinRuntimeArtifactRoot(realKitsRoot)) return null;
+    if (isWithinRuntimeArtifactRoot(realKitsRoot) && realKitsRoot !== executingPackageKitsRoot()) {
+      return refuse(`kits root ${realKitsRoot} is runtime artifact storage, not the executing package's own kits root`);
+    }
     void realRoot;
     return realKitsRoot;
   } catch {
     // The kits root does not exist yet (or is unreadable). There is nothing to be tricked by,
     // and callers that only need a lexical expected-root still get one; enumeration callers
     // simply find nothing there.
-    return isWithinRuntimeArtifactRoot(lexicalKitsRoot) ? null : lexicalKitsRoot;
+    return isWithinRuntimeArtifactRoot(lexicalKitsRoot)
+      ? refuse(`kits root ${lexicalKitsRoot} is unavailable inside runtime artifact storage`) : lexicalKitsRoot;
   }
 }
 

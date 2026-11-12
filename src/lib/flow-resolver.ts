@@ -312,11 +312,14 @@ export interface DeclaredKitFlow {
  *   - `override`        — FLOW_AGENTS_FLOW_DEFS_DIR. Existence only, and never a run binding: an
  *                         env var is not provenance.
  */
-export function declaredKitFlows(repoRoot: string): DeclaredKitFlow[] {
+export function declaredKitFlows(repoRoot: string, skippedSources: string[] = []): DeclaredKitFlow[] {
   const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
   if (override) {
     const resolvedOverride = path.resolve(override);
-    if (isRuntimeArtifactDir(resolvedOverride)) return [];
+    if (isRuntimeArtifactDir(resolvedOverride)) {
+      skippedSources.push(`${resolvedOverride}: flow definitions override is runtime artifact storage`);
+      return [];
+    }
     const overridden: DeclaredKitFlow[] = [];
     for (const entry of listDirents(resolvedOverride)) {
       if (!entry.isFile() || !entry.name.endsWith(".flow.json")) continue;
@@ -333,7 +336,7 @@ export function declaredKitFlows(repoRoot: string): DeclaredKitFlow[] {
     declarations.push({ flowId, sourceRoot, via });
   };
   for (const sourceRoot of canonicalKitFlowSourceRoots(repoRoot)) {
-    const kitsRoot = canonicalKitsRoot(sourceRoot);
+    const kitsRoot = canonicalKitsRoot(sourceRoot, (reason) => skippedSources.push(`${sourceRoot}: ${reason}`));
     if (!kitsRoot) continue;
     const installed = declaredInstalledKitFlowBindings(sourceRoot);
     const installedIds = new Set(installed.map((binding) => binding.flowId));
