@@ -15,6 +15,8 @@
  * @module dream/model
  */
 
+import * as os from "node:os";
+
 import { ModelInvocationError } from "@kontourai/relay";
 
 import { dreamError } from "./util.js";
@@ -98,7 +100,7 @@ const ANTHROPIC_KINDS = new Set(["anthropic-compatible"]);
 /** Datum errors that mean "this machine has no model set up for the role", as opposed to a failed call. */
 const DATUM_SETUP_CODES = new Set([
   "UNKNOWN_ROLE", "UNKNOWN_PROVIDER", "UNKNOWN_MODEL", "AMBIGUOUS_MODEL", "MISSING_ENV", "INVALID_CONFIG",
-  "SECRET_LITERAL", "SECRET_BACKEND_UNAVAILABLE",
+  "SECRET_LITERAL",
 ]);
 
 export const MODEL_SETUP_DOC = "https://github.com/kontourai/flow-agents/blob/main/kits/knowledge/docs/README.md#dream-run-model-setup";
@@ -193,15 +195,24 @@ export const RUNTIME_KINDS = Object.freeze(["claude-code"]);
  * an API key. Relay runs `claude --print` with no tools and no session persistence and hands it the prompt on stdin;
  * nothing here calls a provider.
  *
- * `FLOW_AGENTS_DREAM_TRIGGER=0` is set for that process so a dream hook trigger wired into the same harness does not
- * start another run when the extraction session ends.
+ * The `claude` process is still a full harness session, with the user's own settings and hooks. Three things keep the
+ * dream out of its own way: `FLOW_AGENTS_DREAM_TRIGGER=0`, so a dream hook trigger does not start another run when the
+ * session ends; `profile-memory` added to `SA_DISABLED_HOOKS`, so existing briefs are not injected into the prompt
+ * that distils new ones; and the system temp directory as its working directory, so no project's settings, hooks or
+ * CLAUDE.md are loaded from wherever the scheduler happened to start the run.
  *
  * @param {{ kind: "claude-code", model: string, executable?: string, maxTotalTokens?: number, onReceipt?: (receipt: object) => void }} options
  */
 export async function createCliRuntime({ kind, model, executable, maxTotalTokens = 64_000, onReceipt }) {
   if (kind !== "claude-code") throw dreamError("DREAM_CONFIG_INVALID", `runtime.kind must be one of: ${RUNTIME_KINDS.join(", ")}`);
   const { createClaudeCodeRuntime } = await import("@kontourai/relay/claude-code");
-  const runtime = createClaudeCodeRuntime({ model, ...(executable ? { executable } : {}), environment: { FLOW_AGENTS_DREAM_TRIGGER: "0" } });
+  const disabled = [...new Set([...String(process.env.SA_DISABLED_HOOKS ?? "").split(",").map((id) => id.trim()).filter(Boolean), "profile-memory"])].join(",");
+  const runtime = createClaudeCodeRuntime({
+    model,
+    ...(executable ? { executable } : {}),
+    cwd: os.tmpdir(),
+    environment: { FLOW_AGENTS_DREAM_TRIGGER: "0", SA_DISABLED_HOOKS: disabled },
+  });
   const candidate = {
     id: runtime.id,
     runtimeId: runtime.id,

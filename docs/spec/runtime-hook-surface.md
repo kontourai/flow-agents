@@ -267,7 +267,8 @@ installed hook uses the asynchronous entry point.
 the default uses `$HOME/.local/share`. When the hook environment sets
 `FLOW_AGENTS_DREAM_CONFIG`, the reader loads that dream config with the dream
 run's ownership checks and uses its `dreamDir` if it sets one. If the config cannot be
-loaded, the reader injects nothing; it does not fall back to the default directory. The shape is
+loaded, the reader injects nothing; it does not fall back to the default directory.
+The variable is operator configuration: a project must not set it, because the config also names the code a triggered dream run imports. The shape is
 `{"version":1,"entries":["first complete entry","second complete entry"]}`;
 entries are ordered by the producer and contain display-ready text. For memory
 claims, the producer must use `presentMemoryClaims` with the applicable routing

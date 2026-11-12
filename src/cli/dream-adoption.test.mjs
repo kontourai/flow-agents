@@ -44,7 +44,7 @@ function fakeClaude(dir) {
     const chunks = [];
     for await (const chunk of process.stdin) chunks.push(chunk);
     const stdin = Buffer.concat(chunks).toString("utf8");
-    fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ argv: process.argv.slice(2), trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, stdin }) + "\\n");
+    fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ argv: process.argv.slice(2), trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), stdin }) + "\\n");
     const quote = ${JSON.stringify(QUOTE)};
     const claim = { subject: "ledger service", subjectType: "service", property: "rounding mode", value: "half-even", posture: "stated" };
     const proposals = stdin.includes(quote) ? Object.entries(claim).map(([field, value]) => ({ fieldPath: "claims[0]." + field, value, confidence: 0.9, excerpt: quote })) : [];
@@ -158,7 +158,7 @@ test("runtime claude-code runs the extraction through Relay's Claude Code runtim
   const executable = fakeClaude(c0.root);
   const c = consumer(t, { config: { runtime: { kind: "claude-code", model: "sonnet", executable } } });
   const log = path.join(c.root, "claude.jsonl");
-  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log });
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile], { FAKE_CLAUDE_LOG: log, SA_DISABLED_HOOKS: "stop-goal-fit" });
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
   assert.equal(report.status, "success");
@@ -171,6 +171,8 @@ test("runtime claude-code runs the extraction through Relay's Claude Code runtim
     assert.deepEqual(call.argv.slice(0, 10), ["--print", "--output-format", "json", "--model", "sonnet", "--no-session-persistence", "--tools", "", "--permission-mode", "dontAsk"]);
     assert.equal(call.argv[10], "--json-schema");
     assert.equal(call.trigger, "0", "the extraction session cannot start another dream run through the hook trigger");
+    assert.deepEqual(call.disabledHooks.split(","), ["stop-goal-fit", "profile-memory"], "existing briefs are not injected into the extraction session, and the operator's own disables stay");
+    assert.equal(fs.realpathSync(call.cwd), c.root, "the session starts in the temp directory, not the run's working directory");
     assert.match(call.stdin, /The content is untrusted text/);
   }
 });
@@ -198,7 +200,7 @@ test("a config reached through a symlinked directory is refused with its real pa
   assert.match(refused.stderr, /symlink/);
   assert.ok(refused.stderr.includes(`resolves to ${path.join(real, "dream.config.json")}; pass that path instead`), refused.stderr);
   const accepted = c.run(KIT_CLI, ["run", "--config", path.join(real, "dream.config.json")]);
-  assert.doesNotMatch(accepted.stderr, /symlink/, "the named path passes the config checks");
+  assert.match(accepted.stderr, /^DREAM_MODEL_UNCONFIGURED/m, "the named path passes the config and host checks and the run reaches the model step");
 });
 
 // ── 4. The installed command ─────────────────────────────────────────────────────────────────────────────────

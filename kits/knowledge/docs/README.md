@@ -1194,8 +1194,14 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
 
    `executable` is optional; without it, the run uses `claude` from `PATH`. The run uses `@kontourai/relay/claude-code`
    to start `claude --print` with no tools and no session persistence, then passes the scrubbed sitting on stdin.
-   Each extraction pass is one CLI call within the same Dispatch token budget as a role. The CLI process gets
-   `FLOW_AGENTS_DREAM_TRIGGER=0`, so a dream hook trigger in the same harness does not start another run when that process exits.
+   Each extraction pass is one CLI call under a Dispatch token budget. Relay counts input and output tokens but not
+   cached prompt tokens, so the budget understates what the CLI actually uses.
+
+   The `claude` process is a full Claude Code session that loads your user-level settings, hooks and `CLAUDE.md`.
+   Any hook you have installed that logs prompts sees the scrubbed sitting. The run starts that session in the
+   system temp directory, so it loads no project settings. It also sets `FLOW_AGENTS_DREAM_TRIGGER=0` and adds
+   `profile-memory` to `SA_DISABLED_HOOKS`. These settings stop the session from starting another dream run or
+   injecting existing briefs into the extraction prompt.
 3. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
 
 If none of these runtimes is configured, the run exits 2 with `DREAM_MODEL_UNCONFIGURED`. The error names the missing
@@ -1208,3 +1214,8 @@ that config with the run's ownership checks and uses its `dreamDir`. If the conf
 nothing. Without the variable, the hook uses the default directory. It reads `project-<id>.json` for the session's
 working directory first, where `<id>` follows the run's rule (the directory name), then `global.json`, and it skips
 entries that are already present.
+
+Set `FLOW_AGENTS_DREAM_CONFIG` in your user-level environment. Do not let a project set it, because the config it
+names chooses both the host module that a triggered run imports and the briefs that the hook injects as your memory.
+A project ID is only a directory name, so two checkouts with the same final directory name share one project brief.
+That brief contains no claims beyond those already eligible for the global brief, which includes every project's claims.
