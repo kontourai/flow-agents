@@ -171,12 +171,15 @@ else
 fi
 
 # ── 7. the fingerprint covers exactly what npm packs under its roots ──────────────────────────────
-# package.json `files` excludes *.test.* files and then re-includes the kit evals kit.json
-# declares by path. The fingerprint models both (suffix negation, ordered re-include), so its file
-# set must equal the `npm pack --dry-run` file set under FINGERPRINT_ROOTS, in both directions.
-# The module path goes through the environment, not argv: the generator runs main() (and rewrites
-# the stamp) when argv[1] is its own path.
-parity_out=$( (cd "$ROOT" && npm pack --dry-run --json --ignore-scripts 2>/dev/null | FINGERPRINT_MODULE="$ROOT/build/src/tools/generate-install-identity.js" node --input-type=module -e '
+# package.json `files` excludes *.test.* files and lists the kit evals kit.json declares by plain
+# path. npm ships a plain file path wherever it appears, and a directory listed after a negation
+# re-includes under it. The fingerprint models both, so for each `files` shape below its file set
+# must equal the `npm pack --dry-run` file set under FINGERPRINT_ROOTS, in both directions.
+# fingerprintLines() reads package.json on each call, so no rebuild is needed per shape. The module
+# path goes through the environment, not argv: the generator runs main() (and rewrites the stamp)
+# when argv[1] is its own path.
+parity() {
+  (cd "$ROOT" && npm pack --dry-run --json --ignore-scripts 2>/dev/null | FINGERPRINT_MODULE="$ROOT/build/src/tools/generate-install-identity.js" node --input-type=module -e '
   let raw = ""; for await (const chunk of process.stdin) raw += chunk;
   const { fingerprintLines, FINGERPRINT_ROOTS } = await import(process.env.FINGERPRINT_MODULE);
   const covered = new Set(fingerprintLines().map((line) => line.split("\0")[0]));
@@ -184,12 +187,37 @@ parity_out=$( (cd "$ROOT" && npm pack --dry-run --json --ignore-scripts 2>/dev/n
   const extra = [...covered].filter((p) => !packed.has(p)), missing = [...packed].filter((p) => !covered.has(p));
   if (packed.size === 0 || extra.length || missing.length) { console.log(JSON.stringify({ packed: packed.size, extra: extra.slice(0, 5), missing: missing.slice(0, 5) })); process.exit(1); }
   console.log(`${covered.size} files`);
-') 2>&1 )
-if [[ $? -eq 0 ]]; then
-  pass "fingerprint file set equals the packed file set under its roots ($parity_out)"
+') 2>&1
+}
+check_parity() {
+  local label="$1" out
+  if out=$(parity); then pass "$label: fingerprint equals the packed file set ($out)"; else fail "$label: fingerprint and npm pack disagree: $out"; fi
+}
+
+check_parity "committed files"
+
+# Plain eval paths moved BEFORE the negations: npm still ships them, so the fingerprint must too.
+jq '.files as $f | ($f | map(select(test("\\.test\\.[cm]?js$") and (startswith("!") | not)))) as $plain
+    | .files = $plain + ($f - $plain)' "$PKG_BACKUP" > "$PKG"
+check_parity "plain test paths listed before the negations"
+
+# A directory listed after the negations re-includes the excluded test files under it.
+jq '.files += ["kits/knowledge/promote/"]' "$PKG_BACKUP" > "$PKG"
+check_parity "directory listed after the negations"
+cp "$PKG_BACKUP" "$PKG"
+
+# A wildcard after a negation would re-include its matches, which the generator does not model:
+# the build must refuse with the entry named.
+jq '.files += ["kits/**/suite.test.js"]' "$PKG_BACKUP" > "$PKG"
+wildcard_out=$( (cd "$ROOT" && npm run build) 2>&1 )
+wildcard_status=$?
+cp "$PKG_BACKUP" "$PKG"
+if [[ $wildcard_status -ne 0 ]] && printf '%s' "$wildcard_out" | grep -q "'kits/\*\*/suite.test.js' is a wildcard listed after a negation"; then
+  pass "a wildcard re-include after a negation fails the build with the entry named"
 else
-  fail "fingerprint and npm pack disagree: $parity_out"
+  fail "the build accepted a wildcard re-include after a negation (status=$wildcard_status)"
 fi
+rebuild
 
 echo ""
 if [[ $errors -eq 0 ]]; then
