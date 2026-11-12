@@ -308,7 +308,7 @@ test("identity is exact: a value, property or subject that differs only in case 
 
 test("the slot is Surface's canonical claim key plus claimType", async () => {
   const { memorySlotKey } = await import("@kontourai/flow-agents/memory-claims");
-  const { canonicalClaimKey } = await import("@kontourai/surface-knowledge");
+  const { canonicalClaimKey } = await import("@kontourai/surface");
   const { earlier } = await fixtureClaims();
   const claim = earlier.result.claims[0];
   const surface = canonicalClaimKey({ subjectType: claim.subject.type, subjectId: claim.subject.id, fieldOrBehavior: claim.property });

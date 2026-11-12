@@ -12,7 +12,7 @@ mkdir "$WORK_DIR/package/node_modules"
 YAML_DIR="$(node -e 'const path = require("node:path"); const fs = require("node:fs"); const root = fs.realpathSync(process.argv[1]); console.log(path.dirname(require.resolve("js-yaml/package.json", { paths: [root] })))' "$ROOT_DIR/node_modules/@kontourai/corpus-store")"
 ln -s "$YAML_DIR" "$WORK_DIR/package/node_modules/js-yaml"
 CORPUS_STORE_ENTRY="$WORK_DIR/package/dist/index.js"
-SURFACE_ENTRY="$ROOT_DIR/node_modules/@kontourai/surface-knowledge/dist/src/index.js"
+SURFACE_ENTRY="$ROOT_DIR/node_modules/@kontourai/surface/dist/src/index.js"
 export CORPUS_STORE_ENTRY SURFACE_ENTRY
 TEST_FILE="$ROOT_DIR/kits/knowledge/providers/surface-adapter/packed-purge.test.mjs"
 node --test "$TEST_FILE"

@@ -187,7 +187,7 @@ test("a projection that names a rival the Kit was not given is refused: every bo
 
 test("with the real Surface projection (surface@6.3.0), every committed fact is reproduced and the mapped claims are the ones it accepted", async () => {
   // The committed facts were produced by Surface's projectAccumulation; the pinned release must still reproduce them.
-  const surface = await import("@kontourai/surface-knowledge");
+  const surface = await import("@kontourai/surface");
   assert.equal(typeof surface.projectAccumulation, "function", "the pinned Surface exports the projection");
   const { c0, c1 } = await claims();
   let checked = 0;
@@ -300,7 +300,7 @@ const identityCase = name => {
 const routeWith = (a, current, extra) => routeMemoryChange({ type: "claim", claim: a, current, agreement: { passes: 2, agreeing: 2 }, sourceVisibility: { kind: "public" }, ...extra });
 
 test("identity-joined claims are replayed through the released Surface: contested with different values, current with equal ones", () => {
-  return import("@kontourai/surface-knowledge").then(surface => {
+  return import("@kontourai/surface").then(surface => {
     for (const name of ["differentValues", "equalValues"]) {
       const { a, query, fact, observations, authority } = identityCase(name);
       for (const observation of observations) assert.equal(observation.contentDigest, surface.accumulationDigest(observation.bundle), `${name}: observation digest`);

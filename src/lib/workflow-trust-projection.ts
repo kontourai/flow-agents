@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import {
   readWorkflowProcessSources,
   type ConsoleProjectionRef,
@@ -11,9 +13,24 @@ export type SurfaceTrustRuntime = {
   validateTrustBundle: (input: unknown) => Record<string, unknown>;
   buildTrustReport: (
     bundle: Record<string, unknown>,
-    options?: { now?: Date },
+    options?: { now?: Date; statusFunctionVersion?: string },
   ) => Record<string, unknown>;
+  /** The status function the installed Surface derives with by default. */
+  statusFunctionVersion?: string;
+  /** Surface >= 5: every status function version the package can evaluate. */
+  supportedStatusFunctionVersions?: readonly string[];
 };
+
+type StatusFunctionVersionHelper = {
+  statusFunctionVersionForBundle: (bundle: unknown, surface: SurfaceTrustRuntime) => { version: string; stamped: boolean };
+};
+
+// The shared, dependency-free helper the CI reconciler, the stop gate and `workflow-sidecar claim`
+// use, so every reader re-derives a stored bundle with the status function its writer stamped.
+function loadStatusFunctionVersionHelper(): StatusFunctionVersionHelper {
+  const helper = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/lib/status-function-version.js");
+  return createRequire(import.meta.url)(helper) as StatusFunctionVersionHelper;
+}
 
 export type ConsoleTrustGateAssociation = {
   gateId: string;
@@ -167,7 +184,10 @@ export async function readWorkflowTrustSources(
     let report: Record<string, unknown>;
     try {
       bundle = surface.validateTrustBundle(parsed);
-      report = surface.buildTrustReport(bundle, { now });
+      // Derive with the version the writer stamped: a bundle written before a Surface upgrade
+      // keeps the status it was written with instead of silently re-deriving under the new default.
+      const { version: statusFunctionVersion } = loadStatusFunctionVersionHelper().statusFunctionVersionForBundle(bundle, surface);
+      report = surface.buildTrustReport(bundle, { now, statusFunctionVersion });
     } catch (error) {
       warnings.push(`${processSource.slug}: trust.bundle failed canonical Surface validation/derivation (${errorMessage(error)}) -- skipping trust projection`);
       continue;

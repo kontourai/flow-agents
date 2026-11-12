@@ -12,7 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
-import { meetVisibility } from "@kontourai/surface-knowledge";
+import { meetVisibility } from "@kontourai/surface";
 import {
   currentProposedReviewItem, foldCandidateVerifications, isReviewerKind, reviewResourceApiVersion, runSupportVerifier,
   type CandidateVerification, type EntityProposal, type ReviewerKind, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,

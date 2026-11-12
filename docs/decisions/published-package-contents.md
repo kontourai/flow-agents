@@ -50,5 +50,5 @@ modules a host may import.
   detects nothing and applies nothing: no identity mapping is applied from an accepted outcome (no published function does
   that), and review stays human-only. The `dream` step that proposes candidates is tracked in flow-agents#1618 and ships
   as its own change after this one merges.
-- **Surface alias unchanged.** `@kontourai/surface-knowledge` stays an alias of `@kontourai/surface` (flow-agents#1581);
-  this record does not revisit it.
+- **One Surface package.** The `@kontourai/surface-knowledge` alias (flow-agents#1581) was removed when the shared
+  trust gates moved to Surface 6.3.0; the package now carries a single `@kontourai/surface` pin.

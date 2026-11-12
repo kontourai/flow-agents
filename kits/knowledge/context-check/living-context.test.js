@@ -16,7 +16,7 @@ import { validateCandidateVerification } from "@kontourai/survey";
 
 import { runLivingContext, assertSurfaceVisibility, deriveLivingContext, validateLivingContextInput, validateLivingContextResult, estimateTokens } from "./living-context.js";
 import { observeRepositoryChange, DEFAULT_MAX_CHANGED_PATHS } from "./observe-change.js";
-import { reapplyVerifiedFreshness } from "@kontourai/surface-knowledge";
+import { reapplyVerifiedFreshness } from "@kontourai/surface";
 import { answerLivingContext as answerWith, createLineSupportVerifier, MAX_EVIDENCE_BYTES } from "./living-context-answer.js";
 import { runContextCheck } from "./index.js";
 import { validate } from "../providers/lib/schema-validate.js";

@@ -275,3 +275,36 @@ test("review finding 3: an assignment record without a positive binding is never
   const readMalformed = await readWorkflowTrustSources(root, { generatedAt: GENERATED_AT });
   assert.ok(readMalformed.warnings.some((warning) => /session-a: local assignment record is not a well-formed assignment record/.test(warning)));
 });
+
+// A bundle is projected with the status function its writer stamped into `source`, not the
+// installed Surface's default. The two events below are 0.1 ms apart: status function "3" lets
+// the dispute stand, "4" (Surface 6's default) orders the exact instants so the verification wins.
+function stampedBundle(source) {
+  const bundle = validBundle("claim-stamped");
+  bundle.source = source;
+  bundle.claims[0].verificationPolicyId = "policy:stamped";
+  bundle.policies = [{ id: "policy:stamped", claimType: "builder.verify.tests", requiredEvidence: ["test_output"], acceptanceCriteria: ["A passing test run supports the claim."], reviewAuthority: "system", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel: "high" }];
+  bundle.events = [
+    { id: "evt:dispute", claimId: "claim-stamped", status: "disputed", actor: "reviewer", method: "validation", evidenceIds: [], createdAt: "2026-07-20T10:00:00.0001Z" },
+    { id: "evt:verify", claimId: "claim-stamped", status: "verified", actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: ["ev:claim-stamped"], createdAt: "2026-07-20T10:00:00.0002Z" },
+  ];
+  return bundle;
+}
+
+test("readWorkflowTrustSources re-derives each bundle with the status function its writer stamped", async (t) => {
+  const root = fixtureRoot(t);
+  writeWorkflow(root, "stamped-3", { bundle: stampedBundle("flow-agents/workflow-sidecar;statusFunctionVersion=3") });
+  writeWorkflow(root, "stamped-4", { bundle: stampedBundle("flow-agents/workflow-sidecar;statusFunctionVersion=4") });
+  writeWorkflow(root, "stamped-99", { bundle: stampedBundle("flow-agents/workflow-sidecar;statusFunctionVersion=99") });
+
+  const read = await readWorkflowTrustSources(root, { generatedAt: GENERATED_AT });
+  const bySlug = new Map(read.sources.map((source) => [source.slug, source.report]));
+  assert.ok(bySlug.has("stamped-3") && bySlug.has("stamped-4"), read.warnings.join("\n"));
+  assert.equal(bySlug.get("stamped-3")?.statusFunctionVersion, "3");
+  assert.equal(bySlug.get("stamped-3")?.claims[0].status, "disputed");
+  assert.equal(bySlug.get("stamped-4")?.statusFunctionVersion, "4");
+  assert.equal(bySlug.get("stamped-4")?.claims[0].status, "verified");
+  // An unevaluable stamp is refused with a named warning, never projected under another version.
+  assert.equal(bySlug.has("stamped-99"), false);
+  assert.ok(read.warnings.some((warning) => warning.startsWith("stamped-99: trust.bundle failed canonical Surface validation/derivation") && warning.includes('"99"')), read.warnings.join("\n"));
+});

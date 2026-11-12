@@ -11,7 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
-import { canonicalClaimKey } from "@kontourai/surface-knowledge";
+import { canonicalClaimKey } from "@kontourai/surface";
 import { MAX_DECISION_DEPTH, MAX_EXTRACTION_RESULT_NODES, MAX_RUN_LIST, jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
 // Type-only: proves the schema below is an ordinary Traverse TargetFieldSchema without a runtime dependency.
 import type { TargetFieldSchema } from "@kontourai/traverse";

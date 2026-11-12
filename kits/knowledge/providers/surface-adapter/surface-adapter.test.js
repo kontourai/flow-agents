@@ -379,7 +379,7 @@ test("purged graph records round-trip as Surface deleted claims without content 
   });
   assert.ok(!JSON.stringify(bundle).includes("must-not-escape"));
   assert.ok(bundle.evidence.every((e) => e.claimId !== claim.id && !e.sourceRef.includes(erased.id)));
-  const { validateTrustBundle } = await import("@kontourai/surface-knowledge");
+  const { validateTrustBundle } = await import("@kontourai/surface");
   validateTrustBundle(bundle);
 });
 
@@ -499,11 +499,13 @@ test("default projection retains a bounded tombstone whose record type was omitt
   assert.equal(filtered.claims.some((item) => item.subjectId === "bounded"), false);
 });
 
-test("Knowledge erasure uses Surface 6 without changing the shared gate's v3 status function", async () => {
-  const gate = await import("@kontourai/surface");
-  const knowledge = await import("@kontourai/surface-knowledge");
-  assert.equal(gate.statusFunctionVersion, "3");
-  assert.equal(knowledge.statusFunctionVersion, "4");
+test("one Surface serves Knowledge and the shared gate: status function 4, with 3 still evaluable for stamped bundles", async () => {
+  const surface = await import("@kontourai/surface");
+  assert.equal(surface.statusFunctionVersion, "4");
+  assert.ok(surface.supportedStatusFunctionVersions.includes("3"), "bundles stamped by the Surface 5 gate must stay re-derivable");
+  // The behavior change the Surface 5 -> 6 move brings to the gate: two events 0.1 ms apart
+  // share one millisecond. Status function 3 compares them as Dates and lets the dispute stand;
+  // 4 compares the exact instants, so the later verification wins.
   const claim = { id: "c", claimType: "test", status: "verified" };
   const evidence = [{ id: "e", claimId: "c", evidenceType: "test_output", method: "validation", passing: true, observedAt: "2026-01-01T00:00:00Z" }];
   const policies = [{ id: "p", claimType: "test", requiredEvidence: ["test_output"], requiredMethods: ["validation"], validityRule: { kind: "manual" } }];
@@ -511,6 +513,6 @@ test("Knowledge erasure uses Surface 6 without changing the shared gate's v3 sta
     { id: "d", claimId: "c", status: "disputed", createdAt: "2026-01-01T00:00:00.0001Z" },
     { id: "v", claimId: "c", status: "verified", createdAt: "2026-01-01T00:00:00.0002Z" },
   ];
-  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events }).status, "disputed");
-  assert.equal(knowledge.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
+  assert.equal(surface.deriveClaimStatus({ claim, evidence, policies, events, statusFunctionVersion: "3" }).status, "disputed");
+  assert.equal(surface.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
 });

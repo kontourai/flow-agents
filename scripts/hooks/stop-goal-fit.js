@@ -2287,6 +2287,21 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
   const allEvents = Array.isArray(bundle.events) ? bundle.events : [];
   const allPolicies = Array.isArray(bundle.policies) ? bundle.policies : [];
 
+  // Re-derive with the status function the bundle's writer stamped (the rule the CI reconciler
+  // and `workflow-sidecar claim` share), not the installed Surface's default. Otherwise a bundle
+  // written before a Surface upgrade re-derives under the new rules, and a status that changed
+  // only because the algorithm changed reads as tampering. A stamp the installed Surface cannot
+  // evaluate leaves the claim underivable, which the high-impact check below reports.
+  let statusFunctionVersion = null;
+  let statusFunctionError = null;
+  if (surface) {
+    try {
+      ({ version: statusFunctionVersion } = require('../lib/status-function-version.js').statusFunctionVersionForBundle(bundle, surface));
+    } catch (error) {
+      statusFunctionError = error && error.message ? error.message : String(error);
+    }
+  }
+
   // P-c: claim-selection predicate.
   // When activeFlowStep is non-null, select claims whose claimType is in the
   // gate's declared set. When null, fall back to the existing workflow.* prefix
@@ -2330,14 +2345,20 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
   // BAR-RAISER, NOT AIRTIGHT: an agent that deletes/corrupts @kontourai/surface to force
   // surface=null would trigger this path deliberately. The real anchor is external:
   // signed checkpoints + human review. This raises the cost of the silent-trust vector.
-  if (!surface) {
+  if (!surface || statusFunctionError) {
     const highImpactCount = bundle.claims.reduce((n, claim) => {
       if (!claim || typeof claim !== 'object') return n;
       const impact = String(claim.impactLevel || '').toLowerCase();
       if (impact !== 'high' && impact !== 'critical') return n;
       return isSelectedClaim(claim) ? n + 1 : n;
     }, 0);
-    if (highImpactCount > 0) {
+    if (highImpactCount > 0 && statusFunctionError) {
+      warnings.push(
+        `surface cannot re-derive this trust.bundle (${safeOneLine(statusFunctionError, 240)}) — ${highImpactCount} high/critical-impact claim(s) ` +
+        'could not be re-derived at gate; stored claim status is trusted without independent re-derivation (fail-closed: high-assurance path). ' +
+        'Re-record the evidence with the installed @kontourai/surface, or escalate for operator review.'
+      );
+    } else if (highImpactCount > 0) {
       warnings.push(
         `surface unavailable — ${highImpactCount} high/critical-impact claim(s) could not be re-derived at gate; ` +
         'stored claim status is trusted without independent re-derivation (fail-closed: high-assurance path). ' +
@@ -2358,7 +2379,7 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
     // This closes the gaming vector: editing the stored status field cannot bypass
     // the gate because we recompute from evidence/events/policies.
     let recomputedStatus = null; // null means re-derive was not attempted or threw
-    if (surface && typeof surface.deriveClaimStatus === 'function') {
+    if (surface && statusFunctionVersion !== null && typeof surface.deriveClaimStatus === 'function') {
       const claimId = claim.id;
       const claimEvidence = allEvidence.filter(ev => ev && ev.claimId === claimId);
       const claimEvents = allEvents.filter(evt => evt && evt.claimId === claimId);
@@ -2368,6 +2389,7 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
           evidence: claimEvidence,
           events: claimEvents,
           policies: allPolicies,
+          statusFunctionVersion,
         });
         recomputedStatus = result && typeof result.status === 'string' ? result.status.toLowerCase() : 'unknown';
       } catch {
@@ -2779,8 +2801,8 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 // pattern: the #1048 recipe institutionalized narrowed commands, so existing green flows must
 // stay green until an operator opts in. Do not fold the default lead into either constant.
 const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)|tests-evidence scope divergence \(blocking\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;
-// FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)|tests-evidence scope divergence \(blocking\)/;
+// FULL_BLOCK adds: workflow-state hygiene, surface-unavailable / cannot-re-derive fail-closed, missing log.
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|surface cannot re-derive this trust\.bundle|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)|tests-evidence scope divergence \(blocking\)/;
 
 // #793: deliberately NOT folded into HARD_BLOCK/FULL_BLOCK above. Those two constants are
 // reused by isHardStopWarning() to decide whether the AC2 MAX_BLOCKS escape valve is allowed
@@ -3205,11 +3227,14 @@ function isOrdinaryActiveGateWarning(warning, relPath) {
   const currentFinalAcceptance = warning.startsWith(finalAcceptancePrefix)
     && /^ \d+ acceptance criterion\/criteria still pending; complete CI\/merge\/docs before final delivery\.$/.test(warning.slice(finalAcceptancePrefix.length));
   const surfaceUnavailable = /^surface unavailable — \d+ high\/critical-impact claim\(s\) could not be re-derived at gate; stored claim status is trusted without independent re-derivation \(fail-closed: high-assurance path\)\. Ensure @kontourai\/surface is installed and importable, or escalate for operator review\.$/.test(warning);
+  // Same fail-closed class as surfaceUnavailable: the installed Surface cannot evaluate the stamp.
+  const surfaceCannotRederive = /^surface cannot re-derive this trust\.bundle \(.*\) — \d+ high\/critical-impact claim\(s\) could not be re-derived at gate; /.test(warning);
   return warning.startsWith(`${relPath} is still status:`)
     || /(?:^|\/)\.kontourai\/flow-agents\/[^/]+ workflow state:/.test(warning)
     || /(?:^|\/)\.kontourai\/flow-agents\/[^/]+ (?:next action|required skills|required operations|next command):/.test(warning)
     || currentFinalAcceptance
     || surfaceUnavailable
+    || surfaceCannotRederive
     || canonicalActive;
 }
 

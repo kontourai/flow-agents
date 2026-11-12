@@ -56,7 +56,7 @@ test("the installed public provider entry reads a vault without optional Surface
   }
 });
 
-test("standalone Knowledge projection accepts ordinary erasure-capable Surface and rejects older Surface", () => {
+test("standalone Knowledge projection accepts erasure-capable Surface and rejects older or broken Surface", () => {
   const root = mkdtempSync(join(tmpdir(), "knowledge-surface-fallback-"));
   try {
     const installed = join(root, "kit");
@@ -97,26 +97,29 @@ test("standalone Knowledge projection accepts ordinary erasure-capable Surface a
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["NODE_OPTIONS", "NODE_PATH"].includes(key)));
       return spawnSync(process.execPath, ["--input-type=module", "-e", program, adapter], { cwd: root, env, encoding: "utf8", timeout: 20_000 });
     };
-    symlinkSync(packageRoot("@kontourai/surface-knowledge"), publicName, "junction");
+    symlinkSync(packageRoot("@kontourai/surface"), publicName, "junction");
     let result = run(true);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
     result = runLiving(true);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+
+    // An older Surface (before 6.3.0) has no deletion or derived-visibility API. Stand one in
+    // with the export the projection would otherwise use, so the refusal is what is tested.
     rmSync(publicName);
-    symlinkSync(packageRoot("@kontourai/surface"), publicName, "junction");
+    mkdirSync(publicName);
+    writeFileSync(join(publicName, "package.json"), JSON.stringify({ name: "@kontourai/surface", version: "5.0.0", type: "module", exports: "./index.js" }));
+    writeFileSync(join(publicName, "index.js"), "export class TrustBundleBuilder {}\n");
     result = run(false);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
     result = runLiving(false);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
 
-    // A present alias with a missing transitive dependency is broken, not an
-    // absent alias. Even with ordinary Surface 6 installed, preserve its error.
-    rmSync(publicName);
-    symlinkSync(packageRoot("@kontourai/surface-knowledge"), publicName, "junction");
-    const alias = join(scope, "surface-knowledge");
-    mkdirSync(alias);
-    writeFileSync(join(alias, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
-    writeFileSync(join(alias, "index.js"), 'import "flow-agents-missing-surface-test-dependency";\n');
+    // A Surface install with a missing transitive dependency is broken, not absent:
+    // its own error must reach the caller.
+    rmSync(publicName, { recursive: true, force: true });
+    mkdirSync(publicName);
+    writeFileSync(join(publicName, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
+    writeFileSync(join(publicName, "index.js"), 'import "flow-agents-missing-surface-test-dependency";\n');
     const brokenProgram = `
       import assert from "node:assert/strict";
       import { pathToFileURL } from "node:url";

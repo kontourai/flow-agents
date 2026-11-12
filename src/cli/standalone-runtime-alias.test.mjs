@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { matchesDeclaredRuntimePackage } from '../../build/src/tools/build-universal-bundles.js';
 
+// The builder still supports npm-aliased runtime dependencies; no alias ships today, so these
+// literal alias declarations exercise that matching rule directly.
 test('runtime aliases require the exact declared published name and version', () => {
   const actual = { name: '@kontourai/surface', version: '6.3.0' };
   assert.equal(matchesDeclaredRuntimePackage('@kontourai/surface-knowledge', 'npm:@kontourai/surface@6.3.0', actual), true);
@@ -17,15 +19,16 @@ test('runtime aliases require the exact declared published name and version', ()
   assert.equal(matchesDeclaredRuntimePackage('@kontourai/surface-knowledge', 'npm:@kontourai/surface@6.3.0', { ...actual, version: '6.3.1' }), false);
 });
 
-test('standalone memory runtime loads its bundled Surface alias without node_modules', () => {
+test('standalone memory runtime loads its single bundled Surface without node_modules', () => {
   const root = mkdtempSync(join(tmpdir(), 'flow-runtime-alias-'));
   try {
     for (const runtime of ['codex', 'claude-code']) {
       cpSync(resolve(`dist/${runtime}/build`), join(root, 'build'), { recursive: true });
-      const metadata = JSON.parse(readFileSync(join(root, 'build/src/vendor/surface-knowledge/surface-knowledge.runtime.bundle.json'), 'utf8'));
+      const metadata = JSON.parse(readFileSync(join(root, 'build/src/vendor/surface/surface.runtime.bundle.json'), 'utf8'));
       assert.equal(metadata.entry_package, '@kontourai/surface');
-      assert.equal(metadata.entry_specifier, '@kontourai/surface-knowledge');
+      assert.equal(metadata.entry_specifier, '@kontourai/surface');
       assert.equal(metadata.entry_version, '6.3.0');
+      assert.equal(existsSync(join(root, 'build/src/vendor/surface-knowledge')), false, `${runtime}: a second Surface copy is vendored`);
       const relay = JSON.parse(readFileSync(join(root, 'build/src/vendor/relay-anthropic/relay-anthropic.runtime.bundle.json'), 'utf8'));
       assert.equal(relay.entry_package, '@kontourai/relay');
       assert.equal(relay.entry_specifier, '@kontourai/relay/anthropic');

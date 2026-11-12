@@ -7167,7 +7167,10 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
   if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return null; // Surface unavailable
 
   const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
-  const report = surface.buildTrustReport(bundle as Record<string, unknown>);
+  // Seal the statuses the bundle was derived with (its stamped status function), not the installed
+  // Surface's default; an unevaluable stamp throws rather than sealing a different algorithm's result.
+  const { version: statusFunctionVersion } = loadStatusFunctionVersionHelper().statusFunctionVersionForBundle(bundle, surface);
+  const report = surface.buildTrustReport(bundle as Record<string, unknown>, { statusFunctionVersion });
   const checkpoint = surface.checkpointFromReport(report);
 
   // Derive work_item from state.json if present (best-effort)
@@ -9118,9 +9121,15 @@ async function renderTrustPanel(p: ReturnType<typeof parseArgs>): Promise<number
   let bundle: AnyObj | null = null;
   try { bundle = JSON.parse(fs.readFileSync(path.join(dir!, "trust.bundle"), "utf8")); } catch { bundle = null; }
   if (!bundle) die(`no trust.bundle at ${path.join(dir!, "trust.bundle")} — run record-evidence first`);
-  const surface = (await import("@kontourai/surface")) as unknown as { buildTrustReport?: (b: unknown) => AnyObj; diffFreshness?: (prior: unknown, next: unknown) => Array<Record<string, unknown>> };
+  const surface = (await import("@kontourai/surface")) as unknown as { buildTrustReport?: (b: unknown, options?: { statusFunctionVersion?: string }) => AnyObj; diffFreshness?: (prior: unknown, next: unknown) => Array<Record<string, unknown>>; statusFunctionVersion?: string; supportedStatusFunctionVersions?: readonly string[] };
   if (typeof surface.buildTrustReport !== "function") die("@kontourai/surface buildTrustReport unavailable — cannot derive the trust report");
-  const report = surface.buildTrustReport!(bundle);
+  let statusFunctionVersion = "";
+  try {
+    statusFunctionVersion = loadStatusFunctionVersionHelper().statusFunctionVersionForBundle(bundle, surface).version;
+  } catch (err) {
+    die(err instanceof Error ? err.message : String(err));
+  }
+  const report = surface.buildTrustReport!(bundle, { statusFunctionVersion });
   // diffFreshness on resume: if a prior trust.checkpoint.json exists, surface the
   // fresh→stale transitions so the user sees what has gone stale since the last seal.
   const checkpointFile = path.join(dir!, "trust.checkpoint.json");

@@ -20,11 +20,10 @@ The installed Kit manifest declares `knowledge.store-providers` at
 loaded without Surface or Neo4j packages. The providers remain readers and
 proposal producers; importing them does not approve or apply a change.
 
-`buildKnowledgeTrustBundle` loads the `@kontourai/surface-knowledge` npm alias
-of `@kontourai/surface` 6.3.0 only when explicitly called. If the alias is absent,
-a standalone Kit can use an erasure-capable `@kontourai/surface` installed under
-its ordinary name. Older packages that lack the deletion API are refused. The
-Flow Agents package manifest pins the alias. If neither is available, the projection rejects; it
+`buildKnowledgeTrustBundle` loads `@kontourai/surface` (Flow Agents pins 6.3.0)
+only when explicitly called. A standalone Kit needs an erasure-capable
+`@kontourai/surface` installed; older packages that lack the deletion API are
+refused. If it is unavailable, the projection rejects; it
 does not produce a placeholder bundle or block unrelated vault reads. Neo4j
 likewise needs its driver and service only when that provider is selected.
 
@@ -307,8 +306,7 @@ property names, so a `1.0` input carrying an undeclared `constructor`, `toString
 or `hasOwnProperty` key is now rejected; every other `1.0` input behaves as before.) The `1.1` entry
 points live in `context-check/living-context.js` (recall and reconciliation) and
 `context-check/living-context-answer.js` (the answer step); loading `index.js` still needs no Surface
-or Survey package. The `1.1` modules use the `@kontourai/surface-knowledge` alias,
-or the ordinary `@kontourai/surface` name in a standalone kit, with the derived-visibility
+or Survey package. The `1.1` modules use `@kontourai/surface` with the derived-visibility
 exports (Surface 6.3.0 or later, kontourai/surface#350), and `@kontourai/survey`. Schemas:
 [`living-context-input`](../schemas/knowledge/living-context-input.schema.json) and
 [`living-context-result`](../schemas/knowledge/living-context-result.schema.json).
