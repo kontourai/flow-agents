@@ -265,3 +265,48 @@ test("privacy: in local mode the transcript reaches only the configured runtime,
   const withMarker = outputs.filter(([, text]) => text.includes(MARKER)).map(([name]) => name.replace(/\/[^/]+$/, "/*"));
   assert.deepEqual([...new Set(withMarker)].sort(), ["memory/.corpus-proposals/*", "published.jsonl"]);
 });
+
+// ── Dry run over a memory root that does not exist yet ────────────────────────────────────────────────────────
+
+/** A host over the real Corpus store that follows the dry-run rule: construct the store only when it creates nothing. */
+function corpusHost(c, { constructAlways = false } = {}) {
+  const file = path.join(c.root, "corpus-host.mjs");
+  fs.writeFileSync(file, `
+    import fs from "node:fs";
+    import { KitDefaultStoreAdapter, standaloneFileMutationLock } from ${JSON.stringify(import.meta.resolve("@kontourai/corpus-store"))};
+    const root = ${JSON.stringify(c.memoryRoot)};
+    // Outside the root: the store's file-transaction constructor creates it.
+    const coordinationDirectory = ${JSON.stringify(path.join(c.root, "coordination"))};
+    export async function createDreamHost({ dryRun }) {
+      const open = ${constructAlways ? "true" : "!dryRun || fs.existsSync(root)"};
+      const store = open ? new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory, coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock }) : undefined;
+      return { store, registerRoot() {}, root, rootName: "memory", publish() {} };
+    }
+  `, { mode: 0o600 });
+  const config = JSON.parse(fs.readFileSync(c.configFile, "utf8"));
+  fs.writeFileSync(c.configFile, JSON.stringify({ ...config, host: file }), { mode: 0o600 });
+}
+const tree = (dir) => fs.readdirSync(dir, { recursive: true }).map(String).sort();
+
+test("a dry run over a memory root that does not exist yet leaves the filesystem untouched, with a real Corpus store host", (t) => {
+  const c = consumer(t);
+  corpusHost(c);
+  const before = tree(c.root);
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, "dry-run");
+  assert.equal(report.would_distill.length, 1, "the dry run still reports the sitting it would distil");
+  assert.deepEqual(tree(c.root), before, "no memory root, records, coordination directory or dream directory was created");
+});
+
+test("a dry-run host may leave out the store only while its memory root is missing", (t) => {
+  const c = consumer(t);
+  corpusHost(c);
+  fs.mkdirSync(c.memoryRoot);
+  fs.writeFileSync(path.join(c.root, "corpus-host.mjs"), fs.readFileSync(path.join(c.root, "corpus-host.mjs"), "utf8").replace("!dryRun || fs.existsSync(root)", "false"), { mode: 0o600 });
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile, "--dry-run"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /no store, but its memory root exists/);
+  assert.equal(c.run(KIT_CLI, ["run", "--config", c.configFile]).status, 2, "a real run without a store is still a configuration error");
+});

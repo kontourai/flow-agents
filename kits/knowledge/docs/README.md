@@ -1206,6 +1206,13 @@ project checkout and out of shared directories such as `/tmp`; the default under
    injecting existing briefs into the extraction prompt.
 3. **A host runtime.** Your host module's `createDreamHost` returns `runtime` (a Relay `ModelRuntime`) or `extract`.
 
+**Dry runs and a new memory root.** `--dry-run` creates nothing. Constructing a Corpus store over a memory root
+that does not exist yet creates that root, because Corpus binds a root to a stable identity at construction. So when
+`createDreamHost` is called with `dryRun: true` and the root does not exist, return no `store`; the run then reads the
+root as empty. Over an existing root, open the store as usual. When the root exists, a missing `store` exits 2, because
+an empty answer would hide the proposals already in the root. Keep the store's coordination directory outside the root,
+because the store's constructor creates it.
+
 If none of these runtimes is configured, the run exits 2 with `DREAM_MODEL_UNCONFIGURED`. The error names the missing
 role and prints all three ways to set up a model. A missing credential (`DREAM_MODEL_UNAVAILABLE`) or an unsupported
 provider kind (`DREAM_MODEL_UNSUPPORTED`) also exits 2.

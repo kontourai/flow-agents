@@ -9,7 +9,8 @@
  * Disabled unless the config says `"enabled": true`. The config's `host` is an
  * operator-owned module exporting `createDreamHost({ config })`, which returns
  * the host-composed pieces the run must not discover for itself (`dryRun` is true
- * under `--dry-run`, and the host must then create and write nothing):
+ * under `--dry-run`, and the host must then create and write nothing; a host whose
+ * memory root does not exist yet returns no `store` then, see storeForMissingRoot):
  *   { store, registerRoot, root, rootName, publish, runtime?, extract?, reviewDecisions? }
  * With neither `runtime` nor `extract`, the model is the config's `runtime` (the
  * Claude Code CLI) when it names one, and otherwise the Datum role named by the
@@ -23,6 +24,7 @@
  * @module dream/cli
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -33,6 +35,21 @@ import { dreamError } from "./util.js";
 
 /** Errors that mean the operator has to change something before any run can work: exit 2, not a failed run. */
 const CONFIGURATION_CODES = new Set(["DREAM_DISABLED", "DREAM_CONFIG_INVALID", "DREAM_MODEL_UNCONFIGURED", "DREAM_MODEL_UNAVAILABLE", "DREAM_MODEL_UNSUPPORTED"]);
+
+/**
+ * A dry run creates nothing, but constructing a Corpus store over a memory root that does not exist yet creates the
+ * root (Corpus binds a root to a stable identity when the store is built). So under `--dry-run` a host whose root is
+ * missing returns no `store`, and the run reads this one: the root holds nothing yet, so there is nothing to list. A
+ * host that leaves out the store while its root exists would hide the proposals in it, and is refused.
+ */
+function storeForMissingRoot(root) {
+  if (typeof root !== "string" || !path.isAbsolute(root)) throw dreamError("DREAM_CONFIG_INVALID", "root must be an absolute path");
+  if (fs.existsSync(root)) throw dreamError("DREAM_CONFIG_INVALID", "the host returned no store, but its memory root exists; open the store read-only instead");
+  return {
+    async listProposals() { return []; },
+    async proposeCreate() { throw dreamError("DREAM_DRY_RUN", "a dry run proposes nothing"); },
+  };
+}
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -77,6 +94,7 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       if (error?.code === "DREAM_CONFIG_INVALID") throw error;
       throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);
     }
+    if (args.dryRun && host.store == null) host.store = storeForMissingRoot(host.root);
     if (!host.extract && !args.dryRun) {
       const runtime = host.runtime
         ?? (config.runtime
