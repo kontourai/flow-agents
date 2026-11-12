@@ -964,8 +964,20 @@ cursor. It needs the full channel, because the analytics channel redacts
 `hook.transcript_path`. For each `claude-code` or `codex` event it reads the
 referenced Claude Code project JSONL or Codex rollout. Then it:
 
-- keeps only user and assistant **text**. It drops tool calls and results,
-  thinking and reasoning, images, sidechains and subagent rollouts, meta and
+- keeps only assistant **text** and the text of user messages a person wrote.
+  A kept user turn becomes the speaker of the claims distilled from it, so it
+  carries the person's authority. Ferry records who wrote each user message in
+  the Thread's `origin.kind`, and only `human` is kept. `agent` (a subagent
+  brief, a peer or coordinator message, a Codex `agent_message`), `harness`,
+  `hook`, `compaction` and `task-notification` are dropped. So is `unknown`:
+  the transcript cannot say who wrote it. That covers a prompt submitted
+  through an SDK or IDE client (Claude Code `promptSource: "sdk"`, a Codex
+  session whose `session_meta.source` is not `cli`), an accepted suggestion,
+  and a Claude Code record from before Claude Code wrote `origin` and
+  `promptSource`. From such a session only the assistant's side is
+  distilled. A user message with no `origin` at all is drift, because Ferry's
+  Claude Code and Codex importers always derive one. It also drops tool calls and results,
+  thinking and reasoning, images, sidechains and subagent transcripts, meta and
   compact-summary entries, and harness-originated entries such as task
   notifications. It also drops harness tags, such as `<system-reminder>` and
   `<environment_context>`, Codex developer instructions, and any block wrapped in the injected-memory marker
@@ -1044,8 +1056,10 @@ Ownership boundaries:
   rollout does not open with a `session_meta`. Drift is reported as `UNKNOWN_TRANSCRIPT_FORMAT`, holds the
   cursor, and never crashes the run.
 - **Temporary shims** (`promote/runtime-ferry-shims.js`) cover what the Thread
-  does not carry yet, each tied to an upstream issue and to be deleted when it
-  ships. Each reads one record-level fact from one raw line, and the flagged
+  did not carry, each tied to an upstream issue and to be deleted when it
+  ships. Thread 0.7 now carries `origin` and imports Codex `developer` items as
+  `system` messages, and the user-turn filter above reads them. The line-level
+  shims stay as a second layer. Each reads one record-level fact from one raw line, and the flagged
   *line* is removed before Ferry imports the rest, so there is no join on ids,
   text or time: Claude `origin.kind` other than `human`, compact summaries and
   transcript-only entries ([thread#76](https://github.com/kontourai/thread/issues/76));

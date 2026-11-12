@@ -3,15 +3,16 @@
  *
  * Parsing is `@kontourai/ferry`'s: its Claude Code and Codex importers turn a
  * runtime transcript into a canonical `@kontourai/thread` Thread. This module
- * only works over those canonical messages: it keeps user and assistant TEXT,
- * drops harness-injected tags and any block wrapped in the injected-memory
- * marker, and splits the result into sittings.
+ * only works over those canonical messages: it keeps assistant TEXT and the
+ * TEXT of user messages a person wrote (`origin.kind` `human`, see
+ * `isHumanUserMessage`), drops harness-injected tags and any block wrapped in
+ * the injected-memory marker, and splits the result into sittings.
  *
  * Ferry already drops tool results/calls (separate `tool` messages and
- * non-text parts), thinking, Claude `isMeta` entries and Claude sidechains.
- * What it does not yet expose is handled by the marked shims in
- * runtime-ferry-shims.js (kontourai/thread#76, #77, #78) and by the tag list
- * below (#78).
+ * non-text parts), thinking, Claude `isMeta` entries and Claude sidechains, and
+ * imports Codex `developer` items as `system` messages. The line-level shims in
+ * runtime-ferry-shims.js (kontourai/thread#76, #77, #78) and the tag list below
+ * remain as a second layer.
  *
  * Drift: a transcript that is not the format its telemetry runtime claims, is
  * not valid UTF-8, has no UUID session id, has a conversation record with no
@@ -232,12 +233,35 @@ function messageText(message) {
   return { text: stripHarnessTags(kept), unterminated: filter.open() };
 }
 
-function conversationFromThread(thread) {
+/**
+ * Which user messages are a person speaking. A kept `user` turn becomes the
+ * speaker of the claims distilled from it, so it carries the person's
+ * authority. Thread 0.7 records who authored each user message in
+ * `origin.kind`, and only `human` is kept:
+ *  - `agent` (a subagent brief, a peer or coordinator message, a Codex
+ *    `agent_message`), `harness`, `hook`, `compaction` and `task-notification`
+ *    were not written by the person;
+ *  - `unknown` means the importer looked and the source cannot tell (an SDK or
+ *    IDE client may relay a person or an orchestrator, and a Claude record from
+ *    before Claude Code wrote `origin`/`promptSource` carries neither). It is
+ *    dropped, never read as human;
+ *  - no `origin` at all means the importer did not derive one. Ferry 0.8's
+ *    Claude Code and Codex importers always do, so that is drift.
+ */
+function isHumanUserMessage(message) {
+  const kind = message.origin?.kind;
+  if (kind === undefined) throw drift("a user message carries no origin");
+  return kind === "human";
+}
+
+/** The kept conversation of a canonical Thread. Exported for the origin contract tests; callers use `readConversation`. */
+export function conversationFromThread(thread) {
   const messages = [];
   let unterminatedMemory = false;
   for (const message of thread.messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
     if (message.metadata?.sidechain === true) continue;
+    if (message.role === "user" && !isHumanUserMessage(message)) continue;
     const { text, unterminated } = messageText(message);
     unterminatedMemory ||= unterminated;
     if (text) messages.push({ role: message.role, text, timestampMs: message.timestamp });
@@ -284,6 +308,10 @@ export function readConversation(harness, content) {
     const thread = importThread(createClaudeCodeImporter, kept);
     if (!thread) return empty;
     if (thread.id === FERRY_CLAUDE_FALLBACK_ID) throw drift("claude-code: no record carries a sessionId");
+    // A subagent's own transcript (Ferry 0.8 imports it, under the id `<parent>:agent-<id>`) is a sidechain,
+    // as a Codex subagent rollout is: its "user" is the parent agent.
+    const subagent = thread.metadata?.custom?.claudeSubagent;
+    if (subagent) return { ...empty, sessionId: requireSessionId(subagent.parentSessionId), sidechain: true };
     return {
       sessionId: requireSessionId(thread.id),
       sidechain: false,

@@ -23,11 +23,11 @@ const MARKER = "quokka-marker-7f3a";
 const QUOTE = `I pinned the ledger rounding to half-even under ${MARKER}.`;
 const SESSION = "7d3e1a20-0000-4000-8000-0000000000a1";
 
-/** A Claude Code project transcript in the shape Claude Code writes: a user turn carrying the token, an assistant turn carrying the marker. */
+/** A Claude Code project transcript in the shape Claude Code writes: a typed user turn carrying the token, an assistant turn carrying the marker. */
 function transcript(cwd = "/Users/fixture-user/dev/ledger") {
   const base = { isSidechain: false, cwd, sessionId: SESSION, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "cli" };
   return [
-    { ...base, parentUuid: null, promptId: "p-1", message: { role: "user", content: `Please pin the ledger rounding. The registry deploy token is ${SECRET} if you need it.` }, permissionMode: "default", type: "user", uuid: "00000000-0000-4000-8000-0000000000b1", timestamp: "2026-10-30T09:00:02.000Z" },
+    { ...base, parentUuid: null, promptId: "p-1", origin: { kind: "human" }, promptSource: "typed", message: { role: "user", content: `Please pin the ledger rounding. The registry deploy token is ${SECRET} if you need it.` }, permissionMode: "default", type: "user", uuid: "00000000-0000-4000-8000-0000000000b1", timestamp: "2026-10-30T09:00:02.000Z" },
     { ...base, parentUuid: "00000000-0000-4000-8000-0000000000b1", message: { model: "claude-opus-5-5", id: "msg_b1", type: "message", role: "assistant", content: [{ type: "text", text: `Done. ${QUOTE}` }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 5 } }, requestId: "req_msg_b1", type: "assistant", uuid: "00000000-0000-4000-8000-0000000000b2", timestamp: "2026-10-30T09:00:06.000Z" },
   ].map((line) => JSON.stringify(line)).join("\n").concat("\n");
 }
