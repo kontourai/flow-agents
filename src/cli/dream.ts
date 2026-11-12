@@ -11,6 +11,6 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 export const DREAM_CLI = path.join(PACKAGE_ROOT, "kits", "knowledge", "dream", "cli.js");
 
 export async function main(argv: string[]): Promise<number> {
-  const cli = (await import(pathToFileURL(DREAM_CLI).href)) as { main: (argv: string[]) => Promise<number> };
-  return cli.main(argv);
+  const cli = (await import(pathToFileURL(DREAM_CLI).href)) as { main: (argv: string[], io?: { handleSignals?: boolean }) => Promise<number> };
+  return cli.main(argv, { handleSignals: true }); // this process is the dream command
 }

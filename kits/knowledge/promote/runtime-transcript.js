@@ -294,12 +294,13 @@ function requireSessionId(id) {
  * @param {"claude-code" | "codex"} harness  the runtime the transcript claims to be
  * @param {Buffer} content  the whole transcript file
  * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null, gitBranch: string | null,
- *   partialTail: boolean, thread: object | null }}
+ *   partialTail: boolean, thread: object | null, shimDropped: Record<string, number> }}
+ *   `shimDropped` counts, by kind, user records the line shims removed before import (see runtime-ferry-shims.js).
  * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
 export function importRuntimeThread(harness, content) {
   const { lines, partialTail } = completeLines(content);
-  const empty = { sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, thread: null };
+  const empty = { sessionId: null, sidechain: false, cwd: null, gitBranch: null, partialTail, thread: null, shimDropped: {} };
   if (lines.length === 0) return empty;
 
   const detected = detectFormat(lines.slice(0, 200).join("\n"));
@@ -309,15 +310,20 @@ export function importRuntimeThread(harness, content) {
 
   if (harness === "claude-code") {
     const kept = [];
+    let unattributed = 0;
     for (const line of lines) {
       const facts = claudeLineFacts(line);
+      if (facts.nonHumanOrigin) unattributed += 1;
       if (facts.harnessEntry) continue; // excluded lines are never imported, so their shape does not matter
       if (facts.unrecognizedConversation) throw drift("claude-code: a conversation-shaped record has an unrecognized type");
       if (facts.missingTime) throw drift("claude-code: a conversation record has no source timestamp");
       kept.push(line);
     }
     const thread = importThread(createClaudeCodeImporter, kept);
-    if (!thread) return empty;
+    // A record removed for a non-human raw origin is a user turn a person did not write; its kind is Ferry's to name.
+    // It never reaches the Thread, so it is returned beside it for every reader to count.
+    const shimDropped = unattributed ? { unknown: unattributed } : {};
+    if (!thread) return { ...empty, shimDropped };
     if (thread.id === FERRY_CLAUDE_FALLBACK_ID) throw drift("claude-code: no record carries a sessionId");
     // A subagent's own transcript (Ferry 0.8 imports it, under the id `<parent>:agent-<id>`) is a sidechain,
     // as a Codex subagent rollout is: its "user" is the parent agent.
@@ -330,6 +336,7 @@ export function importRuntimeThread(harness, content) {
       gitBranch: thread.metadata?.git?.branch ?? null,
       partialTail,
       thread,
+      shimDropped,
     };
   }
 
@@ -347,7 +354,7 @@ export function importRuntimeThread(harness, content) {
   }
   const thread = importThread(createCodexImporter, kept);
   if (!thread) return { ...empty, sessionId, gitBranch: meta.gitBranch };
-  return { sessionId, sidechain: false, cwd: thread.metadata?.cwd ?? null, gitBranch: meta.gitBranch, partialTail, thread };
+  return { sessionId, sidechain: false, cwd: thread.metadata?.cwd ?? null, gitBranch: meta.gitBranch, partialTail, thread, shimDropped: {} };
 }
 
 /**
@@ -362,9 +369,11 @@ export function importRuntimeThread(harness, content) {
  * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
 export function readConversation(harness, content) {
-  const { thread, ...meta } = importRuntimeThread(harness, content);
-  if (!thread) return { ...meta, unterminatedMemory: false, messages: [], droppedUserTurns: {} };
-  return { ...meta, ...conversationFromThread(thread) };
+  const { thread, shimDropped, ...meta } = importRuntimeThread(harness, content);
+  if (!thread) return { ...meta, unterminatedMemory: false, messages: [], droppedUserTurns: { ...shimDropped } };
+  const conversation = conversationFromThread(thread);
+  for (const [kind, count] of Object.entries(shimDropped)) conversation.droppedUserTurns[kind] = (conversation.droppedUserTurns[kind] ?? 0) + count;
+  return { ...meta, ...conversation };
 }
 
 /**
@@ -379,8 +388,9 @@ export function readConversation(harness, content) {
  * @param {"claude-code" | "codex"} harness
  * @param {Buffer} content
  * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null, gitBranch: string | null,
- *   partialTail: boolean, messages: Array<{id: string, role: "user"|"assistant", origin: object | undefined,
- *   text: string, timestampMs: number, sidechain: boolean}> }}
+ *   partialTail: boolean, shimDropped: Record<string, number>, messages: Array<{id: string, role: "user"|"assistant",
+ *   origin: object | undefined, text: string, timestampMs: number, sidechain: boolean}> }}
+ *   `shimDropped` is user records removed before import, by kind: they have no text here, only a count.
  */
 export function readRuntimeMessages(harness, content) {
   const { thread, ...meta } = importRuntimeThread(harness, content);

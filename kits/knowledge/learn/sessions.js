@@ -171,6 +171,10 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
     human_turns_in_window: 0,
     human_turns_duplicate: 0,
     unknown_turns_in_window: 0,
+    // User records the line shims removed before import (a raw origin that is not `{ kind: "human" }`, which Ferry 0.8
+    // could otherwise derive as human). They are counted in `user_messages_by_origin` under the kind the shim names
+    // (`unknown`), and are never candidates for anything: they have no text here.
+    shim_dropped_user_turns: 0,
   };
   const turns = [];
   const unknownTurns = [];
@@ -210,6 +214,11 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
       if (scope && !scope(parsed.cwd)) {
         report.sessions_out_of_scope += 1;
         continue;
+      }
+      for (const [kind, count] of Object.entries(parsed.shimDropped ?? {})) {
+        report.user_messages += count;
+        report.shim_dropped_user_turns += count;
+        bump(report.user_messages_by_origin, kind, count);
       }
       const threadId = `${parsed.harness}:${parsed.sessionId}`;
       let lastAssistant = "";

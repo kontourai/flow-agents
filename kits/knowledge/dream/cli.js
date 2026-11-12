@@ -28,6 +28,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { PROCESS_TERMINATION_GRACE_MS } from "@kontourai/relay/process";
+
 import { DEFAULT_ROLE, assertOwnerControlledDir, assertOwnerControlledFile, loadDreamConfig } from "./config.js";
 import { createCliRuntime, createRoleRuntime, executionEvidence, extractForRuntime, modelSetupHelp } from "./model.js";
 import { defaultDreamDir, runDream } from "./run.js";
@@ -112,10 +114,17 @@ function recordExecution(runtime, evidence) {
 const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143 };
 
 /**
- * While a claude-code run is in flight, SIGINT and SIGTERM abort it instead of killing this process. claude runs in its
- * own process group (model.js), so a terminal Ctrl-C no longer reaches it; aborting the run makes Relay signal that
- * whole group, and the run then ends with the signal's exit code. A second signal restores default handling and is
- * re-raised, so a stuck run can still be killed. `restore` removes the handlers.
+ * When this module is the command (`handleSignals`), SIGINT and SIGTERM abort the run instead of killing this process.
+ * claude runs in its own process group (model.js), so a terminal Ctrl-C no longer reaches it. Aborting makes Relay send
+ * the group SIGTERM, then SIGKILL after its grace period, and makes the run stop at its next stage boundary without
+ * committing the cursor (DREAM_INTERRUPTED, exit 130/143).
+ *
+ * A second signal ends this process at once, with `process.exit` rather than by re-raising the signal. Relay SIGKILLs
+ * every group still running from its `exit` hook, which a death by signal would skip, leaving a claude that ignores
+ * SIGTERM running. For the same reason the handlers stay installed for Relay's grace period after the run returns
+ * (on an unref'd timer, so they never keep the process alive).
+ *
+ * Not covered: this process killed by SIGKILL (no handler or exit hook runs), and a process that left claude's group.
  */
 function abortOnSignals() {
   const controller = new AbortController();
@@ -126,17 +135,14 @@ function abortOnSignals() {
   };
   for (const name of Object.keys(SIGNAL_EXIT)) {
     handlers[name] = () => {
-      if (received) {
-        restore();
-        process.kill(process.pid, name);
-        return;
-      }
+      if (received) process.exit(SIGNAL_EXIT[name]);
       received = name;
       controller.abort(dreamError("DREAM_INTERRUPTED", `stopped by ${name}`));
     };
     process.on(name, handlers[name]);
   }
-  return { signal: controller.signal, received: () => received, restore };
+  const restoreAfterGrace = () => setTimeout(restore, PROCESS_TERMINATION_GRACE_MS + 500).unref();
+  return { signal: controller.signal, received: () => received, restore: restoreAfterGrace };
 }
 
 /** One line on stderr when user turns were left out of sittings, so an assistant-only sitting is not a mystery. */
@@ -165,7 +171,13 @@ export function parseArgs(argv) {
   return out;
 }
 
-export async function main(argv = process.argv.slice(2), { stdout = process.stdout, stderr = process.stderr } = {}) {
+/**
+ * @param {string[]} argv
+ * @param {{ stdout?: NodeJS.WritableStream, stderr?: NodeJS.WritableStream, handleSignals?: boolean }} [io]  `handleSignals`:
+ *   this process is the dream command, so SIGINT/SIGTERM may be handled (`abortOnSignals`). Off when a host or a test
+ *   calls `main` in its own process.
+ */
+export async function main(argv = process.argv.slice(2), { stdout = process.stdout, stderr = process.stderr, handleSignals = false } = {}) {
   let args;
   let config;
   try {
@@ -198,14 +210,14 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);
     }
     if (args.dryRun && host.store == null) host.store = storeForMissingRoot(host.root);
+    if (handleSignals && !args.dryRun) interrupt = abortOnSignals();
     let auth = null;
     let runtimeEvidence;
     if (!host.extract && !args.dryRun) {
       runtimeEvidence = { kind: host.runtime ? "host" : config.runtime ? config.runtime.kind : "datum-role", results: 0, execution: [] };
-      if (!host.runtime && config.runtime) interrupt = abortOnSignals();
       const runtime = recordExecution(host.runtime
         ?? (config.runtime
-          ? await createCliRuntime(config.runtime, { dreamDir, signal: interrupt.signal })
+          ? await createCliRuntime(config.runtime, { dreamDir, ...(interrupt ? { signal: interrupt.signal } : {}) })
           : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE })), runtimeEvidence);
       auth = trackAuthentication(runtime);
       host.extract = auth.extract(await extractForRuntime(auth.runtime));
@@ -218,6 +230,7 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       transcriptRoots: config.transcriptRoots,
       ...(config.dreamDir ? { dreamDir: config.dreamDir } : {}),
       ...(runtimeEvidence ? { runtimeEvidence } : {}),
+      ...(interrupt ? { signal: interrupt.signal } : {}),
       ...Object.fromEntries(["passes", "maxSittingsPerRun", "globalBudget", "projectBudget", "maxEntryBytes", "includeUnreviewed", "routingPolicy", "idleGapMs", "proposerId", "visibility"].filter((key) => config[key] !== undefined).map((key) => [key, config[key]])),
     }).catch((error) => {
       // A sitting whose every pass failed because the runtime refused its credentials is a setup problem, not a failed run.
@@ -229,7 +242,7 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     return report.status === "blocked" ? 3 : 0;
   } catch (error) {
     const signal = interrupt?.received();
-    if (signal) stderr.write(`DREAM_INTERRUPTED: stopped by ${signal}; claude was stopped and the cursor is held\n`);
+    if (signal) stderr.write(`DREAM_INTERRUPTED: stopped by ${signal}; the model calls were stopped and the cursor is held\n`);
     else stderr.write(`${error.code ?? "DREAM_FAILED"}: ${String(error.message).slice(0, 300)}\n`);
     // Setup guidance is ours, not echoed input, so it is printed whole.
     if (!signal && typeof error.help === "string") stderr.write(`${error.help}\n`);
@@ -243,5 +256,5 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exitCode = await main();
+  process.exitCode = await main(process.argv.slice(2), { handleSignals: true });
 }

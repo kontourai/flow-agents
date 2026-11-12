@@ -167,6 +167,8 @@ function pruneReports(dir) {
  * @param {{kind: "public"}|{kind: "restricted", audiences: string[]}} [options.visibility]  who the sittings' claims may be shown to,
  *   in Surface's visibility lattice (#1571). Absent reads as sealed, the narrowest, so omission never widens access.
  * @param {string} [options.trigger]  who started it (recorded in the report)
+ * @param {AbortSignal} [options.signal]  aborted on SIGINT/SIGTERM (cli.js): the run throws DREAM_INTERRUPTED at the next
+ *   stage boundary and commits nothing after it
  * @param {{kind: string, results: number, execution: object[]}} [options.runtimeEvidence]  the model runtime's content-free
  *   execution evidence (cli.js), recorded in the report as `runtime`
  * @param {(stage: string) => void | Promise<void>} [options.onStage]  called at each stage boundary; tests inject faults here
@@ -177,7 +179,12 @@ export async function runDream(host, options = {}) {
     throw dreamError("DREAM_DISABLED", "the dream run is disabled; pass enabled: true to run it, or dryRun: true to preview");
   }
   const now = options.now ?? (() => new Date().toISOString());
-  const stage = async (name) => options.onStage?.(name);
+  // An interrupted run stops at the next boundary, before it proposes, publishes, writes briefs or commits the cursor
+  // ("cursor" is checked immediately before the commit). A sitting whose pass was interrupted never reaches "route".
+  const stage = async (name) => {
+    if (options.signal?.aborted) throw dreamError("DREAM_INTERRUPTED", `interrupted before ${name}`);
+    return options.onStage?.(name);
+  };
   const dreamDir = assertAbsolute(options.dreamDir ?? defaultDreamDir(), "dreamDir");
   assertAbsolute(options.telemetryFile, "telemetryFile");
   if (!Array.isArray(options.transcriptRoots) || options.transcriptRoots.length === 0) {

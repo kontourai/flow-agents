@@ -103,7 +103,10 @@ test("only origin.kind human counts: agent briefs, SDK prompts, harness, compact
   assert.ok(document.report.user_messages >= 15, String(document.report.user_messages));
   assert.equal(document.report.user_messages_by_origin.human, 5, JSON.stringify(document.report.user_messages_by_origin));
   assert.ok(!sentText(runtime).includes("ORCHESTRATOR BRIEF"), "no non-human turn was sent to the classifier");
-  assert.equal(document.report.user_messages_by_origin.unknown, 5, "the SDK-submitted briefs are unknown, not human");
+  // The SDK briefs (5) are Ferry's unknown; the coordinator lines (5) are removed by the #76 shim before import and
+  // counted as unknown, the kind the shim can name. None is a candidate for anything.
+  assert.equal(document.report.shim_dropped_user_turns, 5);
+  assert.equal(document.report.user_messages_by_origin.unknown, 10, "the SDK-submitted briefs and the shim-dropped coordinator lines are unknown, not human");
   assert.equal(document.report.occurrences, 2, "only the two typed pin-sha corrections count");
   assert.deepEqual(document.proposals, [], "20 echoed briefs make no proposal; 2 human corrections are under threshold");
 });
@@ -144,9 +147,9 @@ test("real Ferry derives the origins these fixtures rely on", () => {
   ]));
   const { turns, report } = readHumanTurns({ roots: [dir], sinceMs: null, untilMs: null });
   assert.deepEqual(turns.map((turn) => turn.text), ["typed by a person"]);
-  // The coordinator line is dropped before import by the runtime-ferry-shims pre-filter while that shim exists.
-  assert.deepEqual({ ...report.user_messages_by_origin, agent: 0 }, { agent: 0, human: 1, unknown: 1 });
-  assert.ok((report.user_messages_by_origin.agent ?? 0) <= 1);
+  // The coordinator line is dropped before import by the runtime-ferry-shims pre-filter and counted as unknown.
+  assert.deepEqual(report.user_messages_by_origin, { human: 1, unknown: 2 });
+  assert.equal(report.shim_dropped_user_turns, 1);
 });
 
 // ── noise and prompt structure ───────────────────────────────────────────────────────────────────────────────────
