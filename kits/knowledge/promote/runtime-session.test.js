@@ -189,6 +189,8 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
     appendTelemetry(box, event("claude-code", box.claudeTranscript));
     const { residues, report } = run(box);
     assert.equal(report.blocked.length, 0);
+    // The peer message is dropped and counted; the task notification is wrapper text only, so there is nothing to count.
+    assert.deepEqual(report.dropped_user_turns, { agent: 1 });
     assert.deepEqual(residues.map((r) => r.sittingId), [`claude-code:${CLAUDE_SESSION}:0`, `claude-code:${CLAUDE_SESSION}:1`]);
     const [first, second] = residues;
     assert.deepEqual(first.provenance, {
@@ -234,6 +236,7 @@ describe("AC2 runtime-session parsing, sittings and provenance", () => {
     const box = sandbox();
     appendTelemetry(box, event("codex", box.codexRollout), event("codex", box.codexSubagent));
     const { residues, report, candidateCursor } = run(box);
+    assert.deepEqual(report.dropped_user_turns, { agent: 1 }, "the inter-agent message");
     assert.deepEqual(residues.map((r) => r.sittingId), [`codex:${CODEX_SESSION}:0`, `codex:${CODEX_SESSION}:1`]);
     assert.deepEqual(residues[0].provenance, {
       harness: "codex",
@@ -1076,7 +1079,7 @@ describe("review round 1 regressions (PR #1575)", () => {
     const noTime = (rec) => ({ ...rec, timestamp: undefined });
     for (const [runtime, rows] of [
       ["codex", [codexMeta(), codexMsg("user", "REAL_ONE"), noTime({ type: "event_msg", payload: { type: "task_complete" } }), noTime({ type: "event_msg", payload: { type: "token_count", info: null } }), noTime(codexMsg("developer", "DEV_NO_TIME"))]],
-      ["claude-code", [claudeRec("REAL_ONE"), noTime(claudeRec("PEER_NO_TIME", { uuid: "p", origin: { kind: "peer" } })), noTime({ type: "queue-operation", operation: "enqueue", sessionId: UID })]],
+      ["claude-code", [claudeRec("REAL_ONE"), noTime(claudeRec("TRANSCRIPT_ONLY_NO_TIME", { uuid: "p", isVisibleInTranscriptOnly: true })), noTime({ type: "queue-operation", operation: "enqueue", sessionId: UID })]],
     ]) {
       const { box } = single(runtime, ndjson(rows));
       const result = run(box);
@@ -1337,6 +1340,7 @@ describe("Thread origin: only human-authored user messages reach a sitting", () 
     const conversation = readConversation("claude-code", buffer(CLAUDE));
     assert.equal(conversation.sessionId, CLAUDE_UID);
     assert.deepEqual(kept(conversation), ["user:TYPED_HUMAN_PROMPT", "assistant:CLAUDE_REPLY_ONE", "assistant:CLAUDE_REPLY_TWO"]);
+    assert.deepEqual(conversation.droppedUserTurns, { unknown: 4, agent: 1 }, "each dropped user turn is counted under its origin kind");
   });
 
   const CODEX = [
@@ -1360,12 +1364,15 @@ describe("Thread origin: only human-authored user messages reach a sitting", () 
     });
     const conversation = readConversation("codex", buffer(CODEX));
     assert.deepEqual(kept(conversation), ["user:CLI_HUMAN_PROMPT", "assistant:CODEX_REPLY_ONE", "assistant:CODEX_REPLY_TWO"]);
+    assert.deepEqual(conversation.droppedUserTurns, { agent: 1, harness: 1, unknown: 1 });
   });
 
   test("Codex: a session started by a client that relays people and orchestrators (exec) has no human turns", () => {
     const records = [codexMeta("exec"), codexUser(1, "EXEC_PROMPT_MARKER"), codexAssistant(2, "EXEC_REPLY")];
     assert.deepEqual(userOrigins(ferryThread(createCodexImporter, records)), { EXEC_PROMPT_MARKER: "unknown" });
-    assert.deepEqual(kept(readConversation("codex", buffer(records))), ["assistant:EXEC_REPLY"]);
+    const conversation = readConversation("codex", buffer(records));
+    assert.deepEqual(kept(conversation), ["assistant:EXEC_REPLY"]);
+    assert.deepEqual(conversation.droppedUserTurns, { unknown: 1 });
   });
 
   test("a user message with no origin is drift: the importer did not derive one, so nothing says a person wrote it", () => {
@@ -1377,9 +1384,13 @@ describe("Thread origin: only human-authored user messages reach a sitting", () 
   });
 
   test("a Claude Code subagent's own transcript is a sidechain, as a Codex subagent rollout is", () => {
+    // As Claude Code writes a subagent's transcript: every record a sidechain carrying the agent id, and the brief a
+    // user record with no origin or promptSource (the parent agent wrote it).
     const sub = (record) => ({ ...record, isSidechain: true, agentId: "a0e1" });
-    const records = [sub(claudeUser(1, "SUBAGENT_BRIEF_MARKER", { origin: { kind: "human" } })), sub(claudeAssistant(2, "SUBAGENT_REPLY_MARKER"))];
-    assert.equal(ferryThread(createClaudeCodeImporter, records).metadata.custom.claudeSubagent.parentSessionId, CLAUDE_UID, "Ferry 0.8 imports it as a subagent thread");
+    const records = [sub(claudeUser(1, "SUBAGENT_BRIEF_MARKER")), sub(claudeAssistant(2, "SUBAGENT_REPLY_MARKER"))];
+    const thread = ferryThread(createClaudeCodeImporter, records);
+    assert.equal(thread.metadata.custom.claudeSubagent.parentSessionId, CLAUDE_UID, "Ferry 0.8 imports it as a subagent thread");
+    assert.deepEqual(userOrigins(thread), { SUBAGENT_BRIEF_MARKER: "agent" });
     const conversation = readConversation("claude-code", buffer(records));
     assert.equal(conversation.sidechain, true);
     assert.equal(conversation.sessionId, CLAUDE_UID);

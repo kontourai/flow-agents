@@ -2,14 +2,14 @@
 // Claude Code subscription instead of an API key, a config under macOS /tmp, and the installed command. Every run here
 // is a child process with a clean environment, so the exit code is the real one and no operator setting leaks in.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolveRef } from "@kontourai/datum";
 import { MAX_PASS_ENV, MAX_RUNTIME_TIMEOUT_MS, validateDreamConfig } from "../../kits/knowledge/dream/config.js";
-import { MODEL_SETUP_DOC } from "../../kits/knowledge/dream/model.js";
+import { MODEL_SETUP_DOC, resolveClaudeExecutable } from "../../kits/knowledge/dream/model.js";
 import { telemetryLine, tempDir } from "./dream-support.mjs";
 
 const REPO = path.resolve(import.meta.dirname, "..", "..");
@@ -43,8 +43,10 @@ function transcript(cwd = "/Users/fixture-user/dev/ledger") {
  * `log` and `statuses` are baked in when given, because a child started with an allowlisted environment does not
  * see FAKE_CLAUDE_*; otherwise they come from the environment (a host runtime passes the whole environment). `hang`
  * makes it read its input and then never answer, ignoring SIGTERM, so only a timeout and SIGKILL can end it.
+ * `wrapper` makes the executable a `/bin/sh` script that runs the fake as its child without `exec`, as a version
+ * manager's shim does: signalling only the direct child would leave the fake running and holding the pipes.
  */
-function fakeClaude(dir, { log, statuses, hang = false } = {}) {
+function fakeClaude(dir, { log, statuses, hang = false, wrapper = false } = {}) {
   const script = path.join(dir, "fake-claude.mjs");
   fs.writeFileSync(script, `
     import fs from "node:fs";
@@ -54,7 +56,7 @@ function fakeClaude(dir, { log, statuses, hang = false } = {}) {
     for await (const chunk of process.stdin) chunks.push(chunk);
     const stdin = Buffer.concat(chunks).toString("utf8");
     const planted = Object.fromEntries(["ANTHROPIC_BASE_URL", "GH_TOKEN", "ANTHROPIC_API_KEY"].map((name) => [name, process.env[name] ?? null]));
-    fs.appendFileSync(LOG, JSON.stringify({ argv: process.argv.slice(2), envNames: Object.keys(process.env).sort(), planted, trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), pid: process.pid, stdin }) + "\\n");
+    fs.appendFileSync(LOG, JSON.stringify({ argv: process.argv.slice(2), envNames: Object.keys(process.env).sort(), planted, trigger: process.env.FLOW_AGENTS_DREAM_TRIGGER ?? null, disabledHooks: process.env.SA_DISABLED_HOOKS ?? null, cwd: process.cwd(), pid: process.pid, ppid: process.ppid, stdin }) + "\\n");
     if (${JSON.stringify(hang)}) {
       process.on("SIGTERM", () => {});
       setInterval(() => {}, 1000);
@@ -79,7 +81,10 @@ function fakeClaude(dir, { log, statuses, hang = false } = {}) {
     process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "", structured_output: { proposals }, usage: { input_tokens: 12, output_tokens: 7 }, stop_reason: "end_turn" }));
   `, { mode: 0o600 });
   const executable = path.join(dir, "claude");
-  fs.writeFileSync(executable, `#!${process.execPath}\nimport(${JSON.stringify(pathToFileURL(script).href)});\n`, { mode: 0o700 });
+  const body = wrapper
+    ? `#!/bin/sh\n${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\nexit $?\n`
+    : `#!${process.execPath}\nimport(${JSON.stringify(pathToFileURL(script).href)});\n`;
+  fs.writeFileSync(executable, body, { mode: 0o700 });
   return executable;
 }
 
@@ -141,7 +146,7 @@ function consumer(t, { config = {} } = {}) {
   // Only what a fresh shell would have: no DATUM_* overrides, no provider keys, nothing from the operator's own setup.
   const env = { PATH: process.env.PATH, HOME: home, XDG_CONFIG_HOME: path.join(home, ".config"), XDG_DATA_HOME: path.join(home, ".local", "share"), TMPDIR: root };
   const run = (command, args, extraEnv = {}, nodeArgs = []) => spawnSync(process.execPath, [...nodeArgs, command, ...args], { cwd: work, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 60_000 });
-  return { root, home, work, transcripts, memoryRoot, published, dreamDir, configFile, run };
+  return { root, home, work, transcripts, memoryRoot, published, dreamDir, configFile, run, env };
 }
 
 function filesUnder(dir) {
@@ -256,7 +261,7 @@ test("runtime claude-code: a dirty parent environment reaches claude only throug
     assert.deepEqual(written.runtime, {
       kind: "claude-code",
       results: 2,
-      execution: [{ environment: { inherit: "allowlist", names }, isolation_flags: SAFE_MODE_FLAGS, process_group: "shared" }],
+      execution: [{ environment: { inherit: "allowlist", names }, isolation_flags: SAFE_MODE_FLAGS, process_group: process.platform === "win32" ? "shared" : "isolated" }],
     });
     for (const value of Object.values(PLANTED)) {
       for (const [name, text] of [["stdout", result.stdout], ["stderr", result.stderr], ["report", JSON.stringify(written)]]) {
@@ -301,19 +306,69 @@ test("runtime claude-code: claude refusing its sign-in on every pass is setup (e
   assert.equal(JSON.parse(result.stdout).status, "failed");
 });
 
-test("runtime claude-code: a claude that never answers is stopped at runtime.timeoutMs, SIGKILL included, and the run fails", (t) => {
-  const { c, log } = claudeConsumer(t, { runtime: { timeoutMs: 1000 }, fake: { hang: true } });
-  const pids = () => readLines(log).map((call) => call.pid);
-  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+test("runtime claude-code: a claude that never answers is stopped at runtime.timeoutMs, wrapper and child, SIGKILL included", (t) => {
+  // claude is a non-exec /bin/sh wrapper around a child that ignores SIGTERM.
+  const { c, log } = claudeConsumer(t, { runtime: { timeoutMs: 1000 }, fake: { hang: true, wrapper: true } });
+  const pids = () => readLines(log).flatMap((call) => [call.pid, call.ppid]);
   t.after(() => { for (const pid of pids()) if (alive(pid)) process.kill(pid, "SIGKILL"); });
   const started = Date.now();
   const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
   assert.equal(result.status, 1, `${result.stderr} (status ${result.status}, signal ${result.signal})`);
   assert.match(result.stderr, /^DREAM_DISTILL_FAILED/m);
   assert.ok(Date.now() - started < 30_000, "both passes were stopped, not left to the test's 60 s limit");
-  assert.equal(pids().length, 2, "each pass started claude");
-  for (const pid of pids()) assert.equal(alive(pid), false, `claude ${pid} ignored SIGTERM and is still running`);
+  assert.equal(readLines(log).length, 2, "each pass started claude");
+  for (const pid of pids()) assert.equal(alive(pid), false, `claude process ${pid} (wrapper or its child) is still running`);
   assert.equal(fs.existsSync(path.join(c.dreamDir, "cursors", "runtime-session.cursor.json")), false, "the cursor is held");
+});
+
+test("runtime claude-code: SIGINT to the run (a terminal's Ctrl-C) stops claude, wrapper and child, and the run exits 130", async (t) => {
+  const { c, log } = claudeConsumer(t, { fake: { hang: true, wrapper: true } });
+  const pids = () => readLines(log).flatMap((call) => [call.pid, call.ppid]);
+  t.after(() => { for (const pid of pids()) if (alive(pid)) process.kill(pid, "SIGKILL"); });
+  const child = spawn(process.execPath, [KIT_CLI, "run", "--config", c.configFile], { cwd: c.work, env: c.env, stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+  const deadline = Date.now() + 30_000;
+  while (readLines(log).length === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(readLines(log).length, 1, "claude started and is hanging");
+  const started = Date.now();
+  child.kill("SIGINT");
+  const result = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 20_000))]);
+  if (result.timedOut) child.kill("SIGKILL");
+  assert.deepEqual(result, { code: 130, signal: null }, stderr);
+  assert.ok(Date.now() - started < 10_000, "the run exited promptly");
+  assert.match(stderr, /^DREAM_INTERRUPTED: stopped by SIGINT/m);
+  for (const pid of pids()) assert.equal(alive(pid), false, `claude process ${pid} survived the interrupt`);
+  assert.equal(fs.existsSync(path.join(c.dreamDir, "cursors", "runtime-session.cursor.json")), false, "the cursor is held");
+});
+
+test("user turns a person did not write are counted in the report, and the command says so", (t) => {
+  const { c } = claudeConsumer(t);
+  // An SDK client's prompt in the same sitting: Ferry reads it as unknown, so it is left out and counted.
+  const session = path.join(c.transcripts, "session.jsonl");
+  const base = { isSidechain: false, cwd: "/Users/fixture-user/dev/ledger", sessionId: SESSION, version: "2.1.316", gitBranch: "main", userType: "external", entrypoint: "sdk-cli" };
+  fs.appendFileSync(session, JSON.stringify({ ...base, parentUuid: "00000000-0000-4000-8000-0000000000b2", promptSource: "sdk", message: { role: "user", content: "SDK_BRIEF: also bump the version." }, type: "user", uuid: "00000000-0000-4000-8000-0000000000b3", timestamp: "2026-10-30T09:00:09.000Z" }) + "\n");
+  const result = c.run(KIT_CLI, ["run", "--config", c.configFile]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.ingest.dropped_user_turns, { unknown: 1 });
+  assert.deepEqual(onDiskReport(c, report.run_id).ingest.dropped_user_turns, { unknown: 1 });
+  assert.match(result.stderr, /^note: 1 user turn\(s\) were not read as yours \(unknown 1\)/m);
+});
+
+test("Windows: a claude.cmd shim is refused as setup, configured or found on PATH, with the fix named", (t) => {
+  const dir = tempDir("dream-win-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, "claude.cmd"), "@echo off\r\n", { mode: 0o700 });
+  const refused = (fn, pattern) => assert.throws(fn, (error) => error.code === "DREAM_MODEL_UNAVAILABLE" && pattern.test(error.message) && /claude\.exe/.test(error.message));
+  refused(() => resolveClaudeExecutable(path.join(dir, "claude.cmd"), "", "win32"), /batch shim/);
+  refused(() => resolveClaudeExecutable(path.join(dir, "CLAUDE.BAT"), "", "linux"), /batch shim/);
+  refused(() => resolveClaudeExecutable(undefined, dir, "win32"), /only a claude\.cmd shim is on PATH/);
+  fs.writeFileSync(path.join(dir, "claude.exe"), "", { mode: 0o700 });
+  assert.equal(resolveClaudeExecutable(undefined, dir, "win32"), path.join(dir, "claude.exe"));
 });
 
 test("config: runtime.passEnv and runtime.timeoutMs are bounded, and refused past the bound", () => {

@@ -109,6 +109,45 @@ function recordExecution(runtime, evidence) {
   return recorded;
 }
 
+const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143 };
+
+/**
+ * While a claude-code run is in flight, SIGINT and SIGTERM abort it instead of killing this process. claude runs in its
+ * own process group (model.js), so a terminal Ctrl-C no longer reaches it; aborting the run makes Relay signal that
+ * whole group, and the run then ends with the signal's exit code. A second signal restores default handling and is
+ * re-raised, so a stuck run can still be killed. `restore` removes the handlers.
+ */
+function abortOnSignals() {
+  const controller = new AbortController();
+  let received = null;
+  const handlers = {};
+  const restore = () => {
+    for (const [name, handler] of Object.entries(handlers)) process.removeListener(name, handler);
+  };
+  for (const name of Object.keys(SIGNAL_EXIT)) {
+    handlers[name] = () => {
+      if (received) {
+        restore();
+        process.kill(process.pid, name);
+        return;
+      }
+      received = name;
+      controller.abort(dreamError("DREAM_INTERRUPTED", `stopped by ${name}`));
+    };
+    process.on(name, handlers[name]);
+  }
+  return { signal: controller.signal, received: () => received, restore };
+}
+
+/** One line on stderr when user turns were left out of sittings, so an assistant-only sitting is not a mystery. */
+function noteDroppedTurns(report, stderr) {
+  const dropped = report?.ingest?.dropped_user_turns ?? {};
+  const total = Object.values(dropped).reduce((sum, n) => sum + n, 0);
+  if (total === 0) return;
+  const kinds = Object.entries(dropped).sort(([a], [b]) => a.localeCompare(b)).map(([kind, n]) => `${kind} ${n}`).join(", ");
+  stderr.write(`note: ${total} user turn(s) were not read as yours (${kinds}); a person did not write them, or the transcript cannot say who did. Their sittings keep only the assistant's side (report.ingest.dropped_user_turns).\n`);
+}
+
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (command !== "run") throw dreamError("DREAM_USAGE", "usage: dream run --config /abs/dream.config.json [--dry-run] [--trigger NAME]");
@@ -140,6 +179,7 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     stderr.write("DREAM_DISABLED: the dream run is disabled in this config\n");
     return 2;
   }
+  let interrupt = null;
   try {
     // The run keeps its cursor, lock, reports and briefs here, and the SessionStart hook injects the briefs as the
     // user's memory, so another user must not be able to write, or redirect, either directory.
@@ -162,9 +202,10 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     let runtimeEvidence;
     if (!host.extract && !args.dryRun) {
       runtimeEvidence = { kind: host.runtime ? "host" : config.runtime ? config.runtime.kind : "datum-role", results: 0, execution: [] };
+      if (!host.runtime && config.runtime) interrupt = abortOnSignals();
       const runtime = recordExecution(host.runtime
         ?? (config.runtime
-          ? await createCliRuntime(config.runtime, { dreamDir })
+          ? await createCliRuntime(config.runtime, { dreamDir, signal: interrupt.signal })
           : await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE })), runtimeEvidence);
       auth = trackAuthentication(runtime);
       host.extract = auth.extract(await extractForRuntime(auth.runtime));
@@ -183,14 +224,21 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       if (error?.code !== "DREAM_DISTILL_FAILED" || !auth?.onlyAuthentication(error.sittingId)) throw error;
       throw dreamError("DREAM_MODEL_UNAVAILABLE", "the model runtime refused its credentials on every pass (Relay AUTHENTICATION_FAILED); for the Claude Code CLI, run claude and sign in with /login; for a Datum role, check its key", { help: modelSetupHelp(config.role ?? DEFAULT_ROLE), report: error.report });
     });
+    noteDroppedTurns(report, stderr);
     stdout.write(`${JSON.stringify(report)}\n`);
     return report.status === "blocked" ? 3 : 0;
   } catch (error) {
-    stderr.write(`${error.code ?? "DREAM_FAILED"}: ${String(error.message).slice(0, 300)}\n`);
+    const signal = interrupt?.received();
+    if (signal) stderr.write(`DREAM_INTERRUPTED: stopped by ${signal}; claude was stopped and the cursor is held\n`);
+    else stderr.write(`${error.code ?? "DREAM_FAILED"}: ${String(error.message).slice(0, 300)}\n`);
     // Setup guidance is ours, not echoed input, so it is printed whole.
-    if (typeof error.help === "string") stderr.write(`${error.help}\n`);
+    if (!signal && typeof error.help === "string") stderr.write(`${error.help}\n`);
+    noteDroppedTurns(error.report, stderr);
     if (error.report) stdout.write(`${JSON.stringify(error.report)}\n`);
+    if (signal) return SIGNAL_EXIT[signal];
     return error.code === "DREAM_LOCKED" ? 75 : CONFIGURATION_CODES.has(error.code) ? 2 : 1;
+  } finally {
+    interrupt?.restore();
   }
 }
 

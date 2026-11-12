@@ -975,7 +975,10 @@ referenced Claude Code project JSONL or Codex rollout. Then it:
   session whose `session_meta.source` is not `cli`), an accepted suggestion,
   and a Claude Code record from before Claude Code wrote `origin` and
   `promptSource`. From such a session only the assistant's side is
-  distilled. A user message with no `origin` at all is drift, because Ferry's
+  distilled. Each dream report counts the user turns left out this way, by
+  kind, in `ingest.dropped_user_turns`, and the command prints a one-line note
+  when there are any. An opt-in that reads some of these turns as yours is
+  planned; until it ships, the default is the only behaviour. A user message with no `origin` at all is drift, because Ferry's
   Claude Code and Codex importers always derive one. It also drops tool calls and results,
   thinking and reasoning, images, sidechains and subagent transcripts, meta and
   compact-summary entries, and harness-originated entries such as task
@@ -1235,9 +1238,16 @@ The run reaches a model only through a Relay `ModelRuntime`, routed through Disp
      (`primaryApiKey` in `~/.claude.json`), that key is used rather than a subscription. Admin-managed policy
      settings also still apply, including their `env` and `apiKeyHelper`; no flag can turn them off.
    - **Working directory.** `dreamDir/runtime/claude-code`, created `0700` and refused if anyone else can reach it.
-   - **Timeout.** Each call is stopped after `timeoutMs` (default 10 minutes, at most a day), with `SIGTERM` and
-     then `SIGKILL` 2 seconds later, so an unattended, hook-started run cannot hang. A stopped call fails the run
-     (exit 1) and holds the cursor.
+   - **Timeout and signals.** Each call is stopped after `timeoutMs` (default 10 minutes, at most a day). On macOS
+     and Linux `claude` runs in its own process group, and Relay sends the group `SIGTERM`, then `SIGKILL`
+     2 seconds later. That also stops a `claude` that is a shell or version-manager wrapper with the binary as its
+     child. A stopped call fails the run (exit 1) and holds the cursor. Because the group no longer receives a
+     terminal's Ctrl-C directly, the run catches `SIGINT` and `SIGTERM`, stops `claude` the same way and exits
+     130 or 143; a second signal kills the run at once. Not covered: a process that leaves the group (`setsid`), and
+     the run itself being killed with `SIGKILL`, which leaves `claude` running until it ends. On Windows only the
+     direct child is signalled.
+   - **Windows.** A `claude.cmd` shim cannot be started without a shell, so the run refuses it (exit 2). Set
+     `executable` to the real `claude.exe`, or to the node script the shim runs.
 
    A `claude` that cannot be found or is not executable, and one that refuses its sign-in on every pass, exit 2 with
    setup help. Run `claude` and sign in with `/login`. Each report records, under `runtime`, what Relay says it

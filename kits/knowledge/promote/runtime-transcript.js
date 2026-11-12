@@ -9,10 +9,12 @@
  * the injected-memory marker, and splits the result into sittings.
  *
  * Ferry already drops tool results/calls (separate `tool` messages and
- * non-text parts), thinking, Claude `isMeta` entries and Claude sidechains, and
- * imports Codex `developer` items as `system` messages. The line-level shims in
- * runtime-ferry-shims.js (kontourai/thread#76, #77, #78) and the tag list below
- * remain as a second layer.
+ * non-text parts), thinking, Claude `isMeta` entries and inline Claude
+ * sidechain records, and imports Codex `developer` items as `system` messages.
+ * A Claude subagent's own transcript, which Ferry imports, is skipped here as a
+ * sidechain. What the Thread still does not carry is handled by the line-level
+ * shims in runtime-ferry-shims.js (kontourai/thread#76, #77, #79); the tag list
+ * below strips wrapper blocks inside text that is kept.
  *
  * Drift: a transcript that is not the format its telemetry runtime claims, is
  * not valid UTF-8, has no UUID session id, has a conversation record with no
@@ -36,8 +38,9 @@ export { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE };
 
 /**
  * Harness-injected tags removed (with their content) from user/assistant text.
- * Names observed in real transcripts. SHIM until kontourai/thread#78 marks
- * harness-injected messages on the Thread.
+ * Names observed in real transcripts. Thread 0.7 marks a message that is
+ * entirely harness text with its `origin`; this list still strips such a block
+ * from a message that also holds the person's own words.
  */
 export const HARNESS_TAGS = Object.freeze([
   // Claude Code
@@ -254,19 +257,28 @@ function isHumanUserMessage(message) {
   return kind === "human";
 }
 
-/** The kept conversation of a canonical Thread. Exported for the origin contract tests; callers use `readConversation`. */
+/**
+ * The kept conversation of a canonical Thread. Exported for the origin contract tests; callers use `readConversation`.
+ * `droppedUserTurns` counts, by `origin.kind`, the user messages with text that were not kept because a person did
+ * not write them, so a report can say why a sitting holds only the assistant's side.
+ */
 export function conversationFromThread(thread) {
   const messages = [];
+  const droppedUserTurns = {};
   let unterminatedMemory = false;
   for (const message of thread.messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
     if (message.metadata?.sidechain === true) continue;
-    if (message.role === "user" && !isHumanUserMessage(message)) continue;
+    const human = message.role !== "user" || isHumanUserMessage(message);
     const { text, unterminated } = messageText(message);
+    if (!human) {
+      if (text) droppedUserTurns[message.origin.kind] = (droppedUserTurns[message.origin.kind] ?? 0) + 1;
+      continue;
+    }
     unterminatedMemory ||= unterminated;
     if (text) messages.push({ role: message.role, text, timestampMs: message.timestamp });
   }
-  return { messages, unterminatedMemory };
+  return { messages, unterminatedMemory, droppedUserTurns };
 }
 
 function requireSessionId(id) {
@@ -345,12 +357,13 @@ export function importRuntimeThread(harness, content) {
  * @param {Buffer} content  the whole transcript file
  * @returns {{ sessionId: string | null, sidechain: boolean, cwd: string | null,
  *   gitBranch: string | null, partialTail: boolean, unterminatedMemory: boolean,
- *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}> }}
+ *   messages: Array<{role: "user"|"assistant", text: string, timestampMs: number}>,
+ *   droppedUserTurns: Record<string, number> }}
  * @throws {TranscriptFormatError} when the transcript is not readable as `harness`
  */
 export function readConversation(harness, content) {
   const { thread, ...meta } = importRuntimeThread(harness, content);
-  if (!thread) return { ...meta, unterminatedMemory: false, messages: [] };
+  if (!thread) return { ...meta, unterminatedMemory: false, messages: [], droppedUserTurns: {} };
   return { ...meta, ...conversationFromThread(thread) };
 }
 
