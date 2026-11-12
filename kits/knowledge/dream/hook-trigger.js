@@ -24,7 +24,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { DEFAULT_TRIGGER_MIN_INTERVAL_MS, loadDreamConfig } from "./config.js";
+import { DEFAULT_TRIGGER_MIN_INTERVAL_MS, assertOwnerControlledDir, loadDreamConfig } from "./config.js";
 import { defaultDreamDir } from "./run.js";
 
 export const TRIGGER_EVENTS = Object.freeze(["SessionEnd", "PreCompact"]);
@@ -47,7 +47,8 @@ export function handleTrigger({ input, env = process.env, spawn = nodeSpawn, now
     const config = loadDreamConfig(env.FLOW_AGENTS_DREAM_CONFIG);
     if (!config.enabled) return { triggered: false, reason: "config-disabled" };
 
-    const stamp = path.join(config.dreamDir ?? defaultDreamDir(env), "trigger.stamp");
+    const dreamDir = assertOwnerControlledDir(config.dreamDir ?? defaultDreamDir(env), "dreamDir");
+    const stamp = path.join(dreamDir, "trigger.stamp");
     const interval = config.triggerMinIntervalMs ?? DEFAULT_TRIGGER_MIN_INTERVAL_MS;
     try {
       if (now() - fs.statSync(stamp).mtimeMs < interval) return { triggered: false, reason: "debounced" };

@@ -68,6 +68,9 @@ Omitting `--flow` starts the flow a kit declares as its `default_flow` (`builder
 Builder kit). When no kit declares one, or more than one kit does, `start` refuses and asks for
 `--flow`; see [Default flow](kit-authoring-guide.md#default-flow).
 
+The same binary runs the Knowledge kit's dream run: `flow_agents dream run --config /abs/dream.config.json [--dry-run]`.
+For the config and model setup, see [Dream run model setup](../kits/knowledge/docs/README.md#dream-run-model-setup).
+
 ## Approved cross-repository rollouts
 
 An approved portfolio or retrofit initiative does not authorize a retroactive Builder run. Before

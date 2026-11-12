@@ -262,8 +262,14 @@ keeps its return type; on such Node versions it omits profile memory, while the
 installed hook uses the asynchronous entry point.
 
 **Profile brief contract (v1).** A producer writes UTF-8 JSON at
-`$XDG_DATA_HOME/knowledge-store/knowledge/dream/briefs/global.json` (when
-`XDG_DATA_HOME` is unset, `$HOME/.local/share` is used). The shape is
+`<dreamDir>/briefs/global.json`. By default, `dreamDir` is
+`$XDG_DATA_HOME/knowledge-store/knowledge/dream`; when `XDG_DATA_HOME` is unset,
+the default uses `$HOME/.local/share`. When the hook environment sets
+`FLOW_AGENTS_DREAM_CONFIG`, the reader loads that dream config with the dream
+run's ownership checks and uses its `dreamDir` if it sets one. If the config cannot be
+loaded or does not say `"enabled": true`, the reader injects nothing; it does not fall back to the default directory.
+The variable is operator configuration, trusted like the rest of the hook's environment (which can already run code
+in every Node hook through `NODE_OPTIONS`); a project must not set it. The shape is
 `{"version":1,"entries":["first complete entry","second complete entry"]}`;
 entries are ordered by the producer and contain display-ready text. For memory
 claims, the producer must use `presentMemoryClaims` with the applicable routing
@@ -272,7 +278,17 @@ claims. Each presented claim retains its posture and review label. Before
 compilation the producer must use Surface visibility rules to admit only claims
 visible to the profile-wide audience across every project where this global
 brief may be injected; omit sealed, unknown, or narrower-audience claims.
-Project-scoped briefs require a separate future contract. The hook cannot
+The producer may also write `<dreamDir>/briefs/project-<id>.json`, in the same
+shape, for a project. The reader derives `<id>` from the session's working directory
+using the dream kit's own rule (`projectFromCwd`, the directory name), reads that
+brief first, and then appends global entries that it has not already added. Each
+brief is validated and purge-gated independently. A brief that fails a check is
+skipped, and the other brief can still be read. Before reading, the reader requires
+`dreamDir` and `dreamDir/briefs` to have no symlink anywhere on their path, to be owned by the
+current user and not group or world writable, and to have only ancestors owned by the user or root
+that are group or world writable only when sticky. If either directory fails, nothing is injected.
+The project ID is only the directory name, so two checkouts whose last directory segment is the
+same share one project brief. The hook cannot
 verify these producer obligations from display text alone. The reader
 accepts at most 32768 bytes on disk, rejects malformed UTF-8, malformed schema,
 control characters and embedded marker delimiters, and reads only a regular
