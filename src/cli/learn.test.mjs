@@ -1009,6 +1009,11 @@ test("a rule written without human_sessions is decided from its citations when t
   // All 9 occurrences cited: the 6 human ones span 3 threads, exactly.
   const exact = withoutHumanSessions(base, [cite("a"), cite("a"), cite("b"), cite("b"), cite("c"), cite("c"), cite("x", "inferred"), cite("y", "inferred"), cite("z", "inferred")], 9);
   assert.equal((await run(exact)).effect.measured_on, "human");
+  // All 9 cited, the 6 human ones spanning exactly 2 threads: decided (inferred), not left undecided.
+  const exactShort = withoutHumanSessions(base, [cite("a"), cite("a"), cite("a"), cite("b"), cite("b"), cite("b"), cite("x", "inferred"), cite("y", "inferred"), cite("z", "inferred")], 9);
+  const short = await run(exactShort);
+  assert.equal(short.effect, null, "an inferred basis is not measured by a run that does not infer");
+  assert.doesNotMatch(short.notes, /records no human_sessions/, "but it was decided, not left undecided");
   // 8 of 9 cited, and the cited human ones already span 3 threads: the lower bound settles it.
   const bound = withoutHumanSessions(base, [cite("a"), cite("b"), cite("c"), cite("c"), cite("c"), cite("x", "inferred"), cite("y", "inferred"), cite("z", "inferred")], 9);
   assert.equal((await run(bound)).effect.measured_on, "human");
