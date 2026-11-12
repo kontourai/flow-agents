@@ -183,6 +183,10 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
     // could otherwise derive as human). They are counted in `user_messages_by_origin` under the kind the shim names
     // (`unknown`), and are never candidates for anything: they have no text here.
     shim_dropped_user_turns: 0,
+    // Shim-dropped records in a file with no importable conversation, which therefore has no session id or working
+    // directory to scope by. Under repository scope they cannot be attributed to this repository, so they are counted
+    // here only; under --all-projects they are counted like any other shim drop.
+    shim_dropped_unattributed: 0,
   };
   const turns = [];
   const unknownTurns = [];
@@ -214,6 +218,18 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
         continue;
       }
       report.files_read += 1;
+      const countShimDropped = () => {
+        for (const [kind, count] of Object.entries(parsed.shimDropped ?? {})) {
+          report.user_messages += count;
+          report.shim_dropped_user_turns += count;
+          bump(report.user_messages_by_origin, kind, count);
+        }
+      };
+      if (!parsed.sessionId && !parsed.sidechain) {
+        // Counted before the skip: a file whose every user record was removed before import is still a record of them.
+        if (scope) report.shim_dropped_unattributed += Object.values(parsed.shimDropped ?? {}).reduce((a, b) => a + b, 0);
+        else countShimDropped();
+      }
       if (!parsed.sessionId || parsed.sidechain) {
         bump(report.files_skipped, parsed.sidechain ? "SIDECHAIN_TRANSCRIPT" : "NO_CONVERSATION");
         continue;
@@ -223,11 +239,7 @@ export function readHumanTurns({ roots, sinceMs = null, untilMs = null, scope = 
         report.sessions_out_of_scope += 1;
         continue;
       }
-      for (const [kind, count] of Object.entries(parsed.shimDropped ?? {})) {
-        report.user_messages += count;
-        report.shim_dropped_user_turns += count;
-        bump(report.user_messages_by_origin, kind, count);
-      }
+      countShimDropped();
       const threadId = `${parsed.harness}:${parsed.sessionId}`;
       let lastAssistant = "";
       for (const message of parsed.messages) {

@@ -89,6 +89,7 @@ export function aggregate(rootId, label, items, thresholds = DEFAULT_THRESHOLDS)
     high_pain: high.length,
     high_pain_sessions: new Set(high.map((item) => item.turn.threadId)).size,
     human_occurrences: sorted.length - inferred.length,
+    human_sessions: new Set(sorted.filter((item) => item.turn.authority !== "inferred").map((item) => item.turn.threadId)).size,
     inferred_occurrences: inferred.length,
     inferred_sessions: new Set(inferred.map((item) => item.turn.threadId)).size,
     by_kind,
@@ -226,6 +227,7 @@ export function buildProposal(row, { state, window, judgement, conflictCheck, ru
         high_pain: row.high_pain,
         high_pain_sessions: row.high_pain_sessions,
         human_occurrences: row.human_occurrences,
+        human_sessions: row.human_sessions,
         inferred_occurrences: row.inferred_occurrences,
         inferred_sessions: row.inferred_sessions,
         mean_pain: row.mean_pain,
@@ -251,15 +253,21 @@ export function buildProposal(row, { state, window, judgement, conflictCheck, ru
 }
 
 /**
- * The rate a ratified proposal is measured against: the human-origin rate when the proposal had any human-origin
- * occurrence, else (a theme learned from inferred turns alone) its inferred rate. Entries from before the split
- * counted human turns only.
+ * What a ratified proposal is measured on, and the rate it is measured against.
+ *
+ * Human-origin turns, when the proposal's human-origin occurrences alone met the proposal threshold
+ * (`minOccurrences` across `minSessions`), or when it had no inferred occurrence at all: then turning --infer-human on
+ * or off never changes the measurement. Otherwise (a rule that rests mostly on inferred turns, such as 1 human and 9
+ * inferred), the human rate is too small ever to measure, so it is measured on inferred turns, by an inferring run only.
+ * Entries from before the human/inferred split counted human turns only.
  */
-export function measurementBasis(entry) {
+export function measurementBasis(entry, thresholds = DEFAULT_THRESHOLDS) {
   const cost = entry.evidence?.cost ?? {};
   const human = typeof cost.human_occurrences === "number" ? cost.human_occurrences : cost.occurrences;
   const inferred = typeof cost.inferred_occurrences === "number" ? cost.inferred_occurrences : 0;
-  const on = human > 0 || inferred === 0 ? "human" : "inferred";
+  const humanSessions = typeof cost.human_sessions === "number" ? cost.human_sessions : inferred === 0 ? cost.sessions : 0;
+  const humanEnough = human >= thresholds.minOccurrences && humanSessions >= thresholds.minSessions;
+  const on = inferred === 0 || humanEnough ? "human" : "inferred";
   const count = on === "human" ? human : inferred;
   if (typeof count !== "number" || typeof cost.window_days !== "number") return { on, before: cost.rate_per_week };
   return { on, before: round4((count * 7) / Math.max(7, cost.window_days)) };
@@ -285,19 +293,20 @@ export function measureEffect({ before, count, days, minExpected = DEFAULT_EFFEC
 /**
  * Measure ratified correction-recurrence entries of this run's scope whose ratification the run can see (the window
  * reaches back to the decision and at least `minDays` have passed). Counts follow the theme's lineage root, so a theme
- * the clusterer split later still counts. Recurrence is measured on human-origin turns, so turning `--infer-human`
- * on or off between runs never changes it; only a proposal learned from inferred turns alone is measured on inferred
- * turns (`measured_on: "inferred"`), and only by a run that infers (`inferHuman`), never as a silent zero. An entry is re-measured on later runs, so one early sample is not final; the
+ * the clusterer split later still counts. The basis (`measurementBasis`) is human-origin turns for a proposal whose
+ * human occurrences alone met the threshold, so turning `--infer-human` on or off never changes it; a proposal resting
+ * on inferred turns is measured on inferred turns (`measured_on: "inferred"`), and only by a run that infers
+ * (`inferHuman`), never as a silent zero. An entry is re-measured on later runs, so one early sample is not final; the
  * previous measurement moves to `effect_history`. A run that would record the same count over the same whole number of
  * days changes nothing. Returns the indexes it changed.
  */
-export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs, nowMs, measuredAt, effect = DEFAULT_EFFECT, inferHuman = false }) {
+export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs, nowMs, measuredAt, effect = DEFAULT_EFFECT, inferHuman = false, thresholds = DEFAULT_THRESHOLDS }) {
   const key = scopeKey(scope);
   const changed = [];
   entries.forEach((entry, index) => {
     if (!isCorrectionEntry(entry) || entry.decision?.status !== "ratified" || scopeKey(entry.scope) !== key) return;
     const decided = decidedMs(entry);
-    const { on, before } = measurementBasis(entry);
+    const { on, before } = measurementBasis(entry, thresholds);
     if (!Number.isFinite(decided) || typeof before !== "number" || typeof entry.theme?.id !== "string") return;
     if (on === "inferred" && !inferHuman) return; // inferred turns were not read this run: not a zero
     if (windowSinceMs !== null && windowSinceMs > decided) return; // this run did not read back to the decision

@@ -917,3 +917,52 @@ test("a transcript whose only user record is shim-dropped still reports it: the 
   const withTurn = Buffer.from(claudeSession(sessionId(31), NOW_MS - DAY_MS, [{ text: "brief", origin: { kind: "unclassified" }, promptSource: "typed" }, { text: "typed by me" }]));
   assert.deepEqual(readConversation("claude-code", withTurn).droppedUserTurns, { unknown: 1 }, "and the with-thread path");
 });
+
+// ── round 5 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+function mixedEntry({ human, humanSessions, inferred, windowDays = 42 }) {
+  const entry = decidedEntry("agents-md", "ratified", 21, 1);
+  entry.evidence = { ...entry.evidence, cost: { ...entry.evidence.cost, occurrences: human + inferred, sessions: 4, human_occurrences: human, human_sessions: humanSessions, inferred_occurrences: inferred, window_days: windowDays } };
+  return entry;
+}
+
+test("a rule resting on inferred turns (1 human, 9 inferred) is measured on inferred turns, can escalate, and only when inferring", async () => {
+  // Eight inferred and one human recurrence after the ratification 21 days ago.
+  const sessions = sessionsWith([
+    [sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`)],
+    [sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`)],
+    [sdk(`[author:human] ${fix("fetch-main")}`), sdk(`[author:human] ${fix("fetch-main")}`), fix("fetch-main")],
+  ]);
+  const ws = workspace();
+  seedLedger(ws, [mixedEntry({ human: 1, humanSessions: 1, inferred: 9 })]);
+  await learn(sessions, { ws });
+  assert.equal(ledgerLines(ws)[0].effect_observed, null, "a run that does not infer leaves it unmeasured, not insufficient forever");
+  const { document } = await learn(sessions, { ws, inferHuman: true });
+  const effect = ledgerLines(ws)[0].effect_observed;
+  assert.deepEqual([effect.measured_on, effect.before, effect.after_occurrences, effect.moved], ["inferred", 1.5, 8, "worsened"]);
+  assert.deepEqual(document.proposals.map((p) => [p.target.kind, p.authority]), [["skill", "inferred"]], "and it escalates");
+});
+
+test("a rule whose human occurrences alone met the threshold is measured on human turns, identically with or without --infer-human", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), sdk(`[author:human] ${fix("fetch-main")}`)]));
+  const measure = async (inferHuman) => {
+    const ws = workspace();
+    seedLedger(ws, [mixedEntry({ human: 6, humanSessions: 4, inferred: 3 })]);
+    await learn(sessions, { ws, inferHuman });
+    return ledgerLines(ws)[0].effect_observed;
+  };
+  const off = await measure(false);
+  const on = await measure(true);
+  assert.deepEqual([off.measured_on, off.after_occurrences, off.before], ["human", 5, 1]);
+  assert.deepEqual(on, { ...off }, "toggling --infer-human changes nothing");
+});
+
+test("a file whose only user records were removed before import still has its drops counted, by scope", async () => {
+  const root = fs.realpathSync(makeFixtureDir("learn-lone-"));
+  const file = path.join(root, `${sessionId(40)}.jsonl`);
+  fs.writeFileSync(file, claudeSession(sessionId(40), NOW_MS - DAY_MS, [{ text: "a brief", origin: { kind: "unclassified" }, promptSource: "typed" }]));
+  const all = readHumanTurns({ roots: [root], sinceMs: null, untilMs: null });
+  assert.deepEqual([all.report.shim_dropped_user_turns, all.report.user_messages_by_origin.unknown, all.report.files_skipped.NO_CONVERSATION], [1, 1, 1]);
+  const scoped = readHumanTurns({ roots: [root], sinceMs: null, untilMs: null, scope: () => true });
+  assert.deepEqual([scoped.report.shim_dropped_unattributed, scoped.report.shim_dropped_user_turns, scoped.report.user_messages_by_origin.unknown], [1, 0, undefined], "no cwd to scope by: counted, but not as this repository's");
+});

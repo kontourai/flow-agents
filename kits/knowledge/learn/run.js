@@ -186,7 +186,7 @@ export async function runLearn(options) {
     human: items.filter((item) => item.turn.authority !== "inferred").map((item) => item.turn.atMs),
     inferred: items.filter((item) => item.turn.authority === "inferred").map((item) => item.turn.atMs),
   }]));
-  const measured = fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs: sinceMs, nowMs, measuredAt: new Date(nowMs).toISOString(), effect, inferHuman });
+  const measured = fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowSinceMs: sinceMs, nowMs, measuredAt: new Date(nowMs).toISOString(), effect, inferHuman, thresholds });
   report.effects_measured = measured.length;
 
   let rules = null;

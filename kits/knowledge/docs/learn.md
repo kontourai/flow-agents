@@ -265,11 +265,17 @@ rate that triggered the proposal would predict for that period:
 
 This is a heuristic tolerance band, not a significance test.
 
-Recurrence is counted on **human-origin** turns, and the rate it is compared with is the
-proposal's human-origin rate. So running with or without `--infer-human` never changes a
-ratified rule's measurement. Only a proposal learned from inferred turns alone is measured on
-inferred turns (`measured_on: "inferred"`). Only a run with `--infer-human` measures it; a run
-without that flag leaves it unmeasured instead of counting zero. Zero recurrences is a measurement,
+What a ratified rule is measured on (`measured_on`) depends on what it was learned from:
+
+- **Human-origin turns**, when the proposal's human-origin occurrences alone met the proposal
+  threshold (5 across 3 sessions by default), or when it had no inferred occurrences. Its rate
+  is the human-origin rate. Running with or without `--infer-human` never changes this
+  measurement.
+- **Inferred turns** otherwise: a rule resting mostly on inferred turns (say 1 human and 9
+  inferred). Its human rate is too small ever to reach the 3 expected recurrences a
+  measurement needs, so it would stay `insufficient-data` and could never escalate. It is
+  measured against its inferred rate, and only by a run with `--infer-human`; a run without
+  that flag leaves it unmeasured instead of counting zero. Zero recurrences is a measurement,
 not a gap. The measurement is repeated on later runs as more time passes; the previous one moves
 to `effect_history`, so one early sample is never final. A run with the same count over the same
 whole number of days changes nothing.

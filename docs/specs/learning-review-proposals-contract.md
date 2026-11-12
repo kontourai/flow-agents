@@ -401,7 +401,7 @@ script and the advisory-only guardrails.
   "proposed_change": "<human-readable recommendation for the target kind>",
   "severity": "advisory",
   "evidence": {
-    "cost": { "occurrences": 0, "sessions": 0, "high_pain": 0, "high_pain_sessions": 0, "mean_pain": 0, "by_kind": { "correction": 0, "nudge": 0, "frustration": 0 },
+    "cost": { "occurrences": 0, "sessions": 0, "high_pain": 0, "high_pain_sessions": 0, "human_occurrences": 0, "human_sessions": 0, "inferred_occurrences": 0, "mean_pain": 0, "by_kind": { "correction": 0, "nudge": 0, "frustration": 0 },
               "first_at": "<ISO>", "last_at": "<ISO>", "counted_since": "<ISO|null>", "window_days": 0, "rate_per_week": 0 },
     "defect": { "rule": "...", "general": true, "citations_total": 0,
                 "citations": [ { "thread_id": "claude-code:<session>", "message_id": "<id>", "harness": "claude-code", "at": "<ISO>", "kind": "correction", "pain": 0, "excerpt": "<scrubbed, <= 200 bytes>" } ] }
@@ -464,11 +464,13 @@ script and the advisory-only guardrails.
 
 Each learn run measures ratified correction-recurrence proposals of its scope whose
 ratification it can see: the run's window starts at or before `decision.decided_at`, and at
-least 14 days have passed since. Recurrence is measured on human-origin turns:
-`before` is the proposal's human-origin rate (`human_occurrences x 7 / max(7, window_days)`), and
-`after` is the lineage root's human-origin recurrences per week since the decision, so a run with
-or without `--infer-human` measures the same. A proposal with no human-origin occurrence is
-measured on inferred turns instead (`measured_on: "inferred"`), and only by a run that infers. With
+least 14 days have passed since. The basis (`measured_on`) is human-origin turns when the
+proposal's `human_occurrences` and `human_sessions` alone met the proposal threshold
+(`minOccurrences`, `minSessions`), or when it has no inferred occurrences: `before` is then the
+human-origin rate (`human_occurrences x 7 / max(7, window_days)`) and `after` the lineage root's
+human-origin recurrences per week since the decision, the same with or without
+`--infer-human`. Otherwise the basis is inferred turns (`inferred_occurrences` and inferred
+recurrences), measured only by a run that infers. With
 `expected = before x days / 7`: fewer than 3 expected is `insufficient-data`; an observed count
 at most `expected x 0.7` is `improved`, at least `expected x 1.3` is `worsened`, otherwise
 `unchanged`. This is a heuristic band, not a significance test. Zero recurrences is a
