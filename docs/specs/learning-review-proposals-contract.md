@@ -474,10 +474,15 @@ recurrences), measured only by a run that infers.
 
 The basis is decided at the first measurement and frozen on the entry:
 `"measurement_basis": { "measured_on": "human | inferred", "thresholds": { "min_occurrences": 5, "min_sessions": 3 }, "decided_at": "<ISO>" }`.
-Every later measurement reuses it, whatever thresholds the later run was given. For an entry
+Every later measurement reuses it, whatever thresholds the later run was given. A stored
+`measurement_basis` must have exactly this shape (`measured_on` `human` or `inferred`;
+positive-integer `min_occurrences` and `min_sessions`; an ISO-8601 `decided_at`). Any other
+value is treated as absent: re-decided, rewritten whole at the next measurement (even if the
+sample is unchanged), and named in the run's `notes`. For an entry
 without `evidence.cost.human_sessions`, the human session count is taken from
-`evidence.defect.citations`: exactly when `citations_total` equals the number of citations, or as
-a lower bound that already meets `min_sessions`. If neither settles it, the entry is left
+`evidence.defect.citations`: exactly when `citations_total` equals the number of citations and
+every human citation names a `thread_id`, or as a lower bound that already meets `min_sessions`.
+A citation without a `thread_id` is never counted as a session. If neither settles it, the entry is left
 unmeasured and the run's `notes` name it. With
 `expected = before x days / 7`: fewer than 3 expected is `insufficient-data`; an observed count
 at most `expected x 0.7` is `improved`, at least `expected x 1.3` is `worsened`, otherwise

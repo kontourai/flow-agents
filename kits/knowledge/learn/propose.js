@@ -264,9 +264,29 @@ export function buildProposal(row, { state, window, judgement, conflictCheck, ru
 export function humanSessionsOf(cost, defect = {}) {
   if (typeof cost.human_sessions === "number") return { exact: cost.human_sessions };
   const citations = Array.isArray(defect.citations) ? defect.citations : [];
-  const threads = new Set(citations.filter((citation) => citation.authority !== "inferred").map((citation) => citation.thread_id)).size;
-  if (typeof defect.citations_total === "number" && defect.citations_total === citations.length) return { exact: threads };
+  const human = citations.filter((citation) => citation?.authority !== "inferred");
+  // A citation without a thread id names no session: it is not counted as one, and it makes the count inexact.
+  const identified = human.filter((citation) => typeof citation?.thread_id === "string" && citation.thread_id !== "");
+  const threads = new Set(identified.map((citation) => citation.thread_id)).size;
+  const complete = typeof defect.citations_total === "number" && defect.citations_total === citations.length;
+  if (complete && identified.length === human.length) return { exact: threads };
   return { atLeast: threads };
+}
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+
+/**
+ * Whether a stored `measurement_basis` is one this code wrote: `measured_on` is `human` or `inferred`, `thresholds`
+ * holds positive-integer `min_occurrences` and `min_sessions`, and `decided_at` is an ISO-8601 time. Anything else is
+ * treated as absent (re-decided and rewritten), never trusted and never carried forward.
+ */
+export function isValidMeasurementBasis(basis) {
+  return Boolean(basis) && typeof basis === "object" && !Array.isArray(basis)
+    && (basis.measured_on === "human" || basis.measured_on === "inferred")
+    && Boolean(basis.thresholds) && typeof basis.thresholds === "object"
+    && positiveInteger(basis.thresholds.min_occurrences) && positiveInteger(basis.thresholds.min_sessions)
+    && typeof basis.decided_at === "string" && ISO_TIME.test(basis.decided_at) && Number.isFinite(Date.parse(basis.decided_at));
 }
 
 /**
@@ -336,9 +356,13 @@ export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowS
   entries.forEach((entry, index) => {
     if (!isCorrectionEntry(entry) || entry.decision?.status !== "ratified" || scopeKey(entry.scope) !== key) return;
     const decided = decidedMs(entry);
-    // The basis is frozen at the first measurement: a later run with other thresholds never moves it.
-    const frozen = entry.measurement_basis?.measured_on;
-    const decision = frozen === "human" || frozen === "inferred" ? { on: frozen } : decideBasis(entry, thresholds);
+    // The basis is frozen at the first measurement: a later run with other thresholds never moves it. A stored basis
+    // that is not valid is treated as absent: re-decided now, and rewritten when this run measures the rule.
+    const frozenValid = isValidMeasurementBasis(entry.measurement_basis);
+    if (entry.measurement_basis !== undefined && !frozenValid) {
+      notes.push(`${entry.proposal_id} has a malformed measurement_basis; it is re-decided from the proposal's evidence and rewritten when measured`);
+    }
+    const decision = frozenValid ? { on: entry.measurement_basis.measured_on } : decideBasis(entry, thresholds);
     if (decision.on === null) {
       notes.push(decision.reason);
       return;
@@ -352,7 +376,7 @@ export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowS
     if (days < effect.minDays) return;
     const count = ((occurrencesByRoot.get(rootOf(entry.theme.id)) ?? {})[on] ?? []).filter((atMs) => atMs > decided).length;
     const previous = entry.effect_observed;
-    if (previous && previous.after_occurrences === count && Math.floor(previous.after_days) === Math.floor(days)) return;
+    if (frozenValid && previous && previous.after_occurrences === count && Math.floor(previous.after_days) === Math.floor(days)) return;
     const { moved, expected, after } = measureEffect({ before, count, days, minExpected: effect.minExpected, tolerance: effect.tolerance });
     entries[index] = {
       ...entry,
@@ -370,7 +394,7 @@ export function fillEffects(entries, { occurrencesByRoot, rootOf, scope, windowS
         min_expected: effect.minExpected,
       },
       ...(previous ? { effect_history: [...(entry.effect_history ?? []), previous].slice(-MAX_EFFECT_HISTORY) } : {}),
-      measurement_basis: entry.measurement_basis?.measured_on
+      measurement_basis: frozenValid
         ? entry.measurement_basis
         : { measured_on: on, thresholds: { min_occurrences: thresholds.minOccurrences, min_sessions: thresholds.minSessions }, decided_at: measuredAt },
     };

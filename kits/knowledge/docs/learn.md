@@ -280,11 +280,16 @@ What a ratified rule is measured on (`measured_on`) depends on what it was learn
 The basis is decided once, at a rule's first measurement, and frozen on its ledger entry
 (`measurement_basis`: what it is measured on, the thresholds that decided it, and when). Later
 runs reuse it, so running with other `--min-occurrences` or `--min-sessions` values never moves
-a rule from one basis to the other.
+a rule from one basis to the other. A stored basis that isn't exactly that shape is treated as
+missing: re-decided from the proposal's evidence, rewritten in full when the rule is next
+measured, and named in the run's notes. That covers an unknown `measured_on`, thresholds that
+aren't positive integers, or a `decided_at` that isn't an ISO time.
 
 A proposal recorded before `human_sessions` was added doesn't say how many sessions its human
 occurrences span. The loop reads that from the proposal's citations when it can: exactly, when
-every occurrence is cited, or as a lower bound that already meets the threshold. When the
+every occurrence is cited, or as a lower bound that already meets the threshold. A citation
+without a thread id names no session. It doesn't count as one, and it makes the count only a
+lower bound. When the
 citations can't settle it, the rule is left unmeasured and the run prints a note naming it. The
 loop never guesses. Zero recurrences is a measurement,
 not a gap. The measurement is repeated on later runs as more time passes; the previous one moves

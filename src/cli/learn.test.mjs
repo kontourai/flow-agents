@@ -1023,3 +1023,53 @@ test("a rule written without human_sessions is decided from its citations when t
   assert.equal(result.effect, null, "left unmeasured");
   assert.match(result.notes, /records no human_sessions .* left unmeasured/);
 });
+
+// ── round 7 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const VALID_BASIS_AT_NOW = { measured_on: "human", thresholds: { min_occurrences: 5, min_sessions: 3 }, decided_at: new Date(NOW_MS).toISOString() };
+
+test("a malformed measurement_basis is never trusted or carried forward: it is re-decided, rewritten, and noted", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), "hello"]));
+  const malformed = [
+    { measured_on: "bogus" },
+    { measured_on: "inferred", thresholds: "x" },                                        // would be trusted as inferred
+    { measured_on: "human" },                                                            // no thresholds, no decided_at
+    { measured_on: "inferred", thresholds: { min_occurrences: 0, min_sessions: 3 }, decided_at: "2026-10-01T00:00:00Z" },
+    { measured_on: "inferred", thresholds: { min_occurrences: 5, min_sessions: 2.5 }, decided_at: "2026-10-01T00:00:00Z" },
+    { measured_on: "inferred", thresholds: { min_occurrences: 5, min_sessions: 3 }, decided_at: "yesterday" },
+    "human",
+  ];
+  for (const basis of malformed) {
+    const ws = workspace();
+    seedLedger(ws, [{ ...mixedEntry({ human: 6, humanSessions: 3, inferred: 3 }), measurement_basis: basis }]);
+    const { document } = await learn(sessions, { ws });
+    const entry = ledgerLines(ws)[0];
+    assert.equal(entry.effect_observed?.measured_on, "human", `${JSON.stringify(basis)}: re-decided from the evidence`);
+    assert.deepEqual(entry.measurement_basis, VALID_BASIS_AT_NOW, `${JSON.stringify(basis)}: rewritten whole`);
+    assert.match(document.notes.join("\n"), /malformed measurement_basis/, JSON.stringify(basis));
+  }
+});
+
+test("a basis corrupted after a measurement is rewritten even when the new sample is unchanged", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), "hello"]));
+  const ws = workspace();
+  seedLedger(ws, [mixedEntry({ human: 6, humanSessions: 3, inferred: 3 })]);
+  await learn(sessions, { ws });
+  const measured = ledgerLines(ws)[0];
+  seedLedger(ws, [{ ...measured, measurement_basis: { measured_on: "human" } }]);
+  await learn(sessions, { ws });
+  assert.deepEqual(ledgerLines(ws)[0].measurement_basis, VALID_BASIS_AT_NOW);
+});
+
+test("citations without a thread id are not sessions: they make the count inexact rather than adding one", async () => {
+  const sessions = sessionsWith(Array.from({ length: 5 }, () => [fix("fetch-main"), "hello"]));
+  const anonymous = { message_id: "m-anon", at: "2026-10-01T00:00:00.000Z", excerpt: "x", authority: "human" };
+  // All 9 cited; the identified human citations span 2 threads, and 4 name no thread at all.
+  const entry = withoutHumanSessions(mixedEntry({ human: 6, humanSessions: 0, inferred: 3 }),
+    [cite("a"), cite("b"), anonymous, anonymous, anonymous, anonymous, cite("x", "inferred"), cite("y", "inferred"), cite("z", "inferred")], 9);
+  const ws = workspace();
+  seedLedger(ws, [entry]);
+  const { document } = await learn(sessions, { ws });
+  assert.equal(ledgerLines(ws)[0].effect_observed, null, "2 known sessions cannot settle 3, and the rest are unknown");
+  assert.match(document.notes.join("\n"), /records no human_sessions .* left unmeasured/);
+});
