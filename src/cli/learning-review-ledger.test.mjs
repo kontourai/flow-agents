@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import test from "node:test";
 
 import * as published from "@kontourai/flow-agents/learning-review-proposals";
@@ -285,4 +286,69 @@ test("learning-review-proposals.sh with no --ledger writes where the shared reso
   const plain = fs.realpathSync(makeFixtureDir("ledger-plain-"));
   analyze(plain);
   assert.ok(fs.existsSync(path.join(plain, LEDGER_FILE)), "outside a repository: the current directory");
+});
+
+// ── a lockless reader of an append-only file (delta review of aecb24ac) ──────────────────────────────────────────
+
+const cjsFs = createRequire(import.meta.url)("node:fs");
+/** Replace `name` on node:fs (and the ESM namespace the reader imports) for the duration of `body`. */
+function withFs(name, replacement, body) {
+  const original = cjsFs[name];
+  cjsFs[name] = replacement(original);
+  syncBuiltinESMExports();
+  try {
+    return body();
+  } finally {
+    cjsFs[name] = original;
+    syncBuiltinESMExports();
+  }
+}
+
+test("a stale stat never truncates the read: every line is returned even if the file looked smaller", () => {
+  const file = scratch("stale.jsonl");
+  fs.writeFileSync(file, Array.from({ length: 8 }, (_, i) => JSON.stringify(kitLine({ proposal_id: `p${i}` }))).join("\n") + "\n");
+  const result = withFs("fstatSync", (real) => (...args) => ({ ...real(...args), size: 50 }), () => published.readLearningReviewLedger(file, { maxFileBytes: 100_000 }));
+  assert.deepEqual(result.entries.map((entry) => entry.proposal_id), ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7"]);
+  assert.deepEqual(result.gaps, []);
+});
+
+test("a line appended while the reader reads is returned, and a half-written one becomes a gap, never a silent drop", () => {
+  for (const [appended, expectGap] of [[`${JSON.stringify(kitLine({ proposal_id: "late" }))}\n`, false], [JSON.stringify(kitLine({ proposal_id: "half" })).slice(0, 40), true]]) {
+    const file = scratch("append.jsonl");
+    fs.writeFileSync(file, `${JSON.stringify(kitLine({ proposal_id: "first" }))}\n`);
+    let calls = 0;
+    const result = withFs("readSync", (real) => (...args) => {
+      // The writer appends after the reader has opened (and, in the old code, sized) the file.
+      if (calls++ === 0) cjsFs.appendFileSync(file, appended);
+      return real(...args);
+    }, () => published.readLearningReviewLedger(file, { maxFileBytes: 100_000 }));
+    assert.equal(result.entries[0].proposal_id, "first");
+    if (expectGap) {
+      assert.deepEqual([result.entries.length, result.gaps.map((gap) => [gap.line, gap.code])], [1, [[2, "invalid-json"]]], "the partial line is a gap");
+    } else {
+      assert.deepEqual(result.entries.map((entry) => entry.proposal_id), ["first", "late"]);
+    }
+  }
+});
+
+test("growth past the limit while reading is still refused", () => {
+  const file = scratch("grows.jsonl");
+  fs.writeFileSync(file, `${lineOfBytes(500)}\n`);
+  assert.equal(published.readLearningReviewLedger(file, { maxFileBytes: 700 }).entries.length, 1, "under the limit before it grows");
+  let calls = 0;
+  assert.throws(() => withFs("readSync", (real) => (...args) => {
+    if (calls++ === 0) cjsFs.appendFileSync(file, `${lineOfBytes(500)}\n`);
+    return real(...args);
+  }, () => published.readLearningReviewLedger(file, { maxFileBytes: 700 })), { code: "LEARN_LEDGER_TOO_LARGE" });
+});
+
+test("learning-review-proposals.sh refuses, writing nothing, when the resolver prints nothing", () => {
+  const main = repo();
+  const bin = fs.realpathSync(makeFixtureDir("ledger-fake-node-"));
+  fs.writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const pp = path.join(ROOT, "evals", "fixtures", "learning-review-proposals", "pattern-present");
+  const run = spawnSync("bash", [ANALYZER, "--sessions-root", path.join(pp, "sessions"), path.join(pp, "economics.jsonl")], { cwd: main, env: { ...CLEAN_ENV, PATH: `${bin}:${CLEAN_ENV.PATH}` }, encoding: "utf8" });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /resolved to nothing; pass --ledger PATH/);
+  assert.ok(!fs.existsSync(path.join(main, ".kontourai")), "nothing written");
 });

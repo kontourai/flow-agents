@@ -43,6 +43,7 @@ export const ledgerLineSchema = deepFreeze({ ...ledgerDocumentSchema.$defs.propo
 /** The reader's bounds. A file over `MAX_LEDGER_FILE_BYTES` is refused; a line over `MAX_LEDGER_LINE_BYTES` is a gap. */
 export const MAX_LEDGER_FILE_BYTES = 64 * 1024 * 1024;
 export const MAX_LEDGER_LINE_BYTES = 1024 * 1024;
+const READ_CHUNK_BYTES = 64 * 1024;
 
 /** @returns {{ valid: boolean, errors: string[] }} */
 export function validateLedgerLine(value) {
@@ -98,14 +99,20 @@ function readBounded(file, maxBytes) {
     throw error;
   }
   try {
-    // One guard for both cases: read at most one byte past the limit, so a file that is too large, or that grows past
-    // the limit while it is read, is refused without allocating or reading more than `maxBytes + 1`.
-    const { size } = fs.fstatSync(fd);
-    const buffer = Buffer.alloc(Math.min(size, maxBytes) + 1);
-    let read = 0;
-    for (let n; read < buffer.length && (n = fs.readSync(fd, buffer, read, buffer.length - read, read)) > 0;) read += n;
-    if (read > maxBytes) throw learnError("LEARN_LEDGER_TOO_LARGE", `${file} is more than ${maxBytes} bytes, the reader's limit; it was not read`);
-    return buffer.subarray(0, read).toString("utf8");
+    // Read to end of file in chunks, never sized from an earlier stat: a lockless reader of an append-only ledger must
+    // see what a concurrent writer appended, not silently stop at the size the file had a moment ago. The total is capped
+    // at `maxBytes + 1`, so a file that is (or grows) too large is refused without reading more than that.
+    const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, maxBytes + 1));
+    const chunks = [];
+    let total = 0;
+    while (total <= maxBytes) {
+      const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, maxBytes + 1 - total), total);
+      if (n === 0) break;
+      chunks.push(Buffer.from(chunk.subarray(0, n)));
+      total += n;
+    }
+    if (total > maxBytes) throw learnError("LEARN_LEDGER_TOO_LARGE", `${file} is more than ${maxBytes} bytes, the reader's limit; it was not read`);
+    return Buffer.concat(chunks, total).toString("utf8");
   } finally {
     fs.closeSync(fd);
   }

@@ -91,6 +91,7 @@ done
 if [[ -z "$ledger_path" ]]; then
   command -v node >/dev/null 2>&1 || { echo "learning-review-proposals: node is required to resolve the default ledger; pass --ledger PATH" >&2; exit 1; }
   ledger_path="$(node "$SCRIPT_DIR/ledger-path.mjs")" || { echo "learning-review-proposals: could not resolve the default ledger; pass --ledger PATH" >&2; exit 1; }
+  [[ -n "$ledger_path" ]] || { echo "learning-review-proposals: the default ledger resolved to nothing; pass --ledger PATH" >&2; exit 1; }
 fi
 
 min_window_sample="${LR_MIN_WINDOW_SAMPLE:-5}"
