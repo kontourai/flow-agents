@@ -417,3 +417,94 @@ test("two observe runs under one thread: a Stop in run A's project evaluates run
   assert.equal(bStop.status, 2, bStop.stderr);
   assert.match(bStop.stderr, /acceptance\.json is missing|plan-work\.md is missing|has no command check/);
 });
+
+// ─── #1648: orchestrator-acquired claim → worker activity → separate-session review ─────
+
+/** A process with the coordination label and no runtime session variables (an orchestrator's process). */
+function orchestratorEnv() {
+  const env = { ...process.env, FLOW_AGENTS_ACTOR: HOLDER, FLOW_AGENTS_GOAL_FIT_MODE: "block" };
+  for (const name of ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID", "FLOW_AGENTS_HOOK_RUNTIME"]) delete env[name];
+  return env;
+}
+/** The worker: same coordination label, its own runtime session. */
+function workerEnv() {
+  return { ...orchestratorEnv(), CLAUDE_CODE_SESSION_ID: "observe-worker-session", FLOW_AGENTS_HOOK_RUNTIME: "claude-code" };
+}
+const assignmentFile = (fx) => path.join(fx.project, ".kontourai/flow-agents/assignment", `${SLUG}.json`);
+const readAssignment = (fx) => JSON.parse(fs.readFileSync(assignmentFile(fx), "utf8"));
+/**
+ * Station's AssignmentClaimService writes the claim through the assignment library from its own
+ * server process and records NO runtime session (#1648). A CLI `start` from a test process cannot
+ * reproduce that (a session-less CLI still resolves a process-ancestry identity), so the fixture
+ * takes the claim the run created and gives it exactly that writer's shape: no runtime-session fields.
+ */
+function asOrchestratorAcquiredClaim(fx) {
+  const record = readAssignment(fx);
+  delete record.runtime_session_ref;
+  delete record.runtime_session_source;
+  delete record.runtime_session_refs;
+  fs.writeFileSync(assignmentFile(fx), `${JSON.stringify(record, null, 2)}\n`);
+}
+function capture(fx, env, command = "git status") {
+  return spawnSync(process.execPath, [CAPTURE_HOOK], {
+    cwd: fx.project, encoding: "utf8", env,
+    input: JSON.stringify({ hook_event_name: "PostToolUse", cwd: fx.project, tool_name: "Bash", tool_input: { command }, tool_response: { exitCode: 0, stdout: "ok" } }),
+  });
+}
+
+test("orchestrator-acquired claim: the worker's first observed activity binds ITS session, then a separate-session review passes (#1648)", () => {
+  const fx = makeProject();
+  const started = spawnSync(process.execPath, [CLI, "workflow", "start", "--artifact-root", path.join(fx.project, ".kontourai/flow-agents"), "--flow", "builder.observe", "--task-slug", SLUG, "--criterion", "add handles negatives"],
+    { cwd: fx.project, encoding: "utf8", env: orchestratorEnv() });
+  assert.equal(started.status, 0, started.stderr);
+  asOrchestratorAcquiredClaim(fx);
+  writePlan(fx);
+  writeAcceptance(fx);
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+  commit(fx, "feature");
+
+  // Negative: before the worker is observed, a passing review is refused, naming the recovery step.
+  const early = critique(fx);
+  assert.notEqual(early.status, 0);
+  assert.match(early.output, /implementer's runtime session is not recorded on its assignment/);
+  assert.match(early.output, /an orchestrator acquired from its own process \(#1648\)/);
+  assert.match(early.output, /from the WORKER's own runtime session \(the holder, never the orchestrator\)/);
+  assert.match(early.output, /flow-agents assignment-provider claim --artifact-root/);
+
+  // The read-only query names the exact recovery command and binds nothing.
+  const status = spawnSync(process.execPath, [CLI, "observe", "status", "--session-dir", fx.sessionDir], { cwd: fx.project, encoding: "utf8", env: orchestratorEnv() });
+  assert.equal(status.status, 0, status.stderr);
+  assert.match(status.stdout, /review: the worker's runtime session is not recorded on the assignment/);
+  assert.match(status.stdout, /`flow-agents assignment-provider claim --artifact-root ".*\.kontourai\/flow-agents" --subject-id demo --artifact-dir demo --branch [^`]+`/);
+  assert.equal(readAssignment(fx).runtime_session_ref, undefined, "observe status is read-only");
+
+  // Nothing but the worker's own runtime can bind the worker's session: neither the orchestrator's
+  // process nor a reviewer's activity records it, and no input carries a session reference.
+  assert.equal(capture(fx, orchestratorEnv()).status, 0);
+  const reviewerOnly = { ...orchestratorEnv(), CLAUDE_CODE_SESSION_ID: REVIEWER };
+  delete reviewerOnly.FLOW_AGENTS_ACTOR;
+  assert.equal(capture(fx, reviewerOnly).status, 0);
+  const beforeWorker = readAssignment(fx);
+  assert.ok(!(beforeWorker.runtime_session_refs ?? []).some((ref) => /observe-worker-session|observe-reviewer/.test(ref)), "only the worker's runtime may record the worker session; a reviewer never becomes a holder");
+
+  // The worker's first observed activity (any captured command) records its own runtime session.
+  const first = capture(fx, workerEnv());
+  assert.equal(first.status, 0);
+  assert.match(first.stderr, /recorded this worker's runtime session on assignment demo \(#1648\)/);
+  const bound = readAssignment(fx);
+  assert.match(bound.runtime_session_ref, /^claude-code:observe-worker-session:/);
+  assert.equal(bound.audit_trail.at(-1).reason, "holder runtime session bound on first observed activity (#1648)");
+
+  // The binding protects separation: the worker reviewing itself is now same-session and refused.
+  const selfReview = critique(fx, "observe-worker-session");
+  assert.notEqual(selfReview.status, 0);
+  assert.match(selfReview.output, /relation same-session/);
+
+  // A separate reviewer session now passes, and the worker's Stop is released cleanly.
+  const review = critique(fx);
+  assert.equal(review.status, 0, review.output);
+  const raw = JSON.stringify({ cwd: fx.project, hook_event_name: "Stop" });
+  const done = spawnSync(process.execPath, [STOP_HOOK], { cwd: fx.project, input: raw, encoding: "utf8", env: workerEnv() });
+  assert.equal(done.status, 0, done.stderr);
+  assert.match(done.stdout, /All observed truths are met/);
+});

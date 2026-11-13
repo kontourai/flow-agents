@@ -1,27 +1,27 @@
 {
   "id": "builder.observe",
   "version": "1.0",
-  "description": "OBSERVE-AND-REMIND PROFILE of Builder (opt-in; builder.build stays the default). One working step and one gate whose expectations are predicates over observed evidence, not agent submissions. The agent writes the plan (<slug>--plan-work.md) and the acceptance definition (acceptance.json, each criterion mapped to the command that proves it) as files and then works freely. Hooks capture commands and the git diff; at each Stop the harness locks the acceptance checks by content hash, re-runs any locked check that has no confirming observation at the current commit through the writer-observed runner, derives the scope from git diff against the plan's declared files, and evaluates this gate from claims it derives from those observations. Unmet expectations come back to the agent as a short, capped reminder; after the cap the Stop is handed to a human with a computed summary. The only agent-recorded expectation is clean-critique, which keeps the distinct-reviewer rule of builder.build. See docs/decisions/observe-mode.md.",
+  "description": "OBSERVE-AND-REMIND PROFILE of Builder (opt-in; builder.build stays the default). One working step (verify: the agent works there while the harness verifies) and one gate whose expectations are predicates over observed evidence, not agent submissions. The agent writes the plan (<slug>--plan-work.md) and the acceptance definition (acceptance.json, each criterion mapped to the command that proves it) as files and then works freely. Hooks capture commands and the git diff; at each Stop the harness locks the acceptance checks by content hash, re-runs any locked check that has no confirming observation at the current commit through the writer-observed runner, derives the scope from git diff against the plan's declared files, and evaluates this gate from claims it derives from those observations. Unmet expectations come back to the agent as a short, capped reminder; after the cap the Stop is handed to a human with a computed summary. The only agent-recorded expectation is clean-critique, which keeps the distinct-reviewer rule of builder.build. See docs/decisions/observe-mode.md.",
   "evidence_mode": "observed",
   "source_binding": {
     "base": "recorded-at-start"
   },
   "phase_map": {
-    "planning": "observe",
-    "execution": "observe",
-    "verification": "observe",
-    "evidence": "observe"
+    "planning": "verify",
+    "execution": "verify",
+    "verification": "verify",
+    "evidence": "verify"
   },
   "steps": [
-    { "id": "observe", "next": "done" },
+    { "id": "verify", "next": "done" },
     { "id": "done", "next": null }
   ],
   "gates": {
     "observe-gate": {
-      "step": "observe",
+      "step": "verify",
       "on_route_back": {
-        "missing_evidence": "observe",
-        "default": "observe"
+        "missing_evidence": "verify",
+        "default": "verify"
       },
       "route_back_policy": {
         "max_attempts": 3,

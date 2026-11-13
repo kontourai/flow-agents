@@ -319,7 +319,7 @@ test("#1092 every Builder flow's critique binding declares runtime-derived revie
   const kit = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "kits/builder/kit.json"), "utf8"));
   const critiqueSteps = kit.flow_step_actions.filter((row) => row.expectation_bindings?.some((binding) => binding.interface === "workflow.critique"));
   assert.deepEqual(critiqueSteps.map((row) => `${row.flow_id}/${row.step_id}`).sort(),
-    ["builder.build-lean/verify", "builder.build/verify", "builder.deliver-existing/verify", "builder.review-existing/verify"]);
+    ["builder.build-lean/verify", "builder.build/verify", "builder.deliver-existing/verify", "builder.observe/verify", "builder.review-existing/verify"]);
   for (const row of critiqueSteps) {
     assert.equal(declaredCritiqueReviewerAssurance(row.flow_id, row.step_id), "runtime-derived", `${row.flow_id}/${row.step_id}`);
   }

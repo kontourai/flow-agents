@@ -16,7 +16,7 @@ drive workflow state. Decision record: `docs/decisions/observe-mode.md`.
 
 | Context | Binding | Flow expectations |
 | --- | --- | --- |
-| Active observe run | `builder.observe` at `observe` | `acceptance-definition`, `implementation-scope`, `tests-evidence`, `acceptance-criteria` (all derived), `clean-critique` (recorded by a separate reviewer) |
+| Active observe run | `builder.observe` at `verify` | `acceptance-definition`, `implementation-scope`, `tests-evidence`, `acceptance-criteria` (all derived), `clean-critique` (recorded by a separate reviewer) |
 | Standalone invocation | No Flow binding | No workflow mutation. |
 
 ## Procedure

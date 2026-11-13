@@ -520,6 +520,14 @@ function run(rawInput) {
         process.stderr.write('[evidence-capture] command-log generation release uncertain; later capture may require operator recovery\n');
       }
     }
+    // Observe mode (#1648): this is the worker's first observed activity; record its own runtime
+    // session on an orchestrator-acquired assignment. Never blocks or alters the capture above.
+    try {
+      const binding = require('./lib/observe-engagement.js').bindHolderOnObservedActivity(root, artifactDir);
+      if (binding && binding.status === 'bound') process.stderr.write(`[observe] recorded this worker's runtime session on assignment ${path.basename(artifactDir)} (#1648)\n`);
+    } catch {
+      process.stderr.write('[observe] could not record this runtime session on the assignment; the Stop hook will retry\n');
+    }
   } catch {
     // Deliberately omit exception data: hook stderr can be surfaced outside the
     // repository and must not disclose file paths or host details. The command

@@ -11,7 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { detectRuntime } = require('./actor-identity.js');
+const { detectRuntime, resolveActor, isUnresolvedActor } = require('./actor-identity.js');
 
 const HOST_STOP = Object.freeze({
   'claude-code': { blocks: true, note: 'Stop blocks; the reminder reaches the model' },
@@ -51,4 +51,30 @@ function engagementReport(runtime, observed) {
   return `OBSERVE MODE: active (${status} on ${runtime}: ${capability.note}). Write the plan and acceptance.json, work freely, commit; the Stop hook reminds you of anything unmet. Record only the distinct-reviewer critique.`;
 }
 
-module.exports = { HOST_STOP, hostRuntime, hostStopCapability, runIsObserved, engagementReport };
+/**
+ * #1648: on the worker's first observed activity in an observe run, record ITS runtime session on
+ * an orchestrator-acquired assignment. Called from the PostToolUse capture hook, which runs inside
+ * the worker's runtime. The session reference is never an input: the compiled binder derives it
+ * from this process's own runtime environment and refuses unless this process is the holder.
+ * Cheap when nothing is needed (one JSON read); the binder loads only when this runtime's session
+ * is missing from the assignment. Best-effort: capture must never fail because of it.
+ */
+function bindHolderOnObservedActivity(projectRoot, artifactDir, env = process.env) {
+  const slug = path.basename(artifactDir);
+  if (!runIsObserved(projectRoot, slug)) return null;
+  let assignment;
+  try {
+    assignment = JSON.parse(fs.readFileSync(path.join(path.dirname(artifactDir), 'assignment', `${slug}.json`), 'utf8'));
+  } catch {
+    return null;
+  }
+  const runtime = resolveActor({ ...env, FLOW_AGENTS_ACTOR: '' }).actor;
+  if (isUnresolvedActor(runtime)) return { status: 'no-runtime-session' };
+  const held = Array.isArray(assignment.runtime_session_refs) ? assignment.runtime_session_refs : [];
+  if (assignment.runtime_session_ref && held.includes(runtime)) return { status: 'already-bound', ref: runtime };
+  const binder = path.join(path.resolve(__dirname, '..', '..', '..'), 'build', 'src', 'lib', 'holder-session-binding.js');
+  if (!fs.existsSync(binder)) return null;
+  return require(binder).bindHolderRuntimeSession(artifactDir);
+}
+
+module.exports = { HOST_STOP, hostRuntime, hostStopCapability, runIsObserved, engagementReport, bindHolderOnObservedActivity };

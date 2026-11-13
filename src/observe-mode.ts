@@ -20,6 +20,7 @@ import { evaluateGate } from "@kontourai/flow";
 import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot, type GitWorktreeSnapshot } from "./lib/review-workspace-snapshot.js";
 import { execTrustedGitSync, isExactLowercaseCommitSha } from "./lib/trusted-git.js";
 import { runObservedCommand } from "./lib/observed-command.js";
+import { bindHolderRuntimeSession, holderBindingRecovery, type HolderSessionBinding } from "./lib/holder-session-binding.js";
 import { appendWriterObservedCommands, inferExecutedTestCount, testExecutionProof, WRITER_OBSERVATION_SOURCE } from "./cli/workflow-sidecar.js";
 
 type AnyObj = Record<string, any>;
@@ -674,6 +675,13 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   } catch { /* reported below */ }
   const head = snapshot?.head_sha ?? null;
 
+  // #1648: this process runs in the holder's runtime (the Stop hook or `observe verify`), so an
+  // orchestrator-acquired claim gets the worker's session here at the latest. Never in status mode.
+  let holderBinding: HolderSessionBinding | null = null;
+  if (input.mode !== "status") {
+    try { holderBinding = bindHolderRuntimeSession(sessionDir); } catch { holderBinding = null; }
+  }
+
   // Definition layer: plan + acceptance files and the locks.
   const plan = readPlanFile(sessionDir, slug);
   const acceptance = readAcceptance(sessionDir);
@@ -800,7 +808,11 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   // Judgment record: the distinct-reviewer critique.
   const trustBundle = readJson(path.join(sessionDir, "trust.bundle"));
   const critique = currentCritiques(trustBundle, snapshot && snapshot.worktree_clean ? snapshot : null);
-  if (!critique.current) {
+  const assignment = readJson(path.join(path.dirname(sessionDir), "assignment", `${slug}.json`));
+  const holderSessionMissing = Boolean(assignment) && !(typeof assignment!.runtime_session_ref === "string" && assignment!.runtime_session_ref);
+  if (!critique.current && holderSessionMissing) {
+    push("review", null, "unmet", `review: the worker's runtime session is not recorded on the assignment (an orchestrator acquired the claim from its own process), so no passing review can be recorded yet${holderBinding?.status === "no-runtime-session" ? "; this Stop could not record it because it is not running in the holder's runtime session" : ""}. ${holderBindingRecovery({ artifactRoot: path.dirname(sessionDir), slug, branch: typeof assignment!.branch === "string" ? assignment!.branch : undefined })}`);
+  } else if (!critique.current) {
     const reviewed = critique.latest?.metadata?.review_target?.workspace_snapshot?.head_sha;
     push("review", null, "unmet", critique.latest
       ? `review: the latest critique (${String(critique.latest.value)}) reviewed ${short(reviewed)}${critique.latest.metadata?.review_target?.workspace_snapshot?.worktree_clean === false ? "+uncommitted" : ""}, not the current ${short(head)}. Have a separate reviewer session record \`workflow critique\` again.`

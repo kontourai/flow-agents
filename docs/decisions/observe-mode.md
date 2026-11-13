@@ -17,6 +17,8 @@ evidence:
     ref: https://github.com/kontourai/flow-agents/issues/1646
   - kind: issue
     ref: https://github.com/kontourai/flow-agents/issues/1647
+  - kind: issue
+    ref: https://github.com/kontourai/flow-agents/issues/1648
   - kind: pr
     ref: https://github.com/kontourai/evals/pull/273
   - kind: adr
@@ -71,7 +73,7 @@ The lean flow is not a substitute. It is blocked by #1645 and enforces fewer gat
    check is reported and never executed. Optional human plan approval (a checkpoint, like a full
    spec against a quick one) is off by default and follows in the next PR.
 2. **Path: the agent works freely.** Orchestration (multi-agent work, ordering) belongs to the
-   host, Station, or an external recipe, not to Builder. The flow has one working step, `observe`.
+   host, Station, or an external recipe, not to Builder. The flow has one working step, `verify`: the agent works there and the harness verifies.
    Phases are inferred from observed activity: planning, editing, checking, review. The agent does
    not declare them.
 3. **Enforcement loop.** Hooks capture commands (`evidence-capture`), the diff (trusted Git) and
@@ -159,6 +161,29 @@ outside the Stop timeout.
 whether observe mode is active, and whether this host can block Stop. `flow-agents observe status`
 reports the same.
 
+**Integration: orchestrator-acquired claims (#1648).** An orchestrator that claims an
+assignment from its own server process (for example a task-graph claim service) records no
+holder runtime session. #1092's runtime-derived reviewer check then refuses every passing
+critique. Observe mode keeps the review as its one judgment record, so the **worker's** runtime
+binds its own session on its first observed activity:
+
+- The PostToolUse capture hook, the Stop boundary and `flow-agents observe verify` all run inside
+  the worker's runtime. When the assignment does not yet hold this runtime's session, each
+  performs the same same-actor re-claim as `flow-agents assignment-provider claim`, with reason
+  `holder runtime session bound on first observed activity (#1648)`.
+- The session reference is never an input. It comes only from the calling process's own runtime
+  environment (`resolveRuntimeSessionForHolder`), and only when that process resolves to the
+  assignment's holder actor. The orchestrator therefore cannot bind the worker's session. It can
+  pass none, and a non-holder's activity (a reviewer's, for example) binds nothing. A process that
+  forges its own runtime environment is out of scope, exactly as for #1092; #1644 tracks
+  authenticated identity.
+- Binding only adds to the held set. Once the worker is bound, the worker reviewing itself is
+  `same-session` and refused.
+- If the binding is missing, the critique refusal, every Stop reminder, and `observe status` name
+  the exact recovery command: from the worker's own runtime session, the same-actor
+  `flow-agents assignment-provider claim --artifact-root … --subject-id <slug> --artifact-dir <slug>
+  --branch <branch>`. In an observe run, the worker's next command under hooks does the same.
+
 ## Anti-gaming posture
 
 ADR 0017 and 0018 stand: the local layer is a bar-raiser. The authoritative boundary is
@@ -202,7 +227,7 @@ No new shell-parsing rule is added (ADR 0018). Integrity rides existing primitiv
 - **This PR:** the decision, the `builder.observe` flow, `source_binding.base`, the engine (lock,
   scope, bounded re-run, Flow evaluation, reminders, handoff), `flow-agents observe status|verify`,
   the engagement check, Kiro capture wiring, and seam tests. A satisfied observe run allows Stop,
-  but its canonical run stays at `observe`.
+  but its canonical run stays at `verify`.
 - **Next:** the harness attaches the derived claims and the lock through the canonical writer, so
   the run completes and `trust.bundle` and publication consume it. Committed observe settings,
   including plan approval. A publish boundary (before PR or publish). TaskCompleted and

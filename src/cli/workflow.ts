@@ -1,3 +1,4 @@
+import { HOLDER_BINDING_RECOVERY } from "../lib/holder-session-binding.js";
 import * as fs from "node:fs";
 import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
 import { resolveBundle } from "../lib/bundle-store.js";
@@ -4034,8 +4035,8 @@ function insufficientReviewerAssuranceMessage(recorded: ReviewerAssurance, requi
   if (!recorded.implementer) {
     return `workflow critique cannot record a passing review at ${step}: the implementer's runtime session is not recorded on ` +
       "its assignment (claimed before reviewer assurance was recorded, or from no runtime-derived source), so reviewer " +
-      "separation is undetermined. The assignment holder can record it by re-claiming the assignment from its own runtime " +
-      "session (`flow-agents assignment-provider claim`, same actor). Until then the independent review is NOT_VERIFIED.";
+      "separation is undetermined. This is the normal state of an assignment an orchestrator acquired from its own process " +
+      "(#1648). " + HOLDER_BINDING_RECOVERY + " Until then the independent review is NOT_VERIFIED.";
   }
   return `workflow critique cannot record a passing review at ${step}: the kit requires ${required} reviewer identity, ` +
     `and this critique has ${describeReviewerAssurance(recorded)}. A self_declared identity such as a ` +
