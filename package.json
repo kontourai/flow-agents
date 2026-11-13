@@ -238,7 +238,12 @@
     "./memory-recall": {
       "types": "./kits/knowledge/context-check/memory-recall.d.ts",
       "import": "./kits/knowledge/context-check/memory-recall.js"
-    }
+    },
+    "./learning-review-proposals": {
+      "types": "./kits/knowledge/learn/learning-review-proposals.d.ts",
+      "import": "./kits/knowledge/learn/learning-review-proposals.js"
+    },
+    "./schemas/learning-review-proposals.schema.json": "./scripts/telemetry/learning-review-proposals.schema.json"
   },
   "repository": {
     "type": "git",

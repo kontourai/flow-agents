@@ -177,16 +177,29 @@
           }
         },
         "follow_on_ref": { "type": ["string", "null"] },
-        "effect_observed": {
-          "type": ["object", "null"],
+        "effect_observed": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/effectObserved" }] },
+        "effect_history": { "type": "array", "items": { "$ref": "#/$defs/effectObserved" } },
+        "window": {
+          "type": "object",
           "additionalProperties": true,
-          "required": ["measured_at", "metric", "before", "after", "moved"],
+          "required": ["since", "until"],
           "properties": {
-            "measured_at": { "type": "string" },
-            "metric": { "type": "string" },
-            "before": { "type": ["number", "null"] },
-            "after": { "type": ["number", "null"] },
-            "moved": { "type": "string", "enum": ["improved", "worsened", "unchanged", "insufficient-data"] }
+            "since": { "type": ["number", "string", "null"] },
+            "until": { "type": ["number", "string", "null"] }
+          }
+        },
+        "measurement_basis": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["measured_on", "thresholds", "decided_at"],
+          "properties": {
+            "measured_on": { "enum": ["human", "inferred"] },
+            "thresholds": {
+              "type": "object",
+              "required": ["min_occurrences", "min_sessions"],
+              "properties": { "min_occurrences": { "type": "integer", "minimum": 1 }, "min_sessions": { "type": "integer", "minimum": 1 } }
+            },
+            "decided_at": { "type": "string", "minLength": 1 }
           }
         },
         "already_proposed": { "type": "boolean" }
@@ -202,6 +215,19 @@
           "then": { "properties": { "target": { "properties": { "kind": { "const": "gate" } } } } }
         }
       ]
+    },
+    "effectObserved": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["measured_at", "metric", "before", "after", "moved"],
+      "properties": {
+        "measured_at": { "type": "string" },
+        "metric": { "type": "string" },
+        "before": { "type": ["number", "null"] },
+        "after": { "type": ["number", "null"] },
+        "moved": { "type": "string", "enum": ["improved", "worsened", "unchanged", "insufficient-data"] },
+        "measured_on": { "enum": ["human", "inferred"] }
+      }
     },
     "ruleLine": {
       "type": "object",
@@ -243,7 +269,7 @@
           "theme": {
             "type": "object",
             "required": ["id", "label"],
-            "properties": { "id": { "type": "string", "minLength": 1 }, "label": { "type": "string", "minLength": 1 } }
+            "properties": { "id": { "type": "string", "minLength": 1 }, "label": { "type": "string", "minLength": 1 }, "parent": { "type": ["string", "null"] } }
           },
           "rule": { "type": "string", "minLength": 1 },
           "evidence": {

@@ -17,6 +17,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -80,7 +81,16 @@ export function repoScope(cwd) {
 
 /** The scope a ledger entry records, and the key effect measurement and theme history compare. */
 export const scopeRecord = (scope) => (scope.kind === "repo" ? { kind: "repo", repo: scope.repo } : { kind: "all-projects" });
-export const scopeKey = (record) => (record?.kind === "repo" ? `repo:${record.repo}` : record?.kind === "all-projects" ? "all-projects" : null);
+/**
+ * `all` for an all-projects proposal, `r<8 hex>` (a hash of the repository identity) for a repository's. Part of
+ * every proposal id, so one ledger can hold proposals of several scopes without one scope's id answering for another.
+ */
+export function scopeTag(scope) {
+  return scope?.kind === "repo" ? `r${createHash("sha256").update(String(scope.repo)).digest("hex").slice(0, 8)}` : "all";
+}
+
+/** `repo:<path>` or `all-projects`; null for anything else, including a repo scope without a non-empty string `repo`. */
+export const scopeKey = (record) => (record?.kind === "repo" && typeof record.repo === "string" && record.repo !== "" ? `repo:${record.repo}` : record?.kind === "all-projects" ? "all-projects" : null);
 
 /**
  * Refuse to write `file` where Git would track it. A path outside any work tree is fine; a path inside one must be

@@ -4,7 +4,8 @@
  * Supports exactly the draft-07 subset used by the Knowledge Kit graph schemas
  * (schemas/knowledge/*.schema.json): type, required, properties,
  * additionalProperties:false, enum, const, items, minLength, minItems, pattern,
- * uniqueItems, anyOf, oneOf, integer, minimum/maximum, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
+ * uniqueItems, anyOf, oneOf, integer, minimum/maximum, maxItems, and local `$ref` into `#/$defs/*`, plus allOf,
+ * if/then/else, not and maxLength (for the learning-review-proposals ledger line schema). It is intentionally NOT a general validator
  * — it exists so health reports and conformance tests can assert schema validity
  * without pulling an external dependency (the same zero-dep discipline as the
  * promote sub-flow's decision-delta validator in promote/lib.js).
@@ -59,6 +60,23 @@ function validateNode(value, schema, root, pathStr, errors) {
     }
   }
 
+  if (Array.isArray(schema.allOf)) {
+    for (const part of schema.allOf) validateNode(value, part, root, pathStr, errors);
+  }
+
+  if (schema.if && typeof schema.if === "object") {
+    const condition = [];
+    validateNode(value, schema.if, root, pathStr, condition);
+    const branch = condition.length === 0 ? schema.then : schema.else;
+    if (branch && typeof branch === "object") validateNode(value, branch, root, pathStr, errors);
+  }
+
+  if (schema.not && typeof schema.not === "object") {
+    const inner = [];
+    validateNode(value, schema.not, root, pathStr, inner);
+    if (inner.length === 0) errors.push(`${pathStr}: must not satisfy the excluded schema`);
+  }
+
   if (Array.isArray(schema.oneOf)) {
     const candidateErrors = schema.oneOf.map((candidate) => {
       const candidateResult = [];
@@ -85,8 +103,13 @@ function validateNode(value, schema, root, pathStr, errors) {
   }
 
   if (typeof value === "string") {
-    if (typeof schema.minLength === "number" && value.length < schema.minLength) {
+    // JSON Schema lengths count code points (as Ajv does), not UTF-16 units: an emoji is one character, not two.
+    const length = [...value].length;
+    if (typeof schema.minLength === "number" && length < schema.minLength) {
       errors.push(`${pathStr}: string shorter than minLength ${schema.minLength}`);
+    }
+    if (typeof schema.maxLength === "number" && length > schema.maxLength) {
+      errors.push(`${pathStr}: string longer than maxLength ${schema.maxLength}`);
     }
     if (typeof schema.pattern === "string" && !(new RegExp(schema.pattern).test(value))) {
       errors.push(`${pathStr}: string does not match pattern ${JSON.stringify(schema.pattern)}`);
