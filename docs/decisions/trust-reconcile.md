@@ -169,7 +169,10 @@ with into every bundle's `source` (`flow-agents/workflow-sidecar;statusFunctionV
 re-derivation of a stored bundle — `derive-claim-status.mjs` for CI and `reconcile-preflight`, and
 `workflow-sidecar claim` — uses that stamp, through the shared
 `scripts/lib/status-function-version.js`, so a committed delivery reconciles to the verdict it was
-written with.
+written with. Surface 6.3.0 defaults to `"4"` (exact RFC 3339 comparisons and
+fail-closed unevaluable time bounds), while retaining `"2"` and `"3"` as explicit
+algorithms. New bundles use and stamp `"4"`; stored `"2"`/`"3"` bundles keep their
+own algorithm. The stamp parser and unsupported/malformed-stamp refusals are unchanged.
 
 - **No stamp** derives under the installed Surface's current version. No flow-agents writer has
   emitted an unstamped bundle, and leaving the stamp out must never select the more lenient rules.
@@ -200,3 +203,39 @@ claim, so this is what lets a passing review derive `verified` from the bundle's
 status changes already under `"2"`: a critique with no verdict event (`not_verified`) and
 superseded critique history now re-derive `unknown` rather than `proposed`, because their policy
 now requires evidence they do not have. Neither asserts a pass, so neither is reconciled or gated.
+
+### Historical v2 authority-time compatibility
+
+The bundle's status-function stamp does not pin a Surface package or evaluator
+integrity. Surface 5 evaluated `"2"` authority windows with string comparisons;
+Surface 6 evaluates them as `Date.parse` instants. Offsets and variable fractional
+precision survive public validation, so the difference is reachable in valid
+bundles, including records admitted through Flow's public normalization.
+
+Before selecting `"2"` for a stored bundle (including the exact `"1"` compatibility
+mapping), `statusFunctionVersionForBundle` checks each claim's dispute-resolution
+events against matching actor/authority traces. It refuses an unevaluable relevant
+time or an event whose authorization differs between those two comparisons.
+Unambiguous selections remain supported, including noncanonical timestamp
+spellings whose comparisons agree. The check does not change bundle bytes,
+rewrite history, run a legacy status engine, or change live-gate version selection.
+
+Both stored-bundle consumers use this fence: `workflow-sidecar claim` refuses with
+no explanation output; `derive-claim-status.mjs` reports every claim underivable,
+which reconciliation treats as a failure for session-local asserted outcomes.
+The scalar helper's authority admission remains unchanged: it does not forward
+`authorityTrace` into derivation. An unambiguous authorized resolution may still
+be disputed or underivable there even when the claim explanation derives it.
+Structural validation would not authenticate that authority; changing this input
+boundary needs separate owner-scoped work and is not part of this dependency update.
+The temporal fence only adds explicit refusal; it does not turn such a scalar
+result into verified. The evaluator's resolution predicate matches actor and an
+optional authority reference, not trace subject/claim scope; the fence mirrors
+that predicate rather than treating a structural match as authenticated authority.
+Console/narrative reports and live gates continue to use their current evaluator;
+they do not promise historical re-derivation from the producer's stamp.
+
+The separately staged lifecycle authority retains its exact Flow 5.4.0 reducer,
+Surface 2.14.0 dependency, helper integrities and dependency-closure pin. That
+identity is separate from a session bundle's scalar status-function stamp; this
+compatibility fence does not alter or qualify the staged reducer.

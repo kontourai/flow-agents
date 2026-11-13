@@ -499,11 +499,14 @@ test("default projection retains a bounded tombstone whose record type was omitt
   assert.equal(filtered.claims.some((item) => item.subjectId === "bounded"), false);
 });
 
-test("Knowledge erasure uses Surface 6 without changing the shared gate's v3 status function", async () => {
+test("Surface 6 shares the v4 default while preserving the pre-upgrade v3 control", async () => {
   const gate = await import("@kontourai/surface");
   const knowledge = await import("@kontourai/surface-knowledge");
-  assert.equal(gate.statusFunctionVersion, "3");
+  const legacy = await import("@kontourai/surface-legacy");
+  assert.equal(legacy.statusFunctionVersion, "3");
+  assert.equal(gate.statusFunctionVersion, "4");
   assert.equal(knowledge.statusFunctionVersion, "4");
+  assert.deepEqual(gate.supportedStatusFunctionVersions, ["2", "3", "4"]);
   const claim = { id: "c", claimType: "test", status: "verified" };
   const evidence = [{ id: "e", claimId: "c", evidenceType: "test_output", method: "validation", passing: true, observedAt: "2026-01-01T00:00:00Z" }];
   const policies = [{ id: "p", claimType: "test", requiredEvidence: ["test_output"], requiredMethods: ["validation"], validityRule: { kind: "manual" } }];
@@ -511,6 +514,8 @@ test("Knowledge erasure uses Surface 6 without changing the shared gate's v3 sta
     { id: "d", claimId: "c", status: "disputed", createdAt: "2026-01-01T00:00:00.0001Z" },
     { id: "v", claimId: "c", status: "verified", createdAt: "2026-01-01T00:00:00.0002Z" },
   ];
-  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events }).status, "disputed");
+  assert.equal(legacy.deriveClaimStatus({ claim, evidence, policies, events }).status, "disputed");
+  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events, statusFunctionVersion: "3" }).status, "disputed");
+  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
   assert.equal(knowledge.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
 });

@@ -2078,7 +2078,8 @@ result and retained `support-purged` entries also identify survivors for produce
 review, including content that might reproduce erased material.
 The Knowledge projection pins `@kontourai/surface` 6.3.0 under the
 `@kontourai/surface-knowledge` npm alias, which interprets deleted retention.
-Existing shared trust gates retain their separately pinned Surface 5 behavior;
-this does not prove that other hosts have refreshed their projections. Surface 5
+The shared trust gates also pin Surface 6.3.0, using status function `"4"` for
+new bundles and honouring supported historical stamps when re-deriving stored
+bundles. This does not prove that other hosts have refreshed their projections. Surface 5
 can validate a bundle containing this metadata without interpreting the claim as
 deleted. Hosts need an erasure-capable Surface version for deletion-aware reports.

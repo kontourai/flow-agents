@@ -34,11 +34,12 @@ assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && 
 // Survey 9 changes the Trust Bundle projection (buildSurveyTrustBundle emits the review-outcome
 // policy and attestation evidence); this workflow imports only importExtractionEnvelope and
 // buildReviewDecision, and every assertion above holds unchanged.
-// Knowledge uses isolated Surface 6.3.0; the shared workflow retains Surface 5.0.0.
+// Knowledge and the shared workflow both pin Surface 6.3.0; historical bundle
+// readers still select the stored status-function version.
 // Lookout 0.8.9 requires acquisition's exact snapshot store and the recorder's
 // last extracted reference. The reference now uses Forage's real in-memory
 // store/ref builder/resolver and Lookout's extractedSnapshotRef contract.
-assert(Object.values(deterministic.revisions).join(",") === "1.0.2,5.0.3,9.0.0,0.8.9,5.0.0", "public revisions are not pinned");
+assert(Object.values(deterministic.revisions).join(",") === "1.0.2,5.0.3,9.0.0,0.8.9,6.3.0", "public revisions are not pinned");
 assert(!deterministic.action.afterReview.gaps.some((gap) => gap.kind === "claims-not-supplied" || gap.kind === "value-mismatch"), "the reviewed claim value is not bound to the decision");
 assert(deterministic.failures.valueMismatch.outcome === "refused" && deterministic.failures.valueMismatch.gaps.some((gap) => gap.kind === "value-mismatch"), "a claim publishing a value other than the reviewed one was not refused with value-mismatch");
 assert(live.liveTelemetry.provider === "reference-provider-adapter" && live.liveTelemetry.model === "reference-provider-model" && live.liveTelemetry.taskDigest === deterministic.extraction.taskDigest && live.liveTelemetry.usageTokens === 42 && live.liveTelemetry.latencyMs >= 0 && live.liveTelemetry.fixtureRevision === "reviewed-grounding-fixture/v1", "optional live execution telemetry is incomplete or unbound");

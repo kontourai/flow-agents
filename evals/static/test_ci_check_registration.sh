@@ -245,11 +245,79 @@ for (const [lane, job] of laneJobs) {
 // ---------------------------------------------------------------------------
 // Static evals may be reached through the aggregate runner or registered as an
 // exact required-lane command. Derive both paths and reject duplicate execution.
-const staticEntryCheck = [...checks.values()].find((check) => /evals\/run\.sh\s+static\b/.test(check.command));
-if (!staticEntryCheck) {
-  problems.push('No CHECKS entry runs `evals/run.sh static`; the static eval layer would gate nothing.');
-} else if (staticEntryCheck.lanes.length === 0) {
-  problems.push(`The static eval entry check '${staticEntryCheck.label}' is in no lane, so the static layer gates nothing.`);
+const PINNED_STATIC_COMMAND = 'node scripts/ci/readiness-source.mjs && npx --no @kontourai/veritas readiness --changed-from origin/main --changed-to HEAD';
+const packageInfo = JSON.parse(read('package.json'));
+const repoMap = JSON.parse(read('.veritas/repo-map.json'));
+
+// Follow only this complete executable chain. A wrapper name or a comment is
+// not coverage, and a second direct aggregate must not duplicate the corpus.
+function pinnedStaticRoute(entries, pkg, map) {
+  const aggregates = entries.filter((check) =>
+    check.command === PINNED_STATIC_COMMAND ||
+    /evals\/run\.sh\s+static\b|\bnpm\s+run\s+eval:static\b|\bveritas\s+readiness\b/.test(check.command));
+  if (aggregates.length !== 1) return false;
+  const check = aggregates[0];
+  const evidence = map.evidence;
+  const definitions = evidence?.evidenceChecks;
+  return check.id === 'static-eval-suite' && check.command === PINNED_STATIC_COMMAND &&
+    check.lanes.length === 1 && check.lanes[0] === 'source-and-static' &&
+    pkg.devDependencies?.['@kontourai/veritas'] === '1.12.2' &&
+    pkg.scripts?.['eval:static'] === 'bash evals/run.sh static' &&
+    !Object.hasOwn(pkg.scripts, 'preeval:static') && !Object.hasOwn(pkg.scripts, 'posteval:static') &&
+    Array.isArray(definitions) && definitions.length === 1 &&
+    definitions[0].id === 'required-evidence-check' &&
+    definitions[0].command === 'npm run eval:static' && definitions[0].runner === undefined &&
+    definitions[0].timeoutMs === 1200000 &&
+    JSON.stringify(evidence.requiredEvidenceCheckIds) === '["required-evidence-check"]' &&
+    JSON.stringify(evidence.defaultEvidenceCheckIds) === '["required-evidence-check"]';
+}
+if (!pinnedStaticRoute([...checks.values()], packageInfo, repoMap)) {
+  problems.push('Static eval must run once through the pinned installed Veritas readiness command, its required Repo Map check and the unchanged npm static script in Source and Static.');
+}
+
+// Exercise refusal, not just the happy source spelling. These controls execute
+// no evidence command and never edit the protected standards they model.
+const route = [{ id: 'static-eval-suite', command: PINNED_STATIC_COMMAND, lanes: ['source-and-static'] }];
+const validPackage = { devDependencies: { '@kontourai/veritas': '1.12.2' }, scripts: { 'eval:static': 'bash evals/run.sh static' } };
+const validMap = { evidence: { evidenceChecks: [{ id: 'required-evidence-check', command: 'npm run eval:static', timeoutMs: 1200000 }], requiredEvidenceCheckIds: ['required-evidence-check'], defaultEvidenceCheckIds: ['required-evidence-check'] } };
+if (!pinnedStaticRoute(route, validPackage, validMap)) problems.push('The complete pinned static route was refused.');
+const badRoutes = [
+  [],
+  [{ ...route[0], command: `# ${PINNED_STATIC_COMMAND}` }],
+  [{ ...route[0], command: 'node arbitrary-wrapper.mjs' }],
+  ...[' --skip-evidence-check', ' --evidence-check-command true', ' --root elsewhere', ' || true'].map((suffix) => [{ ...route[0], command: PINNED_STATIC_COMMAND + suffix }]),
+  [{ ...route[0], command: 'bash evals/run.sh static' }],
+  [route[0], { ...route[0], id: 'duplicate', command: 'bash evals/run.sh static' }],
+  [route[0], { ...route[0], id: 'duplicate', command: 'npm run eval:static' }],
+  [route[0], { ...route[0], id: 'duplicate', command: 'npx --no @kontourai/veritas readiness' }],
+  [route[0], { ...route[0], id: 'duplicate', command: 'node_modules/.bin/veritas readiness' }],
+  [route[0], { ...route[0], id: 'duplicate' }],
+  [{ ...route[0], lanes: [] }],
+  [{ ...route[0], lanes: ['workflow-contracts'] }],
+  [{ ...route[0], lanes: ['source-and-static', 'source-and-static'] }],
+];
+for (const entries of badRoutes) {
+  if (pinnedStaticRoute(entries, validPackage, validMap)) problems.push('An incomplete, duplicate or altered pinned static command was accepted.');
+}
+for (const change of [
+  (value) => { value.evidence.requiredEvidenceCheckIds = []; },
+  (value) => { value.evidence.defaultEvidenceCheckIds = []; },
+  (value) => { value.evidence.evidenceChecks[0].command = 'true'; },
+  (value) => { value.evidence.evidenceChecks[0].runner = 'node'; },
+  (value) => { value.evidence.evidenceChecks[0].timeoutMs++; },
+  (value) => { value.evidence.evidenceChecks.push(value.evidence.evidenceChecks[0]); },
+]) {
+  const changed = structuredClone(validMap); change(changed);
+  if (pinnedStaticRoute(route, validPackage, changed)) problems.push('An altered or missing required static evidence definition was accepted.');
+}
+for (const change of [
+  (value) => { value.devDependencies['@kontourai/veritas'] = '1.11.2'; },
+  (value) => { value.scripts['eval:static'] = 'true'; },
+  (value) => { value.scripts['preeval:static'] = 'bash evals/run.sh static'; },
+  (value) => { value.scripts['posteval:static'] = 'bash evals/run.sh static'; },
+]) {
+  const changed = structuredClone(validPackage); change(changed);
+  if (pinnedStaticRoute(route, changed, validMap)) problems.push('An altered npm static route or Veritas pin was accepted.');
 }
 
 const runSh = read('evals/run.sh');
