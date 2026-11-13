@@ -77,7 +77,7 @@ test("identity metadata refuses a different installed pin or GitHub checkout", (
   const missingIdentity = fixture.run({ GITHUB_ACTIONS: "true", GITHUB_SHA: "" });
   assert.notEqual(missingIdentity.status, 0);
   assert.equal(missingIdentity.stdout, "");
-  assert.match(missingIdentity.stderr, /requires its SHA and event identity/);
+  assert.match(missingIdentity.stderr, /requires GITHUB_SHA and GITHUB_EVENT_PATH/);
   fixture.git("update-ref", "-d", "refs/remotes/origin/main");
   const missingBase = fixture.run();
   assert.notEqual(missingBase.status, 0);

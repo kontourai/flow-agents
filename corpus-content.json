@@ -4,8 +4,8 @@
   "reviews": [
     {
       "id": "dependabot-pnpm611-ci-compute",
-      "reviewedAt": "2026-11-13T01:46:59.753743+00:00",
-      "note": "Reviewed the complete CI compute guide, the four changed workflow byte streams, the static baseline command, its registration audit, the identity preamble, package scripts and the unchanged Repo Map. Complete byte comparison to main proves only the eleven pnpm 6.1.1 pins and the explicit Source and Static evidence artifact paths/hidden-file option change the workflows. The existing static check now invokes pinned 1.12.2 readiness; its unchanged sole required npm static command runs the full suite once. All check IDs, lanes, runner expansion, permissions, checkout identities, time limits, reusable pins and per-ref cancellation remain unchanged. The guide now distinguishes merge-checkout evidence from PR-head identity and the separate 1.11.2 advisory.",
+      "reviewedAt": "2026-11-13T01:55:02.669836+00:00",
+      "note": "Reviewed the complete CI compute guide, the four changed workflow byte streams, the static baseline command, its registration audit, the identity preamble, package scripts and the unchanged Repo Map. Complete byte comparison to main proves only the eleven pnpm 6.1.1 pins and the explicit Source and Static evidence artifact paths/hidden-file option change the workflows. The existing static check now invokes pinned 1.12.2 readiness; its unchanged sole required npm static command runs the full suite once. All check IDs, lanes, runner expansion, permissions, checkout identities, time limits, reusable pins and per-ref cancellation remain unchanged. The guide now distinguishes merge-checkout evidence from PR-head identity and the separate 1.11.2 advisory. The reviewed registration refusal now also recognizes duplicate npm and bare Veritas aliases; arbitrary wrapper transitivity still requires source review. Main-push empty diff scope remains disclosed.",
       "limits": "Source/document byte review and bounded route controls only; full pinned-CLI readiness and all original lanes still require actual hosted execution at the new candidate. No provider, native, deployment or publication acceptance.",
       "inputs": [
         {
@@ -30,11 +30,11 @@
         },
         {
           "path": "evals/static/test_ci_check_registration.sh",
-          "sha256": "d57c37c0ab195f3e01dd021ab2bab4706cc6cbbedb2fcad926463736b9128728"
+          "sha256": "1d0cf40228a7aff3aa45edbde7b0b0c8b6a23732787770a62acc01ba7dae6b26"
         },
         {
           "path": "scripts/ci/readiness-source.mjs",
-          "sha256": "6ff41e9b68c340aa3f5080b9cf42ea850290b2432a75b09764519d56dd8749b4"
+          "sha256": "efe03365c4111cc9a5ae9ac4263b62190d9ecbe242e5ef28f53e237aed311363"
         },
         {
           "path": "package.json",
@@ -48,7 +48,7 @@
       "outputs": [
         {
           "path": "docs/ci-compute-budget.md",
-          "sha256": "87cfd92f7952db894a8c10b2deca35f2b1a0156280176be41d7475bbb84a034a"
+          "sha256": "5073ee246ba28408edce7a6a50ed96c943543f1fc54e3b0dce2c65b8a8034d89"
         }
       ]
     }

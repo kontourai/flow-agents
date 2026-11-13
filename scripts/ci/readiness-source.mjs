@@ -14,7 +14,7 @@ const resolve = (ref) => execFileSync("git", ["rev-parse", "--verify", `${ref}^{
 const base = resolve("origin/main");
 const head = resolve("HEAD");
 if (process.env.GITHUB_ACTIONS === "true" && (!process.env.GITHUB_SHA || !process.env.GITHUB_EVENT_PATH)) {
-  throw new Error("GitHub readiness requires its SHA and event identity");
+  throw new Error("GitHub readiness requires GITHUB_SHA and GITHUB_EVENT_PATH");
 }
 let prHead = null;
 if (process.env.GITHUB_EVENT_PATH) {

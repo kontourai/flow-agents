@@ -253,7 +253,8 @@ const repoMap = JSON.parse(read('.veritas/repo-map.json'));
 // not coverage, and a second direct aggregate must not duplicate the corpus.
 function pinnedStaticRoute(entries, pkg, map) {
   const aggregates = entries.filter((check) =>
-    check.command === PINNED_STATIC_COMMAND || /evals\/run\.sh\s+static\b/.test(check.command));
+    check.command === PINNED_STATIC_COMMAND ||
+    /evals\/run\.sh\s+static\b|\bnpm\s+run\s+eval:static\b|\bveritas\s+readiness\b/.test(check.command));
   if (aggregates.length !== 1) return false;
   const check = aggregates[0];
   const evidence = map.evidence;
@@ -287,6 +288,9 @@ const badRoutes = [
   ...[' --skip-evidence-check', ' --evidence-check-command true', ' --root elsewhere', ' || true'].map((suffix) => [{ ...route[0], command: PINNED_STATIC_COMMAND + suffix }]),
   [{ ...route[0], command: 'bash evals/run.sh static' }],
   [route[0], { ...route[0], id: 'duplicate', command: 'bash evals/run.sh static' }],
+  [route[0], { ...route[0], id: 'duplicate', command: 'npm run eval:static' }],
+  [route[0], { ...route[0], id: 'duplicate', command: 'npx --no @kontourai/veritas readiness' }],
+  [route[0], { ...route[0], id: 'duplicate', command: 'node_modules/.bin/veritas readiness' }],
   [route[0], { ...route[0], id: 'duplicate' }],
   [{ ...route[0], lanes: [] }],
   [{ ...route[0], lanes: ['workflow-contracts'] }],

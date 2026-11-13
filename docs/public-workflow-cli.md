@@ -470,7 +470,7 @@ Before starting:
    ```
 
    In Flow Agents itself, `static-eval-suite` records the installed Veritas version and
-   resolved source identities, then runs the pinned CLI's committed-scope readiness.
+   compared Git commits, then runs pinned readiness for `origin/main..HEAD`.
    Its required `npm run eval:static` check reaches
    `evals/static/test_unit_helpers.sh`, which executes every `src/cli/*.test.mjs` file with
    the unit-state preload. This establishes CI coverage, but the shell suite does not expose
