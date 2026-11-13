@@ -710,6 +710,10 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
     // Retain the publisher's canonical config, independently of merged user config.
     const seed = targetName === "codex" ? ".codex/hooks.json" : ".claude/settings.json";
     writeText(path.join(targetRoot, seed), targetName === "codex" ? exportCodexHooks() : exportClaudeSettings());
+  }
+  // These standalone installations also need owned metadata and dependency closure:
+  // without it the loaded module cannot locate its package-own kit tree.
+  if (["codex", "claude-code", "opencode", "kiro"].includes(targetName)) {
     writeBundledRuntimeImports(targetRoot);
   }
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
