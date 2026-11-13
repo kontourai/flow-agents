@@ -3458,7 +3458,7 @@ const confDir = '${HACHURE_CONF}';
 // #1422: the vectors are conformance for ONE status function version, declared by the manifest
 // that ships beside them ("All vectors must pass for the statusFunctionVersion declared in
 // appliesTo.statusFunctionVersion"). The hachure release reachable here declares "2", while
-// Surface 5 defaults to "3", so the vectors run under the declared version -- which Surface must
+// Surface defaults to a later version ("4" on Surface 6), so the vectors run under the declared version -- which Surface must
 // still implement -- not under the default.
 const manifest = JSON.parse(readFileSync(confDir + '/manifest.json', 'utf8'));
 const statusFunctionVersion = manifest.appliesTo && manifest.appliesTo.statusFunctionVersion;
