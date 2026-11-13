@@ -6,7 +6,7 @@ against the `release-evidence` Flow Kit.
 
 | File | Purpose |
 | --- | --- |
-| `pass-trusted-release.trust.json` | Passing case: `release.evidence` claim whose events derive status `verified`. Gate verdict: `pass`. |
+| `pass-trusted-release.trust.json` | Passing case: `release.evidence` claim whose events derive status `verified`; its required `test_output` evidence reports `passing: true`, which Flow 6 (Surface 6.3.0) requires of a required check. Gate verdict: `pass`. |
 | `fail-rejected-release.trust.json` | Failing case: `release.evidence` claim whose events derive status `rejected`. Gate verdict: `route-back`. The demo asserts that `evaluate --exit-code` exits non-zero and that the gate's claim diagnostic is `rejected`, so a fixture that fails for another reason does not count. |
 
 ## Format

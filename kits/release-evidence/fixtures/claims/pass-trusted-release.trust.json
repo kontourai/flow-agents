@@ -27,7 +27,8 @@
       "excerptOrSummary": "Release evidence probe passed.",
       "observedAt": "2026-06-12T00:00:00.000Z",
       "collectedBy": "ci/release-evidence-probe",
-      "integrityRef": "commit:release-evidence-fixture"
+      "integrityRef": "commit:release-evidence-fixture",
+      "passing": true
     }
   ],
   "policies": [
