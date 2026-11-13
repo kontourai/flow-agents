@@ -75,6 +75,48 @@ function supportedStatusFunctionVersions(surface) {
 }
 
 /**
+ * Surface 5's "2" compared AuthorityTrace windows as strings; Surface 6's "2"
+ * compares Date.parse instants. The stamp contains no evaluator package identity.
+ * Refuse only a relevant resolution whose authorization can differ. This is a
+ * compatibility fence, never a second status evaluator or permission to run a
+ * live gate through the legacy implementation. Neither the bundle nor its times
+ * are normalized/re-written here.
+ */
+function assertHistoricalV2AuthorityOrdering(bundle) {
+  const claims = new Set((Array.isArray(bundle && bundle.claims) ? bundle.claims : [])
+    .filter((claim) => claim != null).map((claim) => claim.id));
+  const events = Array.isArray(bundle && bundle.events) ? bundle.events : [];
+  const traces = Array.isArray(bundle && bundle.authorityTrace) ? bundle.authorityTrace : [];
+  for (const event of events) {
+    if (!event || event.resolvesDispute !== true || !claims.has(event.claimId)) continue;
+    // Both evaluators first select events by strict event.claimId === claim.id.
+    // Their resolution predicate then matches actor/optional authorityRef only;
+    // it does not consult trace.subject or trace.claimIds. This fence mirrors
+    // those predicates; it does not authenticate or admit any authority.
+    // Compare the union: a separate trace authorizing under both algorithms may
+    // make a divergent trace immaterial to the event's authority decision.
+    const matching = traces.filter((trace) => trace && trace.actorRef === event.actor &&
+      (event.authorityRef === undefined || trace.authorityRef === event.authorityRef));
+    if (matching.length === 0) continue;
+    const refuse = () => { throw new Error(`historical statusFunctionVersion "2" authority-time ordering is ambiguous for resolution event ${JSON.stringify(event.id)}; the bundle does not pin its evaluator package, so refusing to re-derive it`); };
+    if (typeof event.createdAt !== 'string' || !Number.isFinite(Date.parse(event.createdAt))) refuse();
+    for (const trace of matching) {
+      for (const key of ['validFrom', 'validUntil', 'revokedAt']) {
+        if (trace[key] !== undefined && (typeof trace[key] !== 'string' || !Number.isFinite(Date.parse(trace[key])))) refuse();
+      }
+    }
+    const authorizes = (trace, instant) => {
+      const at = instant ? Date.parse(event.createdAt) : event.createdAt;
+      const bound = (key) => instant ? Date.parse(trace[key]) : trace[key];
+      return !(trace.revokedAt !== undefined && bound('revokedAt') <= at) &&
+        !(trace.validFrom !== undefined && bound('validFrom') > at) &&
+        !(trace.validUntil !== undefined && bound('validUntil') < at);
+    };
+    if (matching.some((trace) => authorizes(trace, false)) !== matching.some((trace) => authorizes(trace, true))) refuse();
+  }
+}
+
+/**
  * The version to re-derive `bundle` with on the loaded Surface module.
  * @returns {{ version: string, stamped: boolean }}
  */
@@ -86,12 +128,16 @@ function statusFunctionVersionForBundle(bundle, surface) {
   if (stamped === null) return { version: current, stamped: false };
   if (stamped === '1' && !supported.includes('1') && supported.includes('2')) {
     const divergences = statusFunctionV1Divergences(bundle);
-    if (divergences.length === 0) return { version: '2', stamped: true };
+    if (divergences.length === 0) {
+      assertHistoricalV2AuthorityOrdering(bundle);
+      return { version: '2', stamped: true };
+    }
     throw new Error(`trust.bundle was derived with ${STAMP_KEY} "1" and carries ${divergences.join(', ')}, on which status function "2" derives differently; the installed @kontourai/surface cannot evaluate "1" (supported: ${supported.join(', ')}), so refusing to re-derive it`);
   }
   if (!supported.includes(stamped)) {
     throw new Error(`trust.bundle was derived with ${STAMP_KEY} ${JSON.stringify(stamped)}, which the installed @kontourai/surface cannot evaluate (supported: ${supported.join(', ')}); refusing to re-derive it with a different status function`);
   }
+  if (stamped === '2') assertHistoricalV2AuthorityOrdering(bundle);
   return { version: stamped, stamped: true };
 }
 

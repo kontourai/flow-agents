@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
+import * as installedSurface from "@kontourai/surface";
 import { explainClaim, buildTrustReport, validateTrustBundle } from "@kontourai/surface";
 import { renderClaimExplanation, claimEvidenceResult } from "../../build/src/cli/workflow-sidecar.js";
 import { validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
@@ -303,4 +304,33 @@ test("#1422: the sidecar refuses resolve-critique; resolution is the lifecycle a
   const res = spawnSync(process.execPath, [SIDECAR, "resolve-critique", dir], { encoding: "utf8" });
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /owned by the external lifecycle authority helper/);
+});
+
+// Surface 6 keeps historical algorithms selectable; the installed default is
+// used only for a new/unstamped bundle, never substituted for a stored stamp.
+test("Surface 6 selects v4 for new bundles and honours stored v2/v3 identities", () => {
+  assert.equal(installedSurface.statusFunctionVersion, "4");
+  assert.deepEqual(installedSurface.supportedStatusFunctionVersions, ["2", "3", "4"]);
+  assert.deepEqual(statusFunctionVersionForBundle({}, installedSurface), { version: "4", stamped: false });
+  for (const version of ["2", "3", "4"]) {
+    assert.deepEqual(statusFunctionVersionForBundle({ source: `fixture;statusFunctionVersion=${version}` }, installedSurface), { version, stamped: true });
+  }
+  const { bundle } = writeReviewedDelivery();
+  assert.equal(stampedStatusFunctionVersion(bundle), "4", "the real writer must stamp its actual derivation algorithm");
+});
+
+test("Surface v4 refuses an unevaluable authority window and observes fractional revocation", () => {
+  const claim = { id: "c", claimType: "test", status: "proposed", subjectId: "subject" };
+  const evidence = [{ id: "e", claimId: "c", evidenceType: "test_output", method: "validation", passing: false, observedAt: "2026-01-01T00:00:00Z" }];
+  const policies = [{ id: "p", claimType: "test", requiredEvidence: ["test_output"], requiredMethods: ["validation"], validityRule: { kind: "manual" } }];
+  const events = [{ id: "resolve", claimId: "c", status: "verified", resolvesDispute: true, actor: "owner", authorityRef: "fixture-authority", createdAt: "2026-01-01T00:00:00.0001Z" }];
+  const trace = { actorRef: "owner", authorityRef: "fixture-authority", subjectId: "subject" };
+  const derive = (authorityTrace) => installedSurface.deriveClaimStatus({ claim, evidence, policies, events, authorityTrace, statusFunctionVersion: "4" }).status;
+  assert.equal(derive([trace]), "verified", "the positive control has authority and an older blocking failure");
+  for (const bound of ["validFrom", "validUntil", "revokedAt"]) {
+    assert.equal(derive([{ ...trace, [bound]: "not-a-timestamp" }]), "disputed", `${bound} must not grant authority when unevaluable`);
+  }
+  assert.equal(derive([{ ...trace, revokedAt: "2026-01-01T00:00:00.0002Z" }]), "verified");
+  assert.equal(derive([{ ...trace, revokedAt: "2026-01-01T00:00:00.0001Z" }]), "disputed");
+  assert.equal(derive([{ ...trace, authorityRef: "other-fixture-authority" }]), "disputed");
 });

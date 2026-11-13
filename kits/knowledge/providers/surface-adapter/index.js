@@ -85,7 +85,7 @@ function deletedRetention(mutationLog) {
  */
 export async function buildKnowledgeTrustBundle(options = {}) {
   // Vault and health consumers do not require the optional Surface projection.
-  // The installed Flow Agents package supplies an isolated alias; a standalone
+  // The installed Flow Agents package supplies an explicit Knowledge alias; a standalone
   // Kit may instead have the public Surface 6 package under its ordinary name.
   let surface;
   try {

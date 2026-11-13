@@ -25,7 +25,8 @@ import {
   authorityAtRevision, retrievalProvenance, reconciliationFor, proposalFor, writeResult,
 } from "./index.js";
 
-// The kit uses Surface 6 without changing the shared workflow gate's version.
+// The kit and shared workflow gates both pin Surface 6.3.0. The alias remains
+// the explicit Knowledge dependency for standalone packaging.
 // Standalone installations may instead provide Surface 6 under its usual name.
 let Surface;
 try {

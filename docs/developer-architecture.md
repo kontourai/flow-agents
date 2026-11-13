@@ -379,15 +379,20 @@ Surface's original trust-panel element and exact package
 metadata also ship with its entry; synchronous narrative reads and panel rendering
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
-The shared workflow trust gates retain Surface 5 and its status-function behavior.
+The shared workflow trust gates pin Surface 6.3.0 and use its default status
+function `"4"` for new bundles. Stored bundle readers retain explicit `"2"`/`"3"`
+stamps through Surface's versioned API; an unsupported stamp is still refused.
 Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
 through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
 and accumulation. Standalone Knowledge projection can use an erasure-capable
 Surface under its ordinary name; recall requires Surface 6.3.0 or later with derived
 visibility. Packaged memory modules include their alias through Flow Agents. Survey
-is pinned to 8.4.0.
+is pinned to 9.0.0.
 Relay's optional SDK import and the engine-host's own integration imports are
-bound to packaged code instead of an ambient npm installation.
+bound to packaged code instead of an ambient npm installation. The optional
+Anthropic SDK range starts at 1.7.0; Relay retains its explicit zero-retry default,
+request abort signal and output-token limit. Dependency source inspection does not
+qualify provider execution or installed-runtime behavior.
 Flow's original schemas remain local to its vendor entry;
 packaging exposes its literal CommonJS imports to esbuild without changing the
 validators. A packaging-owned asset relocator reads the upstream validator's

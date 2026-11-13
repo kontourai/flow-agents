@@ -24,7 +24,7 @@ proposal producers; importing them does not approve or apply a change.
 of `@kontourai/surface` 6.3.0 only when explicitly called. If the alias is absent,
 a standalone Kit can use an erasure-capable `@kontourai/surface` installed under
 its ordinary name. Older packages that lack the deletion API are refused. The
-Flow Agents package manifest pins the alias. If neither is available, the projection rejects; it
+Flow Agents package manifest pins both the alias and ordinary Surface to 6.3.0. If neither is available, the projection rejects; it
 does not produce a placeholder bundle or block unrelated vault reads. Neo4j
 likewise needs its driver and service only when that provider is selected.
 
@@ -892,7 +892,8 @@ library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
 `O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
 artifacts; the CLI checks it before constructing its store. Unsupported
 platforms or a missing interpreter refuse, with the legacy runner still
-available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0 for ingest. The kit
+available. This distribution pins Flow 5.4.0 and Surface 6.3.0. Those pins alone
+do not qualify ingest runtime behavior. The kit
 invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
 engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
 unique run id and optionally a `flowCommand` argument array for a particular

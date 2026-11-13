@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "repository": "kontourai/flow-agents",
+  "reviews": [
+    {
+      "id": "dependabot-pnpm611-ci-compute",
+      "reviewedAt": "2026-11-13T00:33:14.679799+00:00",
+      "note": "Reviewed the complete CI compute guide and all four changed workflow byte streams. Each workflow is exactly its prior bytes with pnpm/action-setup 6.1.0 replaced by the immutable 6.1.1 SHA in eleven setup steps. Per-ref groups, cancel-in-progress, triggers, job inventory, matrices, runner expansion, permissions, reusable pins, deadlines and finalizers are byte-identical. The guide remains accurate, including publication exclusions and hosted-observation limits.",
+      "limits": "Local source/document byte review only; no assertion of action execution, hosted acceptance, runtime, provider or publication success.",
+      "inputs": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "sha256": "9b4c510d47adea03f27bd109ed77c8e0927d1f1866fd8033822fa574f7ae07c9"
+        },
+        {
+          "path": ".github/workflows/kit-gates-demo.yml",
+          "sha256": "cc648d320126152f548a1b7270ea99f2670d0791f682819b7de032a5e64e609d"
+        },
+        {
+          "path": ".github/workflows/publish-npm.yml",
+          "sha256": "48d260cd21b04d4229d231052ecadf4f8c556a576d126e17deed87bdd34d3874"
+        },
+        {
+          "path": ".github/workflows/runtime-compat.yml",
+          "sha256": "3056de5bc3ccf051093974ec7dda1994808cc2ed2dcccda34273d6ce0ffbde56"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/ci-compute-budget.md",
+          "sha256": "91e905b2884c85b137cdcc4102c2127154c23d1cb7f9c422ab5546cc147b558e"
+        }
+      ]
+    }
+  ]
+}
