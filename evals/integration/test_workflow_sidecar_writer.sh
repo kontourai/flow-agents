@@ -3453,13 +3453,16 @@ if [[ -z "$HACHURE_CONF" || ! -d "$HACHURE_CONF" ]]; then
 else
   if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-conf-vectors.err"
 import { readFileSync, readdirSync } from 'node:fs';
-import { deriveClaimStatus, supportedStatusFunctionVersions } from '@kontourai/surface';
+import { buildTrustReport, supportedStatusFunctionVersions } from '@kontourai/surface';
 const confDir = '${HACHURE_CONF}';
-// #1422: the vectors are conformance for ONE status function version, declared by the manifest
-// that ships beside them ("All vectors must pass for the statusFunctionVersion declared in
-// appliesTo.statusFunctionVersion"). The hachure release reachable here declares "2", while
-// Surface defaults to a later version ("4" on Surface 6), so the vectors run under the declared version -- which Surface must
-// still implement -- not under the default.
+// #1422: the vectors are conformance for the status function version the manifest declares
+// (appliesTo.statusFunctionVersion), not for whatever Surface defaults to, so they run under that
+// declared version -- which Surface must implement. Since hachure 0.18 a vector may carry its own
+// `statusFunctionVersions` list and then applies only to the versions it lists (the manifest's L2
+// howToRun: "All applicable vectors must pass for the statusFunctionVersion declared"; e.g.
+// sf-authority-window-before-v4 lists ["2", "3"] and does not apply to "4"). Each vector is derived
+// from its whole input, as the manifest specifies: derived-claim vectors (sf-v3-derivation-ceiling)
+// depend on other claims in the bundle, which a per-claim call cannot see.
 const manifest = JSON.parse(readFileSync(confDir + '/manifest.json', 'utf8'));
 const statusFunctionVersion = manifest.appliesTo && manifest.appliesTo.statusFunctionVersion;
 if (typeof statusFunctionVersion !== 'string' || !(supportedStatusFunctionVersions || []).includes(statusFunctionVersion)) {
@@ -3467,32 +3470,38 @@ if (typeof statusFunctionVersion !== 'string' || !(supportedStatusFunctionVersio
   process.exit(1);
 }
 const vectors = readdirSync(confDir).filter(f => f.startsWith('sf-') && f.endsWith('.json'));
-let passed = 0; let failed = 0;
+let passed = 0; let failed = 0; let applicable = 0;
 for (const vec of vectors) {
   const data = JSON.parse(readFileSync(confDir + '/' + vec, 'utf8'));
+  if (Array.isArray(data.statusFunctionVersions) && !data.statusFunctionVersions.includes(statusFunctionVersion)) continue;
+  applicable++;
   const { input, expect, now: nowStr } = data;
   const now = nowStr ? new Date(nowStr) : new Date();
+  let report;
+  try {
+    report = buildTrustReport(input, { now, statusFunctionVersion });
+  } catch (error) {
+    process.stderr.write('vector ' + vec + ': derivation threw ' + (error && error.message) + '\n');
+    failed++;
+    continue;
+  }
+  const statusById = new Map((report.claims || []).map((claim) => [claim.id, claim.status]));
   for (const [claimId, expectedStatus] of Object.entries(expect.statusByClaimId ?? {})) {
-    const claim = input.claims.find((c) => c.id === claimId);
-    if (!claim) { process.stderr.write('vector ' + vec + ': claim ' + claimId + ' not found\n'); failed++; continue; }
-    const evidence = (input.evidence || []).filter((e) => e.claimId === claimId);
-    const events = (input.events || []).filter((e) => e.claimId === claimId);
-    const policies = (input.policies || []);
-    const authorityTrace = (input.authorityTrace || []);
-    const result = deriveClaimStatus({ claim, evidence, events, policies, now, authorityTrace, statusFunctionVersion });
-    if (result.status !== expectedStatus) {
-      process.stderr.write('vector ' + vec + ' claim ' + claimId + ': got ' + result.status + ', expected ' + expectedStatus + '\n');
+    if (!statusById.has(claimId)) { process.stderr.write('vector ' + vec + ': claim ' + claimId + ' not found\n'); failed++; continue; }
+    const status = statusById.get(claimId);
+    if (status !== expectedStatus) {
+      process.stderr.write('vector ' + vec + ' claim ' + claimId + ': got ' + status + ', expected ' + expectedStatus + '\n');
       failed++;
     } else {
       passed++;
     }
   }
 }
-process.stderr.write('conformance vectors: ' + passed + ' passed, ' + failed + ' failed (statusFunctionVersion=' + statusFunctionVersion + ')\n');
-if (failed > 0) process.exit(1);
+process.stderr.write('conformance vectors: ' + applicable + ' of ' + vectors.length + ' applicable, ' + passed + ' expectations passed, ' + failed + ' failed (statusFunctionVersion=' + statusFunctionVersion + ')\n');
+if (failed > 0 || applicable === 0 || passed === 0) process.exit(1);
 NODEOF
   then
-    _pass "hachure conformance vectors pass Surface deriveClaimStatus"
+    _pass "hachure conformance vectors pass Surface status derivation"
   else
     _fail "hachure conformance vectors failed: $(cat "$TMPDIR_EVAL/tb-conf-vectors.err")"
   fi
