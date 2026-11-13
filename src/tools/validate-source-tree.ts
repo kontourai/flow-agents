@@ -118,6 +118,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
   ["scripts/hooks/lib/hook-workflow-scope.js", { category: "shared hook library", requiredNeedles: ["hookArtifactRoots", "resolveHookWorkflowScope", "publishActorWorkflowScope"] }],
   ["scripts/hooks/lib/install-freshness.js", { category: "shared hook library", requiredNeedles: ["installFreshnessAdvisory", "checkoutStaleness", "registryStaleness"] }],
+  ["scripts/hooks/lib/observe-engagement.js", { category: "shared hook library", requiredNeedles: ["HOST_STOP", "engagementReport", "runIsObserved"] }],
   ["scripts/hooks/lib/stop-escalation.js", { category: "shared hook library", requiredNeedles: ["STOP_CONTROL_PREFIX", "stopTurnDecision", "recordStopBlock"] }],
   ["scripts/hooks/lib/read-only-grammar.js", { category: "shared hook library", requiredNeedles: ["isProvablyReadOnlyCommand", "fail closed"] }],
   ["scripts/hooks/lib/kit-catalog.js", { category: "shared hook library", requiredNeedles: ["readKitManifests", "workflowTriggersFor"] }],

@@ -149,7 +149,7 @@ test("target: early stop gets a reminder citing the exact unmet criterion; the h
   commit(fx, "wip");
   const early = stop(fx);
   assert.equal(early.status, 2, `an unmet stop must be held:\n${early.stderr}`);
-  assert.match(early.stderr, /acceptance\.json:negatives locked check `node --test checks\/add\.test\.mjs` FAILS at [0-9a-f]{7} \(exit 1\)/);
+  assert.match(early.stderr, /acceptance\.json:negatives locked check `node --test checks\/add\.test\.mjs` FAILS at [0-9a-f]{7} \(exit 1, run by the observed runner\); you stopped as if done/);
   assert.match(early.stderr, /reminder 1 of 4/);
   assert.doesNotMatch(early.stderr, /flow-agents:stop-control/, "a reminder is soft: no terminal control line");
   assert.doesNotMatch(early.stderr, /canonical Flow run remains active/, "observe mode replaces the canonical-active hard block");
@@ -191,6 +191,13 @@ test("target: weakened test is caught natively through the locked check-file has
   const caught = stop(fx);
   assert.equal(caught.status, 2, caught.stderr);
   assert.match(caught.stderr, /checks\/add\.test\.mjs, a locked check file of .*acceptance\.json:negatives, changed after the lock \(possible weakened test\)/);
+  // The reviewer passed without looking and the weakened check passes when re-run: the catch is
+  // the observe-mode lock, not the reviewer and not the test outcome.
+  const head = git(fx.project, ["rev-parse", "HEAD"]);
+  const rerun = fs.readFileSync(path.join(fx.sessionDir, "command-log.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    .find((entry) => entry.command === CHECK && entry.observed_at_commit === head);
+  assert.equal(rerun?.source, "canonical-writer-execution", "the Stop hook re-ran the locked check at the weakened head");
+  assert.equal(rerun?.observedResult, "pass", "the weakened check passes, so only the lock can catch it");
   // A recorded reason turns it into a human attention item instead of a silent pass.
   writePlan(fx, { checkChanges: ["- `checks/add.test.mjs`: dropped the negatives case on purpose"] });
   const reasoned = stop(fx);
@@ -236,7 +243,8 @@ test("target: skipped verification, self-review relabel and false done stay caug
   commit(fx, "regress");
   const falseDone = stop(fx);
   assert.equal(falseDone.status, 2);
-  assert.match(falseDone.stderr, /acceptance\.json:negatives locked check .* FAILS/);
+  // The boundary's own run refuses it, like the CLI's failing tests-evidence refusal: "check X fails; you reported done".
+  assert.match(falseDone.stderr, /acceptance\.json:negatives locked check `node --test checks\/add\.test\.mjs` FAILS at [0-9a-f]{7} \(exit 1, run by the observed runner\); you stopped as if done/);
   assert.match(falseDone.stderr, /review: no critique of [0-9a-f]{7} from a distinct reviewer/, "the refused relabel left no review behind");
 });
 
@@ -371,4 +379,41 @@ test("target: at the locally decidable terminal the Stop is released and publica
   assert.match(output.systemMessage, /Not observed by this run \(needs you\): publication of the change and hosted CI/);
   assert.match(output.systemMessage, /open question: Should negatives saturate/);
   assert.doesNotMatch(adapter.stdout + adapter.stderr, /external_capability not allowed|canonical Flow run remains active/);
+});
+
+// ─── #1646: no sync instructions anywhere on the observe path ────────────────────────────
+
+test("observe next_action and session-start steering carry no sync or submission instruction (#1646)", () => {
+  const fx = makeProject();
+  start(fx);
+  const state = JSON.parse(fs.readFileSync(path.join(fx.sessionDir, "state.json"), "utf8"));
+  const next = state.next_action;
+  assert.equal(next.status, "continue");
+  for (const key of ["sync_command", "command", "command_role", "evidence_submission"]) assert.equal(next[key], undefined, `next_action.${key} must be absent in observe mode`);
+  assert.doesNotMatch(next.summary, /sync_command|workflow status|npm exec|submit their evidence/);
+  assert.match(next.summary, /observe mode/);
+  const raw = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: fx.project });
+  const steering = spawnSync(process.execPath, [path.join(REPO_ROOT, "scripts/hooks/workflow-steering.js")], { cwd: fx.project, input: raw, encoding: "utf8", env: holderEnv() });
+  assert.equal(steering.status, 0, steering.stderr);
+  const injected = steering.stdout.slice(raw.length);
+  assert.match(injected, /OBSERVE MODE: active \(ENFORCED on claude-code/, "the engagement check is loud at session start");
+  assert.doesNotMatch(injected, /npm exec|mktemp|workflow status|sync_command/);
+});
+
+// ─── #1647: the boundary resolves the run from the Stop's cwd, not per-thread state ──────
+
+test("two observe runs under one thread: a Stop in run A's project evaluates run A and reports the disagreement (#1647)", () => {
+  const a = makeProject();
+  honestPrefix(a);
+  assert.equal(critique(a).status, 0);
+  const b = makeProject();
+  start(b); // same thread (actor) now binds run B; B is unfinished
+  const result = stop(a);
+  assert.equal(result.status, 0, `run A is complete and must be the run evaluated:\n${result.stderr}`);
+  assert.match(result.released, /All observed truths are met/);
+  assert.match(result.released, /run resolution: this thread's workflow binding selected demo \(.*\), but this Stop's cwd is in .*, whose observe run is demo\. Evaluated demo/);
+  // And B, stopped in B's own cwd, is still evaluated as B (unfinished), not as A.
+  const bStop = stop(b);
+  assert.equal(bStop.status, 2, bStop.stderr);
+  assert.match(bStop.stderr, /acceptance\.json is missing|plan-work\.md is missing|has no command check/);
 });

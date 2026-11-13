@@ -2931,6 +2931,10 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   const routeText = routeBack
     ? ` Route-back history: attempt ${routeBack.attempt ?? "n/a"}${routeBack.max_attempts ? `/${routeBack.max_attempts}` : ""} returned to \`${routeBack.route_back_to ?? "an earlier step"}\`${routeBack.route_reason ? ` for \`${routeBack.route_reason}\`` : ""}.`
     : "";
+  // Observe mode (docs/decisions/observe-mode.md, #1646): the agent never synchronizes or submits,
+  // so its next action carries no sync_command and no evidence-submission surface.
+  const observeMode = definitionObservesEvidence(definition);
+  const { sync_command: _syncCommand, command: _syncAlias, command_role: _syncRole, evidence_submission: _submission, ...observeExecution } = execution as Record<string, unknown>;
   const nextAction = complete
     ? { status: "done", summary: "The selected Flow process is complete. Reconcile any remaining publication or consumer obligations from the user goal before reporting full delivery." }
     : canceled
@@ -2950,13 +2954,13 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
             ...execution,
             external_capability: externalCapability,
           }
-    : definitionObservesEvidence(definition)
+    : observeMode
       ? {
         status: "continue",
         summary: `Flow step \`${run.state.current_step}\` (observe mode): work freely. Write \`${context.slug}--plan-work.md\` (## Expected Modified Files) and \`acceptance.json\` (each criterion's command evidence_ref is the check that proves it), commit your work, and stop when you believe it is done. Hooks observe commands and the diff; the Stop hook evaluates ${gates.map((gate) => `\`${gate.id}\``).join(", ") || "the gate"} and reminds you of anything unmet. Do not submit evidence; the only record you make is the distinct-reviewer \`workflow critique\` from a separate session. Optional: \`flow-agents observe status\` shows what is left.`,
         skills,
         operations,
-        ...execution,
+        ...observeExecution,
       }
     : {
         status: "continue",

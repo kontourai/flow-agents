@@ -467,6 +467,24 @@ credential or an externally attested reviewer identity today, so nothing
 records or computes either. A policy that requires one must keep that
 assurance `NOT_VERIFIED`.
 
+## Observe mode
+
+`builder.observe` is the opt-in observe-and-remind profile
+([decision](decisions/observe-mode.md)). The agent starts once, then writes
+`<slug>--plan-work.md` (`## Expected Modified Files`) and `acceptance.json` (each criterion's
+`{"kind":"command","excerpt":...}` evidence ref is its check), and commits its work. It submits
+no evidence. A separate reviewer session records `workflow critique`. The Stop hook does the rest.
+
+```bash
+flow-agents workflow start --flow builder.observe --task-slug <slug> --criterion "<criterion>"
+flow-agents observe status [--session-dir <dir>] [--json]   # optional, read-only: what is left
+flow-agents observe verify [--session-dir <dir>]            # optional: run locked checks with no Stop budget
+```
+
+`observe status` locks nothing, runs nothing, and never counts as a reminder. `observe verify`
+runs the locked checks that have no result at the current commit through the writer-observed
+runner. Use it for suites slower than the Stop hook's budget.
+
 ## Review and verify an existing change
 
 `builder.review-existing` reviews and verifies a change that already exists at one exact Git

@@ -48,6 +48,14 @@ Agents does not write a transition or gate outcome directly. Skipped ownership,
 unresolved actors, precomputed state, and unavailable provider resolution do not
 produce selection evidence and remain at `pull-work`.
 
+A definition that declares `source_binding: {"base": "recorded-at-start"}` (observe mode,
+`builder.observe`) makes start persist the trusted HEAD as `params.source_base`. The scope diff
+is measured from it. Unlike the head pin, the worktree may be dirty and HEAD keeps moving. A
+definition that declares `evidence_mode: "observed"` gets a `next_action` with no
+`sync_command`, no `command`, and no `evidence_submission` surface (#1646). The harness derives
+its expectations from observations at the Stop boundary; see
+[the decision](../decisions/observe-mode.md).
+
 If start fails, the failure is returned to the caller and no substitute run state
 is invented. Runtime hooks keep projected actions advisory while the agent
 performs their declared skills and operations.

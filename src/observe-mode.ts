@@ -784,7 +784,9 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
     const lastText = last ? `last ${String(last.observedResult).toUpperCase()}${Number.isInteger(last.exitCode) ? ` (exit ${last.exitCode})` : ""} at ${short(last.observed_at_commit)}${last.worktree_clean === false ? "+uncommitted" : ""}` : "never observed";
     const rerun = reruns.find((note) => note.command === check.command);
     let why: string;
-    if (observed.result === "fail") why = `locked check ${quoted(check.command)} FAILS at ${short(head)} (exit ${observed.exitCode ?? "?"}${observed.source === "postToolUse-capture" ? ", captured" : ""}). Fix it and commit; a failure at a commit stays a failure.`;
+    // False done: the boundary's own verification refuses a stop whose locked check fails, the
+    // same refusal the CLI's tests-evidence writer applies to a failing outcome.
+    if (observed.result === "fail") why = `locked check ${quoted(check.command)} FAILS at ${short(head)} (exit ${observed.exitCode ?? "?"}${observed.source === "postToolUse-capture" ? ", captured" : ", run by the observed runner"}); you stopped as if done. Fix it and commit; a failure at a commit stays a failure.`;
     else if (!snapshot.worktree_clean) why = `locked check ${quoted(check.command)} has no result for a committed tree (${lastText}).`;
     else if (rerun?.outcome === "budget-exceeded" || rerun?.outcome === "skipped-budget") why = `locked check ${quoted(check.command)} did not finish within the Stop budget (${settings.verifyBudgetMs} ms); run \`flow-agents observe verify\` (${lastText}).`;
     else if (rerun?.outcome === "error") why = `locked check ${quoted(check.command)} could not be run (${rerun.detail ?? "error"}).`;

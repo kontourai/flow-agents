@@ -13,6 +13,12 @@ evidence:
     ref: https://github.com/kontourai/flow-agents/issues/1360
   - kind: issue
     ref: https://github.com/kontourai/flow-agents/issues/1644
+  - kind: issue
+    ref: https://github.com/kontourai/flow-agents/issues/1646
+  - kind: issue
+    ref: https://github.com/kontourai/flow-agents/issues/1647
+  - kind: pr
+    ref: https://github.com/kontourai/evals/pull/273
   - kind: adr
     ref: docs/adr/0016-three-hard-boundary-model.md
   - kind: adr
@@ -36,6 +42,22 @@ review record.
 
 `builder.build` is unchanged and stays the default. Observe mode ships next to it. The default
 switches only after measurement (see [Migration](#migration-and-coexistence)).
+
+## Acceptance targets from the 11.0.0 baseline
+
+A zero-model scripted mechanism stage against published 11.0.0 (kontourai/evals#273, Builder
+re-measurement round 2) measured `builder.build`. Its numbers are this profile's acceptance
+targets. Each target has a scripted test in `src/cli/observe-mode.test.mjs`:
+
+| Baseline finding (11.0.0) | Observe-mode target |
+| --- | --- |
+| **Native catch 3/5.** Skipped verification, self-review relabel and false done are caught. A weakened test and an out-of-scope edit are not. With a reviewer that passes without looking, both reached `pr-open`, and the Stop text was identical to an honest run's. | Catch all five natively, from observations, without relying on the reviewer. A weakened test is caught by the locked check-file hash: the weakened check passes when re-run, so only the lock catches it. An out-of-scope edit is caught by the `git diff` scope. False done is caught by the boundary's own re-run of the locked check ("check X fails; you stopped as if done"). That is the same refusal the CLI's tests-evidence writer applies to a failing outcome. |
+| **8 agent workflow-CLI calls** on the honest path (start, two pickup-probe submissions, plan, scope, critique, tests-evidence, merge-readiness), 72–82% mechanics-only wall share, 14–25 s per run. | `start` plus the review record. Everything else is derived. |
+| **Per-call latency.** Each call is a fresh Node process. Help takes 0.75 s median; a successful call takes 1.1–3.8 s median. Every `next_action` adds an `npm exec --yes --prefix $(mktemp -d) … workflow status` sync, 29 s cold and 1.5 s warm (#1646). | One process per boundary, with no workflow CLI spawned. An observation already recorded at the current commit is reused, never re-run. Boundary latency is recorded in `.kontourai/telemetry/observe-boundary.jsonl`. Observe-mode `next_action` and steering carry no sync or submission instruction. |
+| **Honest-boundary noise.** At the honest offline terminal (`pr-open`, publication unavailable) the Stop hook still blocks ("canonical Flow run remains active", plus `next_action.external_capability not allowed`). | When every local truth is met, the Stop is released cleanly. Publication and hosted CI appear as attention items for the human, never as a block. |
+| **Run resolution** (#1647). The Stop hook resolves the run from per-thread state, so a second run in the same thread contaminates the first. | The observe boundary resolves the run from the Stop's cwd project plus the actor's own pointer there. On disagreement with the per-thread binding, it evaluates the cwd's run and reports the disagreement. A cwd with no run of its own keeps the bound run, so moving the cwd cannot escape the gate. |
+
+The lean flow is not a substitute. It is blocked by #1645 and enforces fewer gates.
 
 ## The three layers
 
@@ -156,6 +178,9 @@ existing catch still applies**:
 - **Locked-check edit.** The engine runs the locked command, never the edited one. The edit is
   reported until reverted, and the handoff lists it.
 - **Same-session review.** `workflow critique` refuses it at write time, unchanged.
+- **Reviewer independence of the catches.** No observe catch depends on the reviewer's content
+  judgment. The baseline showed a reviewer that passes without looking. The lock, the re-run and
+  the diff do not.
 
 Residuals, accepted and disclosed:
 
@@ -163,6 +188,10 @@ Residuals, accepted and disclosed:
   as deleting `command-log.jsonl`. Backstops: the lock digest is printed in every reminder,
   handoff and status, so a reviewer sees the check set. The next PR also attaches the lock claim
   to the canonical `trust.bundle`, which `config-protection` already guards.
+- Evidence capture still resolves its session through the per-thread binding (#1647), so with two
+  runs in one thread a captured command can land in the other run's log. The observe boundary does
+  not depend on it: the writer re-run appends to the evaluated run's own log. The capture fix
+  belongs to #1647.
 - A test suite slower than the Stop budget is never re-run by the hook. The agent must run
   `observe verify`, or the handoff says the check was not verified.
 
