@@ -298,11 +298,26 @@ function readSubjectLockOwner(file: string): { token?: string } | null {
  * a second, parallel claim path. claimLocalFile (CLI wrapper, below) is now a thin
  * parse-args/print-envelope shell around this.
  */
+/**
+ * #1092: the runtime sessions that have held this subject's claim, carried across refreshes,
+ * releases and supersedes, plus the new holder's session. Bounded: a record refuses to grow past
+ * MAX_RUNTIME_SESSION_REFS instead of silently dropping history.
+ */
+const MAX_RUNTIME_SESSION_REFS = 256;
+function heldRuntimeSessionRefs(existing: AssignmentClaimRecord | null, runtimeSession?: { ref: string; source: string }): string[] | undefined {
+  const prior = Array.isArray(existing?.runtime_session_refs)
+    ? existing!.runtime_session_refs!.filter((ref): ref is string => typeof ref === "string" && ref.length > 0)
+    : existing?.runtime_session_ref ? [existing.runtime_session_ref] : [];
+  const refs = [...new Set([...prior, ...(runtimeSession ? [runtimeSession.ref] : [])])];
+  if (refs.length > MAX_RUNTIME_SESSION_REFS) throw new Error(`assignment ${existing?.subject_id ?? ""} has been held by more than ${MAX_RUNTIME_SESSION_REFS} runtime sessions; refusing to record more`);
+  return refs.length > 0 ? refs : undefined;
+}
+
 export function performLocalClaim(
   artifactRoot: string,
   subjectId: string,
   actor: ActorStruct,
-  opts: { ttlSeconds: number; branch: string; artifactDir: string; reason?: string; actorKey?: string; workItemRef?: string },
+  opts: { ttlSeconds: number; branch: string; artifactDir: string; reason?: string; actorKey?: string; workItemRef?: string; runtimeSession?: { ref: string; source: string } },
 ): AssignmentClaimRecord {
   const reason = opts.reason ?? "claim";
 
@@ -327,6 +342,8 @@ export function performLocalClaim(
       subject_id: subjectId,
       actor,
       ...(opts.actorKey ? { actor_key: opts.actorKey } : {}),
+      ...(opts.runtimeSession ? { runtime_session_ref: opts.runtimeSession.ref, runtime_session_source: opts.runtimeSession.source } : {}),
+      ...(heldRuntimeSessionRefs(existing, opts.runtimeSession) ? { runtime_session_refs: heldRuntimeSessionRefs(existing, opts.runtimeSession) } : {}),
       ...((opts.workItemRef ?? existing?.work_item_ref) ? { work_item_ref: opts.workItemRef ?? existing?.work_item_ref } : {}),
       claimed_at: isoNow(),
       ttl_seconds: opts.ttlSeconds,
@@ -480,7 +497,7 @@ export function performLocalSupersede(
   subjectId: string,
   fromActor: ActorStruct,
   toActor: ActorStruct,
-  opts: { ttlSeconds?: number; branch?: string; artifactDir?: string; reason?: string; actorKey?: string; workItemRef?: string } = {},
+  opts: { ttlSeconds?: number; branch?: string; artifactDir?: string; reason?: string; actorKey?: string; workItemRef?: string; runtimeSession?: { ref: string; source: string } } = {},
 ): AssignmentClaimRecord {
   const reason = opts.reason ?? "supersede";
 
@@ -504,6 +521,9 @@ export function performLocalSupersede(
       subject_id: subjectId,
       actor: toActor,
       ...(opts.actorKey ? { actor_key: opts.actorKey } : {}),
+      // The new holder's runtime session only; the superseded holder's is never carried over.
+      ...(opts.runtimeSession ? { runtime_session_ref: opts.runtimeSession.ref, runtime_session_source: opts.runtimeSession.source } : {}),
+      ...(heldRuntimeSessionRefs(existing, opts.runtimeSession) ? { runtime_session_refs: heldRuntimeSessionRefs(existing, opts.runtimeSession) } : {}),
       ...((opts.workItemRef ?? existing.work_item_ref) ? { work_item_ref: opts.workItemRef ?? existing.work_item_ref } : {}),
       claimed_at: isoNow(),
       ttl_seconds: ttlSeconds,

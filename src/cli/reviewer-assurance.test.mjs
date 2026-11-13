@@ -104,6 +104,10 @@ function critiqueClaims(fx) {
 }
 
 /** Start an existing-change run and reach `verify` as `holder`. */
+function assignmentRecord(fx) {
+  return JSON.parse(fs.readFileSync(path.join(fx.artifactRoot, "assignment", `${fx.slug}.json`), "utf8"));
+}
+
 function reachVerify(fx, holder) {
   assertOk(workflow(fx, ["start", "--artifact-root", fx.artifactRoot, "--flow", "builder.review-existing", "--work-item", "acme/widgets#1092",
     "--assignment-provider", "local-file", "--criterion", "The existing change passes its tests.", "--source-head", fx.head], holder), "start");
@@ -190,8 +194,10 @@ test("#1092 a separate reviewer runtime session passes, and its assurance reache
   assert.equal(assurance.reviewer.session_ref, claim.metadata.reviewer, "the session ref is the recorded reviewer");
   assert.equal(assurance.reviewer.session_ref_source, "runtime_derived");
   assert.equal(assurance.reviewer.resolved_by, "runtime-session-id:codex");
-  assert.deepEqual(assurance.implementer, { session_ref: "existing-change-holder", session_ref_source: "self_declared" },
-    "the holder's FLOW_AGENTS_ACTOR identity is recorded as self_declared coordination identity");
+  assert.equal(assurance.implementer.coordination_ref, "existing-change-holder", "the holder's alias is kept for audit only");
+  assert.equal(assurance.implementer.session_ref_source, "runtime_derived", "the implementer is identified by its runtime session");
+  assert.equal(assurance.implementer.session_ref, assignmentRecord(fx).runtime_session_ref);
+  assert.notEqual(assurance.implementer.session_ref, "existing-change-holder");
   assert.equal(reviewerVerifierRelation(assurance), "undetermined", "no receipt-backed identity: never independent");
   assert.equal(reviewerAssuranceLevel(assurance), "runtime-derived");
 
@@ -204,6 +210,68 @@ test("#1092 a separate reviewer runtime session passes, and its assurance reache
     .filter((entry) => entry.metadata?.origin === "critique" && entry.metadata.critique_record_id === claim.metadata.critique_record_id);
   assert.ok(projected.length > 0, "the canonical manifest must carry the critique claim");
   for (const entry of projected) assert.deepEqual(entry.metadata.reviewer_assurance, claim.metadata.reviewer_assurance);
+});
+
+test("#1092 an implementer that drops its FLOW_AGENTS_ACTOR alias keeps its runtime session and is refused as same-session", () => {
+  const fx = makeExistingChange();
+  // Independent review found this: the holder claims under a coordination alias, then the SAME
+  // runtime session (same Codex thread) drops only the alias and reviews its own work.
+  const holder = { ...IMPLEMENTER, FLOW_AGENTS_ACTOR: "implementer-label" };
+  reachVerify(fx, holder);
+  const record = assignmentRecord(fx);
+  assert.equal(record.actor_key, "implementer-label");
+  assert.equal(record.runtime_session_source, "runtime-session-id:codex");
+  assert.match(record.runtime_session_ref, /^codex:thread-/, "the claim records the runtime session apart from the alias");
+
+  const dropped = passingCritique(fx, IMPLEMENTER);
+  assert.notEqual(dropped.status, 0, `the implementer reviewed its own work by dropping its alias:\n${dropped.output}`);
+  assert.match(dropped.output, /relation same-session/);
+  assert.deepEqual(critiqueClaims(fx), []);
+  assert.notEqual(testsEvidence(fx, holder).status, 0);
+  assert.equal(runState(fx).status, "active");
+});
+
+test("#1092 re-claiming the alias from another runtime session cannot launder who implemented", () => {
+  const fx = makeExistingChange();
+  const holder = { ...IMPLEMENTER, FLOW_AGENTS_ACTOR: "implementer-label" };
+  reachVerify(fx, holder);
+  const first = assignmentRecord(fx).runtime_session_ref;
+  // A second runtime session takes the same alias, so the CURRENT runtime ref is no longer the implementer's.
+  const relay = { CODEX_THREAD_ID: "relay-thread", FLOW_AGENTS_ACTOR: "implementer-label" };
+  const record = assignmentRecord(fx);
+  assertOk(run(fx, [CLI, "assignment-provider", "claim", "--provider", "local-file", "--artifact-root", fx.artifactRoot, "--subject-id", fx.slug,
+    "--branch", record.branch, "--artifact-dir", record.artifact_dir], relay), "re-claim from a relay session");
+  const after = assignmentRecord(fx);
+  assert.notEqual(after.runtime_session_ref, first);
+  assert.deepEqual(after.runtime_session_refs, [first, after.runtime_session_ref], "every holding runtime session is kept");
+
+  const laundered = passingCritique(fx, IMPLEMENTER);
+  assert.notEqual(laundered.status, 0, `the original implementer reviewed after laundering the alias:\n${laundered.output}`);
+  assert.match(laundered.output, /relation same-session/);
+});
+
+test("#1092 a claim without a recorded implementer runtime session refuses clean critique until the holder re-claims", () => {
+  const fx = makeExistingChange();
+  const holder = { FLOW_AGENTS_ACTOR: "existing-change-holder" };
+  reachVerify(fx, holder);
+  // A claim written before runtime sessions were recorded.
+  const file = path.join(fx.artifactRoot, "assignment", `${fx.slug}.json`);
+  const legacy = assignmentRecord(fx);
+  delete legacy.runtime_session_ref;
+  delete legacy.runtime_session_source;
+  fs.writeFileSync(file, `${JSON.stringify(legacy, null, 2)}\n`);
+
+  const refused = passingCritique(fx, SEPARATE_REVIEWER);
+  assert.notEqual(refused.status, 0, `a critique passed with no recorded implementer runtime session:\n${refused.output}`);
+  assert.match(refused.output, /implementer's runtime session is not recorded on its assignment/);
+
+  // The holder re-claims from its own runtime session, which records it.
+  assertOk(run(fx, [CLI, "assignment-provider", "claim", "--provider", "local-file", "--artifact-root", fx.artifactRoot, "--subject-id", fx.slug,
+    "--branch", legacy.branch, "--artifact-dir", legacy.artifact_dir], holder), "re-claim");
+  assert.ok(assignmentRecord(fx).runtime_session_ref, "the re-claim records the runtime session");
+  assertOk(passingCritique(fx, SEPARATE_REVIEWER), "critique after re-claim");
+  assertOk(testsEvidence(fx, holder), "tests-evidence");
+  assert.equal(runState(fx).status, "completed");
 });
 
 test("#1092 an in-session subagent shares the implementer's runtime session and is refused as same-session", () => {
@@ -227,6 +295,13 @@ test("#1092 the gate decision is computed from recorded inputs, not a stored lab
   const separate = { reviewer: identity("reviewer", "runtime_derived"), implementer: identity("implementer", "runtime_derived") };
   assert.equal(reviewerVerifierRelation(separate), "undetermined");
   assert.equal(reviewerAssuranceMeets(separate, "runtime-derived"), true);
+  // A reviewer matching any runtime session that has held the assignment is same-session.
+  const relayed = { reviewer: identity("first-holder", "runtime_derived"), implementer: { ...identity("relay", "runtime_derived"), held_by_session_refs: ["first-holder", "relay"] } };
+  assert.equal(reviewerVerifierRelation(relayed), "same-session");
+  assert.equal(reviewerAssuranceMeets(relayed, "runtime-derived"), false);
+  // No recorded implementer runtime session: separation is undetermined and never satisfies.
+  assert.equal(reviewerAssuranceMeets({ reviewer: separate.reviewer, implementer: null }, "runtime-derived"), false);
+  assert.equal(reviewerAssuranceMeets({ reviewer: separate.reviewer, implementer: identity("implementer-label", "self_declared") }, "runtime-derived"), false);
   const sameSession = { reviewer: identity("shared", "runtime_derived"), implementer: identity("shared", "runtime_derived") };
   assert.equal(reviewerVerifierRelation(sameSession), "same-session");
   assert.equal(reviewerAssuranceMeets(sameSession, "runtime-derived"), false);

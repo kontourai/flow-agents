@@ -49,7 +49,7 @@ import {
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
-import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
+import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, resolveRuntimeSessionForHolder, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import type { ReviewerAssurance } from "../lib/reviewer-assurance.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
@@ -2974,6 +2974,8 @@ function enforceEnsureSessionOwnership(
               reason: `provider-confirmed ${assignmentProviderKind} ownership mirror`,
               actorKey: resolution.branchActorKey,
               ...(workItemRef ? { workItemRef } : {}),
+              // #1092: the holder's runtime session, kept apart from its coordination alias.
+              ...runtimeSessionOption(resolution.branchActorKey),
             });
           }
         }
@@ -3022,6 +3024,8 @@ function enforceEnsureSessionOwnership(
         // branchActorKey string on the next status/guard check, cross-tool.
         actorKey: resolution.branchActorKey,
         ...(workItemRef ? { workItemRef } : {}),
+        // #1092: the holder's runtime session, kept apart from its coordination alias.
+        ...runtimeSessionOption(resolution.branchActorKey),
       });
       // Render-don't-execute: emit the incumbent's branch so the skill continues it (never a new
       // branch). The successor re-enters the SAME artifact dir (deterministic slug) by construction.
@@ -3040,6 +3044,8 @@ function enforceEnsureSessionOwnership(
         // F1 fix (fix-plan iteration 1, HIGH): see the performLocalSupersede call above.
         actorKey: resolution.branchActorKey,
         ...(workItemRef ? { workItemRef } : {}),
+        // #1092: the holder's runtime session, kept apart from its coordination alias.
+        ...runtimeSessionOption(resolution.branchActorKey),
       });
       return selectedWorkEvidence();
     }
@@ -9879,6 +9885,12 @@ Available claim ids:
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+/** #1092: the claim option that records the holder's runtime session, when this process is the holder. */
+function runtimeSessionOption(holderActorKey: string): { runtimeSession?: { ref: string; source: string } } {
+  const runtimeSession = resolveRuntimeSessionForHolder(holderActorKey);
+  return runtimeSession ? { runtimeSession } : {};
+}
 
 export type PublicWorkflowInvocation = {
   writerTransactionId?: string;

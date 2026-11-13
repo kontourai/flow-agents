@@ -101,6 +101,16 @@ export type AssignmentClaimRecord = {
   subject_id: string;
   actor: ActorStruct;
   actor_key?: string;
+  /**
+   * #1092: the holder's runtime-derived session key (runtime session id, CI job identity, or
+   * process ancestry), resolved with any FLOW_AGENTS_ACTOR override ignored, and the resolver
+   * source that produced it. Recorded only when the writing process is the holder. `actor_key` may
+   * be a caller-chosen coordination label; independent-review separation compares this instead.
+   */
+  runtime_session_ref?: string;
+  runtime_session_source?: string;
+  /** #1092: every runtime session that has held this subject's claim, oldest first, so re-claiming the same alias from another session cannot launder who implemented. */
+  runtime_session_refs?: string[];
   work_item_ref?: string;
   claimed_at: string;
   ttl_seconds: number;

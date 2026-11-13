@@ -418,7 +418,7 @@ canonical Flow manifest that embeds it:
 ```json
 {
   "reviewer": { "session_ref": "<reviewer actor key>", "session_ref_source": "runtime_derived", "resolved_by": "runtime-session-id:codex" },
-  "implementer": { "session_ref": "<assignment actor key>", "session_ref_source": "self_declared" }
+  "implementer": { "session_ref": "<holder runtime session>", "session_ref_source": "runtime_derived", "resolved_by": "runtime-session-id:codex", "coordination_ref": "<assignment actor key>", "held_by_session_refs": ["<holder runtime session>"] }
 }
 ```
 
@@ -429,9 +429,18 @@ canonical Flow manifest that embeds it:
 | `self_declared` | A name the caller chose: a `FLOW_AGENTS_ACTOR` override, or a reviewer label passed to the sidecar writer | `caller-asserted` |
 | `runtime_derived` | The runtime session id, the CI job identity, or process ancestry | `runtime-derived` |
 
-The gate computes the relation between reviewer and implementer from these
-inputs. It is `same-session` when both session refs are present and equal, and
-`undetermined` otherwise. The shape follows the producer–verifier relation
+The implementer's `session_ref` is the runtime session recorded on its
+assignment claim (`runtime_session_ref`), not its `actor_key`: an assignment
+held under a `FLOW_AGENTS_ACTOR` label keeps that label only as
+`coordination_ref`, and `held_by_session_refs` lists every runtime session that
+has held the claim. The gate computes the relation between reviewer and
+implementer from these inputs. It is `same-session` when the reviewer's session
+matches the implementer's or any session that has held the claim, and
+`undetermined` otherwise. An implementer that drops its label keeps its runtime
+session, so it is still `same-session`. A claim recorded without a runtime
+session (claimed before this was recorded, or from no runtime-derived source)
+leaves separation undetermined, and a passing critique is refused until the
+holder re-claims the assignment from its own runtime session. The shape follows the producer–verifier relation
 proposed in [hachure-org/spec#37](https://github.com/hachure-org/spec/issues/37).
 Neither source is receipt-backed, so the relation is never `independent`.
 

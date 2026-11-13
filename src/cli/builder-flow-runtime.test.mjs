@@ -45,7 +45,7 @@ import { BuilderBuildRunInputError, startBuilderFlowRun } from "../../build/src/
 import { resultDigestClaimedByCanonicalRun } from "../../build/src/cli/merge-change.js";
 import { attachEvidence } from "@kontourai/flow";
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
-import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
+import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor, resolveRuntimeSessionForHolder } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, assertRecoveryLedgerCoverage, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
@@ -3173,6 +3173,8 @@ function claimAmbientSessionAssignment(session) {
       reason: "test holder replacement",
     });
   }
+  // #1092: the ambient holder records its runtime session, exactly as the real claim writers do.
+  const runtimeSession = resolveRuntimeSessionForHolder(ambient.actorKey);
   performLocalClaim(session.artifactRoot, session.slug, ambient.actor, {
     ttlSeconds: 1800,
     actorKey: ambient.actorKey,
@@ -3180,6 +3182,7 @@ function claimAmbientSessionAssignment(session) {
     artifactDir: session.slug,
     workItemRef: SUBJECT,
     reason: "test",
+    ...(runtimeSession ? { runtimeSession } : {}),
   });
   return ambient;
 }

@@ -3990,14 +3990,27 @@ function assertActiveAssignmentShape(assignment: JsonRecord, slug: string, sessi
 function assertDistinctReviewActor(sessionDir: string, slug: string): { caller: ReturnType<typeof resolveCurrentActorWithSource>; reviewerAssurance: ReviewerAssurance } {
   const assignment = readActiveAssignment(sessionDir, slug);
   const caller = resolveCurrentActorWithSource();
-  // #1092: the inputs a gate computes reviewer assurance from. An assignment claimed under an
-  // explicit override carries the struct runtime "explicit-override" (actor-identity.js).
-  const assignmentActor = assignment.actor as JsonRecord;
+  // #1092: the inputs a gate computes reviewer assurance from. The implementer is identified by the
+  // runtime session recorded on its assignment, never by `actor_key`, which can be a coordination
+  // label the holder chose. A claim without a recorded runtime session leaves the implementer null,
+  // so separation is undetermined and a passing review is refused.
+  const runtimeRef = typeof assignment.runtime_session_ref === "string" && assignment.runtime_session_ref ? assignment.runtime_session_ref : null;
   const reviewerAssurance: ReviewerAssurance = {
     reviewer: { session_ref: caller.actorKey, session_ref_source: sessionRefSourceForActorSource(caller.source), resolved_by: caller.source },
-    implementer: { session_ref: String(assignment.actor_key), session_ref_source: assignmentActor.runtime === "explicit-override" ? "self_declared" : "runtime_derived" },
+    implementer: runtimeRef
+      ? {
+        session_ref: runtimeRef,
+        session_ref_source: "runtime_derived",
+        ...(typeof assignment.runtime_session_source === "string" ? { resolved_by: assignment.runtime_session_source } : {}),
+        coordination_ref: String(assignment.actor_key),
+        ...(Array.isArray(assignment.runtime_session_refs) && assignment.runtime_session_refs.length
+          ? { held_by_session_refs: (assignment.runtime_session_refs as unknown[]).filter((ref): ref is string => typeof ref === "string") }
+          : {}),
+      }
+      : null,
   };
-  if (reviewerVerifierRelation(reviewerAssurance) === "same-session") {
+  // The holder's own coordination identity and the holder's runtime session are both same-session.
+  if (assignment.actor_key === caller.actorKey || reviewerVerifierRelation(reviewerAssurance) === "same-session") {
     throw new Error(
       "workflow critique requires a reviewer identity distinct from the active implementation assignment actor. " +
         "The reviewer resolves to the implementer's own session (relation same-session): an orchestrator that " +
@@ -4018,6 +4031,12 @@ const INDEPENDENT_REVIEW_REMEDIATION =
   "is NOT_VERIFIED: leave the gate blocked and report the gap rather than renaming the implementing process.";
 
 function insufficientReviewerAssuranceMessage(recorded: ReviewerAssurance, required: ReviewerAssuranceLevel, step: string): string {
+  if (!recorded.implementer) {
+    return `workflow critique cannot record a passing review at ${step}: the implementer's runtime session is not recorded on ` +
+      "its assignment (claimed before reviewer assurance was recorded, or from no runtime-derived source), so reviewer " +
+      "separation is undetermined. The assignment holder can record it by re-claiming the assignment from its own runtime " +
+      "session (`flow-agents assignment-provider claim`, same actor). Until then the independent review is NOT_VERIFIED.";
+  }
   return `workflow critique cannot record a passing review at ${step}: the kit requires ${required} reviewer identity, ` +
     `and this critique has ${describeReviewerAssurance(recorded)}. A self_declared identity such as a ` +
     `FLOW_AGENTS_ACTOR override does not establish an independent reviewer. ${INDEPENDENT_REVIEW_REMEDIATION}`;

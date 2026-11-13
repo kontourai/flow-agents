@@ -6,8 +6,13 @@
  *
  *   {
  *     reviewer:    { session_ref, session_ref_source, resolved_by },
- *     implementer: { session_ref, session_ref_source } | null
+ *     implementer: { session_ref, session_ref_source, resolved_by, coordination_ref } | null
  *   }
+ *
+ * The implementer's `session_ref` is the runtime session recorded on its assignment claim
+ * (`runtime_session_ref`), not its `actor_key`: an assignment may be held under a caller-chosen
+ * coordination label, which is kept only as `coordination_ref`. `implementer` is null when no
+ * runtime session was recorded, and a gate then treats separation as undetermined and refuses.
  *
  * The shape is meant to map onto the producer–verifier relation proposed upstream in
  * hachure-org/spec#37: `session_ref` is `actorIdentity.sessionRef`, and `session_ref_source`
@@ -19,7 +24,8 @@
  * From those inputs:
  *
  * - `verifierRelation` takes the first value that applies, in #37's order: `same-session` when both
- *   session refs are present and equal, otherwise `undetermined`. Without receipt-backed identity
+ *   session refs are present and equal (or the reviewer's matches any runtime session that has held
+ *   the assignment), otherwise `undetermined`. Without receipt-backed identity
  *   on both ends the relation can never be `independent`.
  * - The assurance level is `caller-asserted` for a `self_declared` reviewer identity (a
  *   FLOW_AGENTS_ACTOR override, or a free-form `--reviewer` label on the sidecar writer), and
@@ -41,6 +47,10 @@ export interface ReviewerSessionIdentity {
   session_ref_source: SessionRefSource;
   /** The resolver source or writer path that produced `session_ref`, for audit. */
   resolved_by?: string;
+  /** The holder's coordination identity (`actor_key`), recorded for audit only; never compared. */
+  coordination_ref?: string;
+  /** Implementer only: every runtime session that has held the assignment. A reviewer matching any is same-session. */
+  held_by_session_refs?: string[];
 }
 
 export interface ReviewerAssurance {
@@ -64,7 +74,8 @@ function sessionIdentity(value: unknown): ReviewerSessionIdentity | null {
   const record = value as Record<string, unknown>;
   if (typeof record.session_ref !== "string" || record.session_ref.length === 0) return null;
   if (record.session_ref_source !== "self_declared" && record.session_ref_source !== "runtime_derived") return null;
-  return { session_ref: record.session_ref, session_ref_source: record.session_ref_source, ...(typeof record.resolved_by === "string" ? { resolved_by: record.resolved_by } : {}) };
+  const held = Array.isArray(record.held_by_session_refs) ? record.held_by_session_refs.filter((ref): ref is string => typeof ref === "string" && ref.length > 0) : [];
+  return { session_ref: record.session_ref, session_ref_source: record.session_ref_source, ...(typeof record.resolved_by === "string" ? { resolved_by: record.resolved_by } : {}), ...(held.length ? { held_by_session_refs: held } : {}) };
 }
 
 /** The relation between the reviewer and the implementer, computed in hachure-org/spec#37's order. */
@@ -72,7 +83,7 @@ export function reviewerVerifierRelation(recorded: unknown): VerifierRelation {
   const record = recorded && typeof recorded === "object" && !Array.isArray(recorded) ? recorded as Record<string, unknown> : {};
   const reviewer = sessionIdentity(record.reviewer);
   const implementer = sessionIdentity(record.implementer);
-  if (reviewer && implementer && reviewer.session_ref === implementer.session_ref) return "same-session";
+  if (reviewer && implementer && (reviewer.session_ref === implementer.session_ref || (implementer.held_by_session_refs ?? []).includes(reviewer.session_ref))) return "same-session";
   return "undetermined";
 }
 
@@ -84,12 +95,21 @@ export function reviewerAssuranceLevel(recorded: unknown): ReviewerAssuranceLeve
   return reviewer.session_ref_source === "runtime_derived" ? "runtime-derived" : "caller-asserted";
 }
 
+/** The implementer's runtime-derived session, or null when none was recorded. */
+function implementerRuntimeSession(recorded: unknown): ReviewerSessionIdentity | null {
+  const record = recorded && typeof recorded === "object" && !Array.isArray(recorded) ? recorded as Record<string, unknown> : {};
+  const implementer = sessionIdentity(record.implementer);
+  return implementer && implementer.session_ref_source === "runtime_derived" ? implementer : null;
+}
+
 /**
  * True when a recorded assurance satisfies a required minimum level. A `same-session` relation never
- * does, and neither does a missing or malformed record.
+ * does, and neither does a missing or malformed record, nor one without the implementer's
+ * runtime-derived session (separation undetermined).
  */
 export function reviewerAssuranceMeets(recorded: unknown, required: ReviewerAssuranceLevel): boolean {
   if (reviewerVerifierRelation(recorded) === "same-session") return false;
+  if (!implementerRuntimeSession(recorded)) return false;
   const level = reviewerAssuranceLevel(recorded);
   if (!level) return false;
   return REVIEWER_ASSURANCE_LEVELS.indexOf(level) >= REVIEWER_ASSURANCE_LEVELS.indexOf(required);
@@ -100,5 +120,6 @@ export function describeReviewerAssurance(recorded: unknown): string {
   const record = recorded && typeof recorded === "object" && !Array.isArray(recorded) ? recorded as Record<string, unknown> : {};
   const reviewer = sessionIdentity(record.reviewer);
   if (!reviewer) return "no recorded reviewer identity";
-  return `reviewer identity ${reviewer.session_ref_source}${reviewer.resolved_by ? ` (${reviewer.resolved_by})` : ""}, relation ${reviewerVerifierRelation(recorded)}`;
+  const implementer = implementerRuntimeSession(recorded) ? "" : ", implementer runtime session not recorded (separation undetermined)";
+  return `reviewer identity ${reviewer.session_ref_source}${reviewer.resolved_by ? ` (${reviewer.resolved_by})` : ""}, relation ${reviewerVerifierRelation(recorded)}${implementer}`;
 }
