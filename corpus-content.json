@@ -45,7 +45,7 @@
     {
       "id": "builder-assurance-developer-architecture",
       "reviewedAt": "2026-11-13T00:00:00Z",
-      "note": "The changed src files record reviewer-assurance inputs on critiques, compute the Builder verify-gate decision from them, resolve the declaring kit's reviewer_assurance policy, and add resolveCurrentActorWithSource beside the unchanged resolveCurrentAssignmentActor; the test files update fixtures to use a separate reviewer runtime session. This guide covers package layout, build, publication, documentation freshness and module ownership; it states that review-work and verify-work produce report-only critique and evidence, which remains true, and makes no claim about reviewer identity or gate assurance, so every statement in it remains accurate.",
+      "note": "The changed src files record reviewer-assurance inputs on critiques, compute the Builder verify-gate decision from them, resolve the declaring kit's reviewer_assurance policy, and add resolveCurrentActorWithSource beside the unchanged resolveCurrentAssignmentActor; the test files update fixtures to use a separate reviewer runtime session. This guide covers package layout, build, publication, documentation freshness, module ownership and installed kit discovery (whose root resolution this change calls but does not alter); it states that review-work and verify-work produce report-only critique and evidence, which remains true, and makes no claim about reviewer identity or gate assurance, so every statement in it remains accurate.",
       "limits": "Source and document byte review only. Does not verify runtime behaviour, and does not review other documents that cover these files.",
       "inputs": [
         {
@@ -96,7 +96,7 @@
       "outputs": [
         {
           "path": "docs/developer-architecture.md",
-          "sha256": "0798c02aa14a6094b6ed06da5b3a6c04551c3e4528c357535cbcbe9b48d8eceb"
+          "sha256": "fff1271d520ac507a6922f0b60636f18f5c3d769570a00c42c6f53307f403eda"
         }
       ]
     },
