@@ -45,7 +45,7 @@
     {
       "id": "builder-assurance-developer-architecture",
       "reviewedAt": "2026-11-13T00:00:00Z",
-      "note": "The changed src files record reviewer-assurance inputs on critiques, compute the Builder verify-gate decision from them, resolve the declaring kit's reviewer_assurance policy, and add resolveCurrentActorWithSource beside the unchanged resolveCurrentAssignmentActor; the test files update fixtures to use a separate reviewer runtime session. This guide covers package layout, build, publication, documentation freshness, module ownership and installed kit discovery (whose root resolution this change calls but does not alter); it states that review-work and verify-work produce report-only critique and evidence, which remains true, and makes no claim about reviewer identity or gate assurance, so every statement in it remains accurate.",
+      "note": "The changed src files record reviewer-assurance inputs on critiques, compute the Builder verify-gate decision from them, resolve the declaring kit's reviewer_assurance policy, add resolveCurrentActorWithSource beside the unchanged resolveCurrentAssignmentActor, and record the holder's runtime-derived session on local assignment claims (documented in docs/assignment-host-contract.md and the assignment provider contract); the test files update fixtures to use a separate reviewer runtime session. This guide covers package layout, build, publication, documentation freshness, module ownership and installed kit discovery (whose root resolution this change calls but does not alter); it states that review-work and verify-work produce report-only critique and evidence, which remains true, and makes no claim about reviewer identity or gate assurance, so every statement in it remains accurate.",
       "limits": "Source and document byte review only. Does not verify runtime behaviour, and does not review other documents that cover these files.",
       "inputs": [
         {
@@ -58,7 +58,7 @@
         },
         {
           "path": "src/cli/assignment-provider.ts",
-          "sha256": "b5dcac209c6175c57d64dd351e7bdf2a514dc9dc3e5ed050b2f61ae473c1fbde"
+          "sha256": "34ec7589d01de38229c121dae64b400451c2ce66d26625d938e98dd6b4ee86c4"
         },
         {
           "path": "src/cli/builder-deliver-existing.test.mjs",
@@ -66,7 +66,7 @@
         },
         {
           "path": "src/cli/builder-flow-runtime.test.mjs",
-          "sha256": "64c6ea98a89c91c2e243ddf0f61e87827ccf98edcf3a13004a25255bac9f9f38"
+          "sha256": "ebcfdb88c1534a2a900f4eabbeb7883072840da1741b44857b0f03437f3ee60e"
         },
         {
           "path": "src/cli/builder-review-existing.test.mjs",
@@ -74,47 +74,37 @@
         },
         {
           "path": "src/cli/reviewer-assurance.test.mjs",
-          "sha256": "78f345734fd78320c6b03cab63c92a58fb5382c5dc22419831571f21fdfdf13d"
+          "sha256": "a821ea972ea7eff0cd60a373bef8c82ad40c7e7f4a3e65d4145c2ade98d35c16"
         },
         {
           "path": "src/cli/workflow-sidecar.ts",
-          "sha256": "9ee684321750bbba807a010a8340a82ade3fd7c73e9ddd65eac268abd2d5ccad"
+          "sha256": "f3bd9b917f42a9b6bad2d73a6b02293ff087c65c405e136b5d95d06598f0b116"
         },
         {
           "path": "src/cli/workflow.ts",
-          "sha256": "09876ec82bb1305733dba949170ae8c81ab7d63d2735dd9af1816639070d20ac"
+          "sha256": "97b9a70ab0aa46de3ca17283ed7e645a227b5e55f544e541794c3ca1c1aad33c"
         },
         {
           "path": "src/flow-kit/action-metadata.ts",
           "sha256": "e54752ba865b4560946252c3cbb46d75edd904c670cec07515cd8d3ae5cc48b3"
         },
         {
+          "path": "src/lib/assignment-local-store.ts",
+          "sha256": "a0a49e2bdd0bd346b72dd1fe868e80413d06c26f75e2fa37406d4b1690d86c31"
+        },
+        {
+          "path": "src/lib/assignment-model.ts",
+          "sha256": "20b0cc7d0585b52121d646ea7d538b9dd649758715d4c05bc12374a0a753932c"
+        },
+        {
           "path": "src/lib/reviewer-assurance.ts",
-          "sha256": "20da1bba8129de156582730dabe1ebd8c80fabf5e72bec4e92eba0305c30a32e"
+          "sha256": "52d703c5ee6d1211290157138ae17145bc1d993de3e1589f760dd07523ca071f"
         }
       ],
       "outputs": [
         {
           "path": "docs/developer-architecture.md",
           "sha256": "901f50ce6456af33ad14570e2668d1f40237f439ee883841c605ac1ad16a9c8c"
-        }
-      ]
-    },
-    {
-      "id": "builder-assurance-assignment-host-contract",
-      "reviewedAt": "2026-11-13T00:00:00Z",
-      "note": "src/cli/assignment-provider.ts adds resolveCurrentActorWithSource, which returns the resolver source alongside the actor, and keeps resolveCurrentAssignmentActor's output shape unchanged. This document describes the exported assignment-contract, assignment-github and assignment-local-file package entries, the liveness source and effective-state join; the CLI module's new internal helper is not part of those entries, so every statement in it remains accurate.",
-      "limits": "Source and document byte review only. Does not verify runtime behaviour, and does not review other documents that cover these files.",
-      "inputs": [
-        {
-          "path": "src/cli/assignment-provider.ts",
-          "sha256": "b5dcac209c6175c57d64dd351e7bdf2a514dc9dc3e5ed050b2f61ae473c1fbde"
-        }
-      ],
-      "outputs": [
-        {
-          "path": "docs/assignment-host-contract.md",
-          "sha256": "858c25fe8a104e49f2247f59d85028a4d1a71adec89c1e35ac556fdfb91395c5"
         }
       ]
     }
