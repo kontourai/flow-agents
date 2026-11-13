@@ -800,13 +800,38 @@ function moduleDirectory(): string {
 
 // #1415: the definition-declared source-head pin. Re-exported by builder-flow-runtime.ts.
 const SOURCE_HEAD_PINNED_AT_START = "pinned-at-start";
+// Observe mode: the definition-declared base commit, recorded at start so scope can be derived
+// from `git diff <base>` instead of being submitted. The head keeps moving; only the base is fixed.
+const SOURCE_BASE_RECORDED_AT_START = "recorded-at-start";
+
+/** The declared source binding, or null when the definition declares none. Any other shape is refused. */
+function declaredSourceBinding(definition: unknown): "head-pinned" | "base-recorded" | null {
+  if (!isRecord(definition) || !Object.prototype.hasOwnProperty.call(definition, "source_binding")) return null;
+  const binding = definition.source_binding;
+  if (isRecord(binding) && Object.keys(binding).length === 1) {
+    if (binding.head === SOURCE_HEAD_PINNED_AT_START) return "head-pinned";
+    if (binding.base === SOURCE_BASE_RECORDED_AT_START) return "base-recorded";
+  }
+  throw new BuilderBuildRunInputError("definition.source_binding", `must be exactly {"head":"${SOURCE_HEAD_PINNED_AT_START}"} or {"base":"${SOURCE_BASE_RECORDED_AT_START}"}`);
+}
 
 /** True when `definition` declares the start-pinned source head. Any other declared shape is refused. */
 export function definitionPinsSourceHead(definition: unknown): boolean {
-  if (!isRecord(definition) || !Object.prototype.hasOwnProperty.call(definition, "source_binding")) return false;
-  const binding = definition.source_binding;
-  if (!isRecord(binding) || Object.keys(binding).length !== 1 || binding.head !== SOURCE_HEAD_PINNED_AT_START) {
-    throw new BuilderBuildRunInputError("definition.source_binding", `must be exactly {"head":"${SOURCE_HEAD_PINNED_AT_START}"}`);
-  }
-  return true;
+  return declaredSourceBinding(definition) === "head-pinned";
+}
+
+/**
+ * True when the definition declares `evidence_mode: "observed"`: its gate expectations are derived
+ * by the harness from observations (observe mode), not submitted by the agent. The kit declares
+ * this, so the core never branches on a flow name (ADR 0016). Any other declared value is refused.
+ */
+export function definitionObservesEvidence(definition: unknown): boolean {
+  if (!isRecord(definition) || !Object.prototype.hasOwnProperty.call(definition, "evidence_mode")) return false;
+  if (definition.evidence_mode === "observed") return true;
+  throw new BuilderBuildRunInputError("definition.evidence_mode", 'must be exactly "observed" when present');
+}
+
+/** True when `definition` declares a base commit recorded at start (observe mode's scope base). */
+export function definitionRecordsSourceBase(definition: unknown): boolean {
+  return declaredSourceBinding(definition) === "base-recorded";
 }

@@ -48,6 +48,8 @@ import {
   BuilderBuildRunInputError,
   actionableOpenGates,
   definitionPinsSourceHead,
+  definitionObservesEvidence,
+  definitionRecordsSourceBase,
   evaluateBuilderFlowRun,
   isCanonicalRunFlowId,
   loadBoundBuilderFlowDefinition,
@@ -507,12 +509,14 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
       if (!isRunNotFound(error)) throw error;
       // #1415: a definition-declared source pin is checked BEFORE the run exists, against the
       // exact definition the run would pin, so a refusal leaves no canonical run behind.
+      const startDefinition = await loadBoundBuilderFlowDefinition(requestedFlowId, context.projectRoot);
       const sourceHead = assertSourceHeadStartable(
-        await loadBoundBuilderFlowDefinition(requestedFlowId, context.projectRoot),
+        startDefinition,
         requestedFlowId,
         input.sourceHead,
         context.projectRoot,
       );
+      const sourceBase = recordableSourceBase(startDefinition, requestedFlowId, context.projectRoot);
       const correlationActor = resolveBuilderCorrelationActor(context, subject);
       run = await startBuilderFlowRun({
         cwd: context.projectRoot,
@@ -528,6 +532,7 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
         params: {
           subject,
           ...(sourceHead !== null ? { source_head: sourceHead } : {}),
+          ...(sourceBase !== null ? { source_base: sourceBase } : {}),
         },
       });
     }
@@ -2129,6 +2134,35 @@ function dirtyWorktreePaths(projectRoot: string): string[] {
   }
 }
 
+/**
+ * Observe mode: the trusted HEAD at start, for a flow whose definition declares
+ * `source_binding: {"base": "recorded-at-start"}`; null for any other flow. Unlike the head pin,
+ * the worktree may be dirty and HEAD keeps moving afterwards. Only the scope base is fixed, so
+ * work done before the first Stop still shows up in `git diff <base>`.
+ */
+export function recordableSourceBase(definition: unknown, flowId: string, projectRoot: string): string | null {
+  if (!definitionRecordsSourceBase(definition)) return null;
+  try {
+    return resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+  } catch (error) {
+    throw new BuilderBuildRunInputError("sourceBase", `${flowId} records the base commit at start, but the trusted HEAD of ${projectRoot} cannot be resolved (${errorMessage(error)}); start it inside a Git worktree with at least one commit`);
+  }
+}
+
+/** The base commit an observe run was started at, or null for a flow without the base binding. */
+export function recordedRunSourceBase(definition: unknown, state: FlowRunState): string | null {
+  const params = isRecord(state.params) ? state.params : {};
+  const present = Object.prototype.hasOwnProperty.call(params, "source_base");
+  if (!definitionRecordsSourceBase(definition)) {
+    if (present) throw new BuilderBuildRunInputError("flow_run.state.params.source_base", "is present but the run's start definition declares no base source_binding");
+    return null;
+  }
+  if (!isExactLowercaseCommitSha(params.source_base)) {
+    throw new BuilderBuildRunInputError("flow_run.state.params.source_base", "must be the 40-hex commit the observe run was started at");
+  }
+  return params.source_base;
+}
+
 /** The head a pinned run was started at, or null for an unpinned run. Definition and run must agree. */
 export function pinnedRunSourceHead(definition: unknown, state: FlowRunState): string | null {
   const params = isRecord(state.params) ? state.params : {};
@@ -2916,6 +2950,14 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
             ...execution,
             external_capability: externalCapability,
           }
+    : definitionObservesEvidence(definition)
+      ? {
+        status: "continue",
+        summary: `Flow step \`${run.state.current_step}\` (observe mode): work freely. Write \`${context.slug}--plan-work.md\` (## Expected Modified Files) and \`acceptance.json\` (each criterion's command evidence_ref is the check that proves it), commit your work, and stop when you believe it is done. Hooks observe commands and the diff; the Stop hook evaluates ${gates.map((gate) => `\`${gate.id}\``).join(", ") || "the gate"} and reminds you of anything unmet. Do not submit evidence; the only record you make is the distinct-reviewer \`workflow critique\` from a separate session. Optional: \`flow-agents observe status\` shows what is left.`,
+        skills,
+        operations,
+        ...execution,
+      }
     : {
         status: "continue",
         summary: `Flow step \`${run.state.current_step}\`: ${skillText}${operationText} Produce the declared artifacts and submit their evidence through the bound public interfaces. ${gateText}${rejectionText}${routeText} Then run sync_command to inspect canonical state, inspect the resulting next action, and continue orchestration. Status does not execute skills or submit evidence.`,

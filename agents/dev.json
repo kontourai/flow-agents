@@ -45,6 +45,11 @@
         "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:workflow-steering workflow-steering.js standard,strict",
         "matcher": "*",
         "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:evidence-capture evidence-capture.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 5000
       }
     ],
     "preToolUse": [

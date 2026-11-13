@@ -637,6 +637,19 @@ function kitWorkflowSteering(input, root) {
 }
 
 /**
+ * Observe-mode engagement check (docs/decisions/observe-mode.md): at a session boundary, say loudly
+ * that the run is in observe mode and whether this host can block Stop. '' for any other run.
+ */
+function observeEngagementLine(root, slug) {
+  try {
+    const { hostRuntime, runIsObserved, engagementReport } = require('./lib/observe-engagement');
+    return runIsObserved(root, slug) ? (engagementReport(hostRuntime(process.env), true) || '') : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Compose the RESUME block for SessionStart.
  *
  * Reads trust.bundle, handoff.json, and the liveness stream beside state.json;
@@ -658,7 +671,7 @@ function resumeSteering(root, current, resolvedGuidance = null) {
 
     const guidance = resolvedGuidance || canonicalGuidance(root, current);
     if (guidance.kind !== 'legacy') {
-      return canonicalGuidanceLines(guidance).join('\n');
+      return [observeEngagementLine(root, slug), ...canonicalGuidanceLines(guidance)].filter(Boolean).join('\n');
     }
     if (next.status === 'done' || state.status === 'archived' || state.status === 'accepted') return '';
 

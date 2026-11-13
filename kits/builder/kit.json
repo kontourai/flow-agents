@@ -32,6 +32,11 @@
       "description": "EXISTING-CHANGE DELIVERY: review, verify, and merge a change that already exists as an open same-repository pull request at an exact Git commit, without a retroactive implementation claim. No implementation step; the head is pinned at start by workflow start --source-head and re-checked at every gate, so a new head needs a new run. pr-open adopts the existing pull request through publish-change execute (it never opens one), merge-ready-ci and learn run at the pinned head with no provisional delivery, and merge-change merges the pinned head plus exactly one delivery-only commit."
     },
     {
+      "id": "builder.observe",
+      "path": "flows/observe.flow.json",
+      "description": "OBSERVE-AND-REMIND PROFILE (opt-in; builder.build stays the default): the agent writes the plan and acceptance.json as files and works freely; hooks observe commands and the git diff, and at each Stop the harness derives the gate's claims from those observations, reminds the agent of exactly what is unmet, and hands off to a human after a capped number of reminders. The only agent-recorded expectation is the distinct-reviewer critique."
+    },
+    {
       "id": "builder.publish-learn",
       "path": "flows/publish-learn.flow.json",
       "description": "Reusable delivery closeout extension for publish, provider/CI merge readiness, and learning feedback gates."
@@ -334,6 +339,32 @@
       "artifact_bindings": []
     },
     {
+      "flow_id": "builder.observe",
+      "step_id": "observe",
+      "skills": ["observe-work", "review-work"],
+      "implementation_allowed": true,
+      "artifacts": ["<slug>--plan-work.md", "acceptance.json", "trust.bundle#critique"],
+      "expectation_ids": ["acceptance-definition", "implementation-scope", "tests-evidence", "acceptance-criteria", "clean-critique"],
+      "expectation_bindings": [
+        { "expectation_id": "acceptance-definition", "interface": "workflow.evidence" },
+        { "expectation_id": "implementation-scope", "interface": "workflow.evidence" },
+        { "expectation_id": "tests-evidence", "interface": "workflow.evidence" },
+        { "expectation_id": "acceptance-criteria", "interface": "workflow.evidence" },
+        { "expectation_id": "clean-critique", "interface": "workflow.critique", "reviewer_assurance": "runtime-derived" }
+      ],
+      "artifact_bindings": [{ "artifact": "<slug>--plan-work.md", "expectation_ids": ["implementation-scope"] }, { "artifact": "acceptance.json", "expectation_ids": ["acceptance-definition", "tests-evidence", "acceptance-criteria"] }, { "artifact": "trust.bundle#critique", "expectation_ids": ["clean-critique"] }]
+    },
+    {
+      "flow_id": "builder.observe",
+      "step_id": "done",
+      "skills": [],
+      "implementation_allowed": false,
+      "artifacts": [],
+      "expectation_ids": [],
+      "expectation_bindings": [],
+      "artifact_bindings": []
+    },
+    {
       "flow_id": "builder.deliver-existing",
       "step_id": "pull-work",
       "skills": ["pull-work"],
@@ -507,6 +538,8 @@
     { "skill_id": "builder.plan-work", "role": "step", "flow_id": "builder.build", "step_ids": ["plan"], "artifacts": ["<slug>--plan-work.md", "acceptance.json", "handoff.json", "trust.bundle#implementation-plan"], "expectation_ids": ["implementation-plan"] },
     { "skill_id": "builder.execute-plan", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean"], "step_ids": ["execute"], "artifacts": ["<slug>--deliver.md", "trust.bundle#implementation-scope"], "expectation_ids": ["implementation-scope"] },
     { "skill_id": "builder.review-work", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean", "builder.review-existing", "builder.deliver-existing"], "step_ids": ["verify"], "artifacts": ["trust.bundle#critique"], "expectation_ids": ["clean-critique"] },
+    { "skill_id": "builder.review-work", "role": "step", "flow_id": "builder.observe", "step_ids": ["observe"], "artifacts": ["trust.bundle#critique"], "expectation_ids": ["clean-critique"] },
+    { "skill_id": "builder.observe-work", "role": "step", "flow_id": "builder.observe", "step_ids": ["observe"], "artifacts": ["<slug>--plan-work.md", "acceptance.json"], "expectation_ids": ["acceptance-definition", "implementation-scope", "tests-evidence", "acceptance-criteria"] },
     { "skill_id": "builder.verify-work", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean", "builder.review-existing", "builder.deliver-existing"], "step_ids": ["verify"], "artifacts": ["trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"], "expectation_ids": ["acceptance-criteria", "tests-evidence", "policy-compliance"] },
     { "skill_id": "builder.evidence-gate", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean"], "step_ids": ["merge-ready"], "artifacts": ["<slug>--evidence-gate.md", "trust.bundle#merge-readiness"], "expectation_ids": ["merge-readiness"] },
     { "skill_id": "builder.review-existing", "role": "step", "flow_id": "builder.review-existing", "flow_ids": ["builder.deliver-existing"], "step_ids": ["existing-change"], "artifacts": ["<slug>--existing-change.md", "trust.bundle#pre-existing-implementation"], "expectation_ids": ["pre-existing-implementation"] },
@@ -576,6 +609,11 @@
       "id": "builder.plan-work",
       "path": "skills/plan-work/SKILL.md",
       "description": "Code planning primitive — goal + directory to structured execution plan."
+    },
+    {
+      "id": "builder.observe-work",
+      "path": "skills/observe-work/SKILL.md",
+      "description": "Observe-and-remind Builder profile: write the plan and acceptance.json as files, work freely, and let the Stop hook remind you of exactly what is unmet."
     },
     {
       "id": "builder.pull-work",

@@ -182,6 +182,12 @@ function successOutput(event, additionalContext = '') {
       },
     };
   }
+  if (event === 'Stop' && context) {
+    // Observe mode (docs/decisions/observe-mode.md): a RELEASED Stop may carry a summary for the
+    // human (the handoff, or the attention items of a satisfied run). systemMessage is the
+    // user-facing channel; the Stop is not blocked and the turn ends normally.
+    return { continue: true, suppressOutput: false, systemMessage: context };
+  }
   return { continue: true, suppressOutput: true };
 }
 

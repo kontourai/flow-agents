@@ -3113,7 +3113,13 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
   }
   const activeFlowRun = normalizedStatus(canonicalFlow.state?.status) === 'active'
     || (gateState && gateState.flow_run && normalizedStatus(gateState.flow_run.status) === 'active');
-  if (activeFlowRun && !warnings.some(w => /canonical Flow run remains active/.test(w))) {
+  // Observe mode (docs/decisions/observe-mode.md): a run whose pinned, validated definition declares
+  // evidence_mode "observed" is evaluated by the reminder engine in run(), which replaces the
+  // non-releasable "canonical Flow run remains active" block. Every other warning is computed as
+  // before; run() keeps the hard ones hard.
+  const observeRun = Boolean(activeFlowRun && !unsafeActiveCanonical && canonicalFlow.state && canonicalFlow.definition
+    && normalizedStatus(canonicalFlow.state.status) === 'active' && canonicalFlow.definition.evidence_mode === 'observed');
+  if (activeFlowRun && !observeRun && !warnings.some(w => /canonical Flow run remains active/.test(w))) {
     const activeStep = safeOneLine(canonicalFlow.state?.current_step || gateState?.flow_run?.current_step || 'unknown', 80);
     warnings.push(`workflow state: canonical Flow run remains active at step ${activeStep}; complete or explicitly cancel the run before stopping.`);
   }
@@ -3148,6 +3154,8 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
     warnings,
     blocking,
     activeFlowRun,
+    observeRun,
+    observeCanonical: observeRun ? { state: canonicalFlow.state, definition: canonicalFlow.definition } : null,
     activeTurnAuthority: activeTurnAuthority.valid,
     activeTurnIssuedStep: activeTurnAuthority.valid ? activeTurnAuthority.record.issued_step : null,
     activeFlowCurrentStep: canonicalFlow.state?.current_step || null,
@@ -3665,6 +3673,7 @@ async function run(rawInput) {
   // liveness release must always be attempted on a non-terminal Stop, independent of
   // whether goal-fit found anything to warn about).
   releaseOnNonTerminalStop(root, result.latestArtifactDir || null);
+  if (result.observeRun) return observeStop(root, input, rawInput, result, mode);
   if (result.warnings.length === 0) {
     clearBlockStreak(root);
     return rawInput;
@@ -3765,6 +3774,68 @@ async function run(rawInput) {
     stderr: `${message}\n${gatePrefix} Stop blocked — ${remediationWarnings.length} evidence gap(s) ${blockTail}` + stopControlLine,
     exitCode: 2,
   };
+}
+
+// ─── Observe mode: the reminder engine at the Stop boundary ─────────────────────────────────
+//
+// docs/decisions/observe-mode.md. The engine (build/src/observe-mode.js) derives the gate's claims
+// from observations and lets Flow decide; this function only maps its decision onto the Stop
+// contract. Hard warnings that analyze() already computed (capture contradiction, tamper,
+// laundering, integrity) stay non-releasable exactly as on the ordinary path. An engine that
+// cannot load fails closed to the same hard class the canonical-active block had.
+async function loadObserveEngine() {
+  const file = path.join(path.resolve(__dirname, '..', '..'), 'build', 'src', 'observe-mode.js');
+  if (!fs.existsSync(file)) throw new Error('build/src/observe-mode.js is missing (run npm run build)');
+  return import(require('node:url').pathToFileURL(file).href);
+}
+
+function recordObserveBoundary(root, result, decision) {
+  try {
+    const file = path.join(root, '.kontourai', 'telemetry', 'observe-boundary.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify({
+      schema: 'flow-agents.observe-boundary', version: '0.1', at: new Date().toISOString(),
+      session: path.basename(result.latestArtifactDir || ''), action: decision.action,
+      latency_ms: decision.latency_ms ?? null, reruns: Array.isArray(decision.reruns) ? decision.reruns.length : 0,
+      reminder: decision.reminder ?? null, gate_status: decision.gate ? decision.gate.status : null,
+    })}\n`, 'utf8');
+  } catch { /* best-effort: telemetry must never fail or delay the Stop hook */ }
+}
+
+async function observeStop(root, input, rawInput, result, mode) {
+  const relPath = result.warningRelPath || relative(root, result.latestArtifactDir || root);
+  const prefix = result.gatePrefix || '[stop-gate]';
+  const hardWarnings = result.warnings.filter(w => isHardStopWarning(w, relPath, false));
+  let decision;
+  try {
+    const engine = await loadObserveEngine();
+    decision = await engine.evaluateObserveRun({
+      projectRoot: root,
+      sessionDir: result.latestArtifactDir,
+      mode: 'boundary',
+      stopHookActive: input.stop_hook_active === true,
+      canonical: result.observeCanonical,
+    });
+  } catch (error) {
+    decision = { action: 'hard', message: `${prefix} observe-mode engine unavailable (fail-closed): ${safeOneLine(error && error.message || error, 400)}` };
+  }
+  recordObserveBoundary(root, result, decision);
+  if (hardWarnings.length || decision.action === 'hard') {
+    const message = [
+      ...(hardWarnings.length ? [`${prefix} Goal Fit warning:`, ...hardWarnings.flatMap(w => [` - ${w}`, ...(remediationFor(w) ? [remediationFor(w)] : [])])] : []),
+      ...(decision.action === 'hard' ? [decision.message] : []),
+    ].join('\n');
+    if (mode !== 'block') return { stdout: rawInput, stderr: message, exitCode: 0 };
+    const control = `\n${STOP_CONTROL_PREFIX} ${JSON.stringify({ v: 1, terminal: true, code: 'non-releasable-hard-block' })}`;
+    return { stdout: rawInput, stderr: `${message}\n${prefix} Stop blocked — this block is non-releasable and will not clear itself; it needs a real fix or an operator override.${control}`, exitCode: 2 };
+  }
+  clearBlockStreak(root);
+  if (decision.action === 'remind') {
+    return { stdout: rawInput, stderr: decision.message, exitCode: mode === 'block' ? 2 : 0 };
+  }
+  // satisfied or handoff: the Stop is released, and the summary goes to the human. The adapters
+  // turn trailing stdout into the released Stop's user-facing systemMessage.
+  return { stdout: `${rawInput}\n${decision.message}`, stderr: decision.message, exitCode: 0 };
 }
 
 if (require.main === module) {
