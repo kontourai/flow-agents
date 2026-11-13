@@ -45,12 +45,30 @@ import { BuilderBuildRunInputError, startBuilderFlowRun } from "../../build/src/
 import { resultDigestClaimedByCanonicalRun } from "../../build/src/cli/merge-change.js";
 import { attachEvidence } from "@kontourai/flow";
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
-import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
+import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor, resolveRuntimeSessionForHolder } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, assertRecoveryLedgerCoverage, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+
+/**
+ * #1092: the reviewer-assurance inputs the public `workflow critique` records for a reviewer whose
+ * identity the runtime derived, in a session other than the implementer's. The session ref is the
+ * reviewer key the critique records, exactly as the public writer passes it.
+ */
+function runtimeReviewerAssurance(reviewer) {
+  return {
+    reviewer: { session_ref: reviewer, session_ref_source: "runtime_derived", resolved_by: "runtime-session-id:claude-code" },
+    implementer: { session_ref: "implementation-actor", session_ref_source: "runtime_derived" },
+  };
+}
+
+/** Record a critique as an independent runtime-session reviewer would through `workflow critique`. */
+function recordRuntimeReviewerCritique(argv) {
+  const reviewer = argv[argv.indexOf("--reviewer") + 1];
+  return mainFromPublicWorkflow(argv, { reviewerAssurance: runtimeReviewerAssurance(reviewer) });
+}
 import { useFixtureGitHooks } from "./fixture-git.mjs";
 
 let releaseRuntimeTestSeams;
@@ -680,7 +698,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   bindFixturePassingObservations(session, [currentTests, ...currentPrerequisites, forgedHistoricalRouteBack]);
   writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, forgedHistoricalRouteBack]);
   try {
-    await workflowSidecarMain([
+    await recordRuntimeReviewerCritique([
       "record-critique", session.sessionDir,
       "--id", "forged-route-rebuild",
       "--reviewer", "post-route-reviewer",
@@ -706,7 +724,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   bindFixturePassingObservations(session, [currentTests, ...currentPrerequisites, historicalRouteBack]);
   writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, historicalRouteBack]);
   const reviewedArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
-  await workflowSidecarMain([
+  await recordRuntimeReviewerCritique([
     "record-critique", session.sessionDir,
     "--id", "post-route-rebuild",
     "--reviewer", "post-route-reviewer",
@@ -978,7 +996,7 @@ test("routed-back provenance keeps the manifest bound to the start definition af
   for (const entry of prerequisites) entry.claim.status = "verified";
   bindFixturePassingObservations(session, [currentTests, ...prerequisites, historical]);
   writeBundle(session.sessionDir, [currentTests, ...prerequisites, historical]);
-  await workflowSidecarMain([
+  await recordRuntimeReviewerCritique([
     "record-critique", session.sessionDir,
     "--id", "amended-route-back-review",
     "--reviewer", "amended-route-back-reviewer",
@@ -3155,6 +3173,8 @@ function claimAmbientSessionAssignment(session) {
       reason: "test holder replacement",
     });
   }
+  // #1092: the ambient holder records its runtime session, exactly as the real claim writers do.
+  const runtimeSession = resolveRuntimeSessionForHolder(ambient.actorKey);
   performLocalClaim(session.artifactRoot, session.slug, ambient.actor, {
     ttlSeconds: 1800,
     actorKey: ambient.actorKey,
@@ -3162,6 +3182,7 @@ function claimAmbientSessionAssignment(session) {
     artifactDir: session.slug,
     workItemRef: SUBJECT,
     reason: "test",
+    ...(runtimeSession ? { runtimeSession } : {}),
   });
   return ambient;
 }
@@ -3404,6 +3425,7 @@ function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString(
     workflow_subject_ref: SUBJECT,
     origin: "critique",
     reviewer: "reviewer-actor",
+    reviewer_assurance: runtimeReviewerAssurance("reviewer-actor"),
     findings: [],
     lanes: [{ id: "code", status: "pass" }],
     review_target: {
@@ -3636,13 +3658,19 @@ async function publicReviewContextSession(slug) {
   await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "Plan owns source scope and criterion identity", "--evidence-ref-json", ref(plan), "--evidence-ref-json", ref(path.join(session.sessionDir, "acceptance.json"))]);
   fs.writeFileSync(delivery, "# Execution\n\n## Definition Of Done\nAC1: preserve implementation behavior.\n\n## Scope\nreview-target/implementation.txt\n\n```md\n## Verification Evidence\n```\n\n## Verification Evidence\nNo results recorded yet.\n");
   await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-scope", "--status", "pass", "--summary", "Implementation matches the accepted scope", "--evidence-ref-json", ref(delivery)]);
+  // #1092: the reviewer is a separate runtime session, not a FLOW_AGENTS_ACTOR relabel.
   const producerActor = process.env.FLOW_AGENTS_ACTOR;
-  process.env.FLOW_AGENTS_ACTOR = `reviewer-${slug}`;
+  const producerSession = process.env.CLAUDE_CODE_SESSION_ID;
+  delete process.env.FLOW_AGENTS_ACTOR;
+  process.env.CLAUDE_CODE_SESSION_ID = `reviewer-${slug}`;
   try {
     await workflowJson(["critique", "--session-dir", session.sessionDir, "--verdict", "pass", "--summary", "Independent current implementation review",
       "--artifact-ref", delivery, "--artifact-ref", "review-target/implementation.txt", "--artifact-ref", "review-target/delivery.md",
       "--lane-json", JSON.stringify({ id: "code", status: "pass", summary: "Implementation and controls reviewed", evidence_refs: [{ kind: "source", file: "review-target/implementation.txt", line_start: 1, line_end: 1, excerpt: "reviewed implementation" }] })]);
-  } finally { if (producerActor === undefined) delete process.env.FLOW_AGENTS_ACTOR; else process.env.FLOW_AGENTS_ACTOR = producerActor; }
+  } finally {
+    if (producerActor === undefined) delete process.env.FLOW_AGENTS_ACTOR; else process.env.FLOW_AGENTS_ACTOR = producerActor;
+    if (producerSession === undefined) delete process.env.CLAUDE_CODE_SESSION_ID; else process.env.CLAUDE_CODE_SESSION_ID = producerSession;
+  }
   const verify = (chosen = command) => {
     const commandRef = { kind: "command", excerpt: chosen, summary: "Actual source behavior test" };
     return workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "tests-evidence", "--status", "pass", "--summary", "Verification executed against reviewed implementation",
@@ -7719,7 +7747,7 @@ externalAuthorityE2E("an authenticated final reviewer resolves an earlier repair
   const originalCodexThread = process.env.CODEX_THREAD_ID;
   process.env.CODEX_THREAD_ID = "critique-resolution-reviewer-thread";
   const finalReviewer = resolveCurrentAssignmentActor();
-  await workflowSidecarMain([
+  await recordRuntimeReviewerCritique([
     "record-critique", session.sessionDir,
     "--id", "final-repair-review", "--reviewer", finalReviewer.actorKey, "--verdict", "pass",
     "--summary", "An independent final reviewer verified the repair.",
@@ -7929,13 +7957,13 @@ externalAuthorityE2E("a scrubbed thirteen-review repair history migrates through
   fs.writeFileSync(delivery, "repaired delivery artifact after every historical finding\n");
   const fixedFindingArgs = () => Array.from({ length: 11 }, (_, index) => "--finding-json")
     .flatMap((flag, index) => [flag, JSON.stringify({ id: `finding-${index + 1}`, severity: "high", status: "fixed", description: `Repair ${index + 1} verified.` })]);
-  await workflowSidecarMain([
+  await recordRuntimeReviewerCritique([
     "record-critique", session.sessionDir,
     "--id", "independent-repair-observation", "--reviewer", "independent-repair-reviewer", "--verdict", "pass",
     "--summary", "Independent repair observation passed.", "--artifact-ref", delivery, "--lane-json", lane("pass"),
     ...fixedFindingArgs(), "--timestamp", "2026-07-19T10:11:00.000Z",
   ]);
-  await workflowSidecarMain([
+  await recordRuntimeReviewerCritique([
     "record-critique", session.sessionDir,
     "--id", "final-migration-review", "--reviewer", "final-independent-reviewer", "--verdict", "pass",
     "--summary", "Final independent repair review passed.", "--artifact-ref", delivery, "--lane-json", lane("pass"),

@@ -115,6 +115,16 @@ unresolved `NOT_VERIFIED` gaps. A clean critique satisfies the declared
 `clean-critique` expectation, but it is not test evidence, does not satisfy
 `tests-evidence`, and does not independently advance a Flow run.
 
+Builder requires `runtime-derived` reviewer assurance for `clean-critique`.
+Run the reviewer in its own runtime session, such as a delegated agent with its
+own runtime session id, with `FLOW_AGENTS_ACTOR` unset. A `FLOW_AGENTS_ACTOR`
+override is `self_declared` (`caller-asserted`) and cannot record a passing
+critique; an in-session subagent that shares the implementer's runtime session
+id is `same-session` and is refused. Never set `FLOW_AGENTS_ACTOR` in the
+implementing process to stand in for a reviewer. If no separate reviewer
+runtime is available, the independent review is `NOT_VERIFIED`: leave the
+verify gate blocked and report the gap.
+
 Runtime actor separation is a coordination guarantee, not cryptographic
 attestation. When repository policy requires an externally attested reviewer
 credential and the runtime cannot provide one, record reviewer identity as

@@ -30,10 +30,19 @@ trap cleanup EXIT
 _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
+# #1092: the holder and the reviewer are distinct runtime sessions. The holder keeps a
+# FLOW_AGENTS_ACTOR alias as its coordination identity; the reviewer runs with no alias, because
+# Builder's clean-critique gate requires a runtime-derived reviewer outside the holder's session.
 run_public() {
   local actor="$1"
   shift
-  (cd "$PROJECT" && FLOW_AGENTS_ACTOR="$actor" node "$ROOT/build/src/cli.js" workflow "$@")
+  (cd "$PROJECT" && FLOW_AGENTS_ACTOR="$actor" CLAUDE_CODE_SESSION_ID="${actor}-session" node "$ROOT/build/src/cli.js" workflow "$@")
+}
+
+run_reviewer() {
+  local session="$1"
+  shift
+  (cd "$PROJECT" && env -u FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID="$session" node "$ROOT/build/src/cli.js" workflow "$@")
 }
 
 echo ""
@@ -91,7 +100,7 @@ git -C "$PROJECT" add checks/wedge-1164.test.mjs
 git -C "$PROJECT" commit -qm "add final public evidence command"
 TEST_COMMAND="node --test checks/wedge-1164.test.mjs"
 
-if run_public wedge-reviewer critique --session-dir "$SESSION" --id wedge-review --verdict pass \
+if run_reviewer wedge-reviewer-session critique --session-dir "$SESSION" --id wedge-review --verdict pass \
   --summary "Independent review is clean before verifier evidence." \
   --artifact-ref "$SESSION/$SLUG--deliver.md" \
   --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Fixture review completed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION/$SLUG--deliver.md\",\"summary\":\"Reviewed fixture delivery artifact.\"}]}" \

@@ -21,6 +21,7 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 import { flowAgentsPackageMetadataRelativePath, flowAgentsPackageRoot } from "./lib/package-version.js";
 import { resolveKitFlowBinding, kitFlowSourceRoots, type KitFlowBinding } from "./lib/kit-flow-binding.js";
+import { REVIEWER_ASSURANCE_LEVELS, type ReviewerAssuranceLevel } from "./lib/reviewer-assurance.js";
 
 const MAX_METADATA_BYTES = 1_048_576;
 const MAX_ENVELOPE_BYTES = 65_536;
@@ -303,6 +304,29 @@ export function declaredStepBindsInterface(
   } catch {
     return false;
   }
+}
+
+/**
+ * #1092: the minimum reviewer assurance the declaring kit requires for a passing critique at
+ * `stepId`, or `null` when its `workflow.critique` binding declares none. The policy is the kit's;
+ * the engine only records how each reviewer identity was established and compares.
+ *
+ * A flow no installed kit declares has no kit policy, so the gate engine stays usable without a
+ * kit. A declaring kit whose metadata cannot be read or parsed throws, so a gate that consults it
+ * fails closed instead of treating a broken kit as one without a requirement.
+ */
+export function declaredCritiqueReviewerAssurance(definitionId: string, stepId: string, projectRoot?: string): ReviewerAssuranceLevel | null {
+  if (!resolveKitFlowBinding(definitionId, kitFlowSourceRoots(flowAgentsPackageRoot(), projectRoot))) return null;
+  const { manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
+  const parsed = parseKitFlowStepActions(kit, manifestRef);
+  if (parsed.errors.length) throw new Error(`could not resolve the kit declaration for ${definitionId}: ${parsed.errors.join("; ")}`);
+  const required = parsed.entries
+    .filter((entry) => entry.flow_id === definitionId && entry.step_id === stepId)
+    .flatMap((entry) => entry.expectation_bindings)
+    .flatMap((binding) => binding.interface === "workflow.critique" && binding.reviewer_assurance ? [binding.reviewer_assurance] : []);
+  if (required.length === 0) return null;
+  // Several critique bindings at one step: the strictest wins.
+  return required.reduce((strictest, level) => REVIEWER_ASSURANCE_LEVELS.indexOf(level) > REVIEWER_ASSURANCE_LEVELS.indexOf(strictest) ? level : strictest);
 }
 
 /**

@@ -118,7 +118,7 @@
       "artifacts": ["trust.bundle#critique", "trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"],
       "expectation_ids": ["clean-critique", "acceptance-criteria", "tests-evidence", "policy-compliance"],
       "expectation_bindings": [
-        { "expectation_id": "clean-critique", "interface": "workflow.critique" },
+        { "expectation_id": "clean-critique", "interface": "workflow.critique", "reviewer_assurance": "runtime-derived" },
         { "expectation_id": "acceptance-criteria", "interface": "workflow.evidence" },
         { "expectation_id": "tests-evidence", "interface": "workflow.evidence" },
         { "expectation_id": "policy-compliance", "interface": "workflow.evidence" }
@@ -227,7 +227,7 @@
       "artifacts": ["trust.bundle#critique", "trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"],
       "expectation_ids": ["clean-critique", "acceptance-criteria", "tests-evidence", "policy-compliance"],
       "expectation_bindings": [
-        { "expectation_id": "clean-critique", "interface": "workflow.critique" },
+        { "expectation_id": "clean-critique", "interface": "workflow.critique", "reviewer_assurance": "runtime-derived" },
         { "expectation_id": "acceptance-criteria", "interface": "workflow.evidence" },
         { "expectation_id": "tests-evidence", "interface": "workflow.evidence" },
         { "expectation_id": "policy-compliance", "interface": "workflow.evidence" }
@@ -316,7 +316,7 @@
       "artifacts": ["trust.bundle#critique", "trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"],
       "expectation_ids": ["clean-critique", "acceptance-criteria", "tests-evidence", "policy-compliance"],
       "expectation_bindings": [
-        { "expectation_id": "clean-critique", "interface": "workflow.critique" },
+        { "expectation_id": "clean-critique", "interface": "workflow.critique", "reviewer_assurance": "runtime-derived" },
         { "expectation_id": "acceptance-criteria", "interface": "workflow.evidence" },
         { "expectation_id": "tests-evidence", "interface": "workflow.evidence" },
         { "expectation_id": "policy-compliance", "interface": "workflow.evidence" }
@@ -361,7 +361,7 @@
       "artifacts": ["trust.bundle#critique", "trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"],
       "expectation_ids": ["clean-critique", "acceptance-criteria", "tests-evidence", "policy-compliance"],
       "expectation_bindings": [
-        { "expectation_id": "clean-critique", "interface": "workflow.critique" },
+        { "expectation_id": "clean-critique", "interface": "workflow.critique", "reviewer_assurance": "runtime-derived" },
         { "expectation_id": "acceptance-criteria", "interface": "workflow.evidence" },
         { "expectation_id": "tests-evidence", "interface": "workflow.evidence" },
         { "expectation_id": "policy-compliance", "interface": "workflow.evidence" }

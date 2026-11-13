@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { PUBLIC_OPERATION_IDS } from "../cli/public-contracts.js";
+import { isReviewerAssuranceLevel, REVIEWER_ASSURANCE_LEVELS, type ReviewerAssuranceLevel } from "../lib/reviewer-assurance.js";
 
 export interface KitFlowStepActionEntry {
   flow_id: string;
@@ -17,6 +18,8 @@ export type KitFlowStepExpectationBinding = {
   expectation_id: string;
   interface: "workflow.evidence" | "workflow.critique" | "operation";
   operation?: string;
+  /** #1092: the minimum reviewer assurance a `workflow.critique` binding accepts for a passing critique. */
+  reviewer_assurance?: ReviewerAssuranceLevel;
 };
 
 export type KitFlowStepArtifactBinding = { artifact: string; expectation_ids: string[] };
@@ -133,13 +136,16 @@ function parseExpectationBindings(value: unknown, operations: string[], manifest
   for (const [bindingIndex, entry] of value.entries()) {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].expectation_bindings[${bindingIndex}] must be an object`);
     const record = entry as Record<string, unknown>;
-    const unsupported = Object.keys(record).filter((key) => key !== "expectation_id" && key !== "interface" && key !== "operation");
+    const unsupported = Object.keys(record).filter((key) => key !== "expectation_id" && key !== "interface" && key !== "operation" && key !== "reviewer_assurance");
     if (unsupported.length) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].expectation_bindings[${bindingIndex}] has unsupported field(s): ${unsupported.join(", ")}`);
     if (!workflowTriggerIdentifier(record.expectation_id) || !new Set(["workflow.evidence", "workflow.critique", "operation"]).has(String(record.interface))) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].expectation_bindings[${bindingIndex}] must declare a valid expectation_id and interface`);
     if (record.interface === "operation") {
       if (!workflowTriggerIdentifier(record.operation) || !operations.includes(record.operation) || !PUBLIC_OPERATION_IDS.has(record.operation)) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].expectation_bindings[${bindingIndex}].operation must name a declared canonical public operation`);
     } else if (record.operation !== undefined) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].expectation_bindings[${bindingIndex}].operation is allowed only for operation bindings`);
-    bindings.push({ expectation_id: record.expectation_id as string, interface: record.interface as KitFlowStepExpectationBinding["interface"], ...(typeof record.operation === "string" ? { operation: record.operation } : {}) });
+    if (record.reviewer_assurance !== undefined && (record.interface !== "workflow.critique" || !isReviewerAssuranceLevel(record.reviewer_assurance))) {
+      return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].expectation_bindings[${bindingIndex}].reviewer_assurance is allowed only for workflow.critique bindings and must be one of: ${REVIEWER_ASSURANCE_LEVELS.join(", ")}`);
+    }
+    bindings.push({ expectation_id: record.expectation_id as string, interface: record.interface as KitFlowStepExpectationBinding["interface"], ...(typeof record.operation === "string" ? { operation: record.operation } : {}), ...(isReviewerAssuranceLevel(record.reviewer_assurance) ? { reviewer_assurance: record.reviewer_assurance } : {}) });
   }
   if (new Set(bindings.map((binding) => binding.expectation_id)).size !== bindings.length) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].expectation_bindings must not duplicate expectation ids`);
   return bindings;

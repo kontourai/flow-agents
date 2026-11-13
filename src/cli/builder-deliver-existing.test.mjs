@@ -111,9 +111,21 @@ function makeExistingChange(number) {
   };
 }
 
+/**
+ * The holder identifies itself with FLOW_AGENTS_ACTOR (coordination). The reviewer runs as a
+ * separate runtime session with no override: Builder's clean-critique requires runtime-derived
+ * reviewer assurance, so a FLOW_AGENTS_ACTOR reviewer cannot pass (#1092).
+ */
+function actorEnv(actor, env) {
+  if (actor !== REVIEWER) return { ...process.env, FLOW_AGENTS_ACTOR: actor, ...env };
+  const base = { ...process.env };
+  for (const name of ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID"]) delete base[name];
+  return { ...base, CLAUDE_CODE_SESSION_ID: REVIEWER, ...env };
+}
+
 function workflow(fx, args, actor = HOLDER, env = {}) {
   const result = spawnSync(process.execPath, [CLI, "workflow", ...args], {
-    cwd: fx.project, encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actor, ...env },
+    cwd: fx.project, encoding: "utf8", env: actorEnv(actor, env),
   });
   return { status: result.status, output: `${result.stdout}\n${result.stderr}`, stdout: result.stdout };
 }

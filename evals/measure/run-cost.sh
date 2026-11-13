@@ -118,8 +118,9 @@ ev implementation-plan "$D/$SLUG--plan-work.md"
 printf '# Delivery\n' > "$REPO/$D/$SLUG--deliver.md"
 ev implementation-scope "$D/$SLUG--deliver.md"
 
+# #1092: the reviewer is a separate runtime session, not a FLOW_AGENTS_ACTOR relabel.
 crit() {
-  (cd "$REPO" && FLOW_AGENTS_ACTOR=cost-reviewer node "$CLI" workflow critique --session-dir "$D" \
+  (cd "$REPO" && CLAUDE_CODE_SESSION_ID=cost-reviewer node "$CLI" workflow critique --session-dir "$D" \
      --id cost-review --verdict pass --summary 'Independent review clean.' \
      --artifact-ref "$D/$SLUG--deliver.md" \
      --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$D/$SLUG--deliver.md\",\"summary\":\"Delivery\"}]}" \

@@ -409,10 +409,63 @@ single final `## Verification Evidence` appendix without another source review. 
 unowned reports, the execution prefix, accepted plan, criterion identity and live scope claims
 remain review subjects. Ambiguous markers and malformed role metadata fail closed.
 
-Current local runtime actor IDs provide coordination-level separation, not a
-cryptographic identity guarantee. A policy that requires externally attested
-reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
-supplies a trusted delegation credential.
+### Reviewer assurance
+
+Each critique records the inputs of its reviewer assurance in
+`metadata.reviewer_assurance`, which appears in `trust.bundle` and in the
+canonical Flow manifest that embeds it:
+
+```json
+{
+  "reviewer": { "session_ref": "<reviewer actor key>", "session_ref_source": "runtime_derived", "resolved_by": "runtime-session-id:codex" },
+  "implementer": { "session_ref": "<holder runtime session>", "session_ref_source": "runtime_derived", "resolved_by": "runtime-session-id:codex", "coordination_ref": "<assignment actor key>", "held_by_session_refs": ["<holder runtime session>"] }
+}
+```
+
+`session_ref_source` says how each identity was established:
+
+| `session_ref_source` | Established by | Assurance level |
+| --- | --- | --- |
+| `self_declared` | A name the caller chose: a `FLOW_AGENTS_ACTOR` override, or a reviewer label passed to the sidecar writer | `caller-asserted` |
+| `runtime_derived` | The runtime session id, the CI job identity, or process ancestry | `runtime-derived` |
+
+The implementer's `session_ref` is the runtime session recorded on its
+assignment claim (`runtime_session_ref`), not its `actor_key`: an assignment
+held under a `FLOW_AGENTS_ACTOR` label keeps that label only as
+`coordination_ref`, and `held_by_session_refs` lists every runtime session that
+has held the claim. The gate computes the relation between reviewer and
+implementer from these inputs. It is `same-session` when the reviewer's session
+matches the implementer's or any session that has held the claim, and
+`undetermined` otherwise. An implementer that drops its label keeps its runtime
+session, so it is still `same-session`. A claim recorded without a runtime
+session (claimed before this was recorded, or from no runtime-derived source)
+leaves separation undetermined, and a passing critique is refused until the
+holder re-claims the assignment from its own runtime session. The shape follows the producer–verifier relation
+proposed in [hachure-org/spec#37](https://github.com/hachure-org/spec/issues/37).
+Neither source is receipt-backed, so the relation is never `independent`.
+
+A kit can require a minimum level on its `workflow.critique` binding
+(`expectation_bindings[].reviewer_assurance` in `kit.json`). Every Builder flow
+requires `runtime-derived` for `clean-critique`. `workflow critique` refuses a
+`same-session` reviewer and a passing review below that level. The verify gate
+recomputes both from the record and rejects any current critique that fails
+either, including one written before the inputs were recorded.
+`FLOW_AGENTS_ACTOR` still names the actor for assignment, coordination, and
+liveness. It does not make a process an independent reviewer.
+
+Record the review from a separate reviewer runtime session: a delegated agent
+or new session with its own runtime session id and `FLOW_AGENTS_ACTOR` unset.
+An in-session subagent that shares the implementer's runtime session id is
+`same-session`. If no separate reviewer runtime is available, the independent
+review is `NOT_VERIFIED`. Leave the verify gate blocked and report the gap; do
+not rename the implementing process.
+
+`runtime-derived` is coordination-level separation, not authentication. A
+process that rewrites its runtime session variables can still impersonate
+another session. No Flow Agents runtime issues an authenticated delegation
+credential or an externally attested reviewer identity today, so nothing
+records or computes either. A policy that requires one must keep that
+assurance `NOT_VERIFIED`.
 
 ## Review and verify an existing change
 
@@ -660,14 +713,15 @@ gates. Three things differ:
   `merge-change`. Adoption itself only observes.
 
 At `verify`, record a critique from a reviewer whose runtime identity differs from the assignment
-holder's, and command-backed `tests-evidence` bound to the acceptance criterion. `FLOW_AGENTS_ACTOR`
-names the reviewer's identity where identities are assigned explicitly; it must be a different
-reviewer, not a relabeled holder:
+holder's, and command-backed `tests-evidence` bound to the acceptance criterion. The reviewer runs
+in its own runtime session with `FLOW_AGENTS_ACTOR` unset: Builder requires `runtime-derived`
+reviewer assurance, so a `FLOW_AGENTS_ACTOR` override cannot record a passing critique (see
+[Reviewer assurance](#reviewer-assurance)). From the reviewer's session:
 
 ```bash
 S=.kontourai/flow-agents/kontourai-target-repository-123
 R="$S/kontourai-target-repository-123--existing-change.md"
-FLOW_AGENTS_ACTOR=existing-change-reviewer flow_agents workflow critique \
+flow_agents workflow critique \
   --session-dir "$S" --id existing-review --verdict pass \
   --summary "Independent review of the existing change at the pinned head." \
   --artifact-ref "$R" \
