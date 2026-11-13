@@ -12,6 +12,11 @@ do the work. The flow declares what must be true when you are done, hooks observ
 happens, and the Stop hook tells you exactly what is still unmet. You do not submit evidence or
 drive workflow state. Decision record: `docs/decisions/observe-mode.md`.
 
+## Outputs
+
+This step produces two artifacts, as files the gate reads: `<slug>--plan-work.md` and
+`acceptance.json`. Their expectations are derived by the harness, not submitted.
+
 ## Binding
 
 | Context | Binding | Flow expectations |
