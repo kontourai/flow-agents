@@ -238,7 +238,12 @@
     "./memory-recall": {
       "types": "./kits/knowledge/context-check/memory-recall.d.ts",
       "import": "./kits/knowledge/context-check/memory-recall.js"
-    }
+    },
+    "./learning-review-proposals": {
+      "types": "./kits/knowledge/learn/learning-review-proposals.d.ts",
+      "import": "./kits/knowledge/learn/learning-review-proposals.js"
+    },
+    "./schemas/learning-review-proposals.schema.json": "./scripts/telemetry/learning-review-proposals.schema.json"
   },
   "repository": {
     "type": "git",
@@ -408,6 +413,7 @@
     "@kontourai/corpus-store": "0.1.0-next.5",
     "@kontourai/forage": "1.0.2",
     "@kontourai/lookout": "0.8.9",
+    "@kontourai/surface-legacy": "npm:@kontourai/surface@5.0.0",
     "@kontourai/veritas": "1.12.2",
     "@types/node": "^26.6.6",
     "ajv": "8.20.0",

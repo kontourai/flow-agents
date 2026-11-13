@@ -40,6 +40,8 @@ assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && 
 // byte-identical between surface v5.0.0 and v6.3.0; src/types.ts only widens SchemaVersion to 9
 // and adds retention, evidence-collector and stale-reason types.
 // Every behavior assertion above passed on 6.3.0 before this pin moved.
+// Knowledge and the shared workflow both pin Surface 6.3.0; historical bundle
+// readers still select the stored status-function version.
 // Lookout 0.8.9 requires acquisition's exact snapshot store and the recorder's
 // last extracted reference. The reference now uses Forage's real in-memory
 // store/ref builder/resolver and Lookout's extractedSnapshotRef contract.

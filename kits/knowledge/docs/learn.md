@@ -76,10 +76,22 @@ role.
 | `--all-projects` | off | Read every project, not just this repository (see above). |
 | `--infer-human` | off | Let a model judge whether `unknown`-origin turns were typed by a person (see below). |
 | `--transcripts DIR` | the two harness directories | Repeatable. Every `*.jsonl` below it is read; symlinks are not followed. |
-| `--ledger PATH` | `$LEARNING_REVIEW_PROPOSALS_LEDGER`, else `<main checkout>/.kontourai/telemetry/learning-review-proposals.jsonl` | The contract's ledger. |
+| `--ledger PATH` | `$LEARNING_REVIEW_PROPOSALS_LEDGER`, else `<$TELEMETRY_DATA_DIR or main checkout>/.kontourai/telemetry/learning-review-proposals.jsonl` | The contract's ledger. |
+| `--print-ledger-path` | off | Print the ledger path this run would use and exit, without reading any transcript. |
 | `--rules-file PATH` | `AGENTS.md`, else `CLAUDE.md`, at the worktree root | The file proposals target and are judged against. A symlink is followed to a regular file you own that no other user can write. |
 | `--min-occurrences`, `--min-sessions`, `--min-high-pain` | 5, 3, 2 | The thresholds below. |
 | `--json` | off | Print the contract document instead of the summary. |
+
+| Environment | Meaning |
+| --- | --- |
+| `LEARNING_REVIEW_PROPOSALS_LEDGER` | The ledger file. A relative path resolves against the main checkout (against the current directory with `--all-projects`). |
+| `TELEMETRY_DATA_DIR` | When the ledger is not set directly, the directory whose `.kontourai/telemetry/` holds it, instead of the main checkout. A relative path resolves the same way. |
+| `LEARNING_REVIEW_LOCK_TIMEOUT_MS` | How long a ledger writer waits for the lock (default 10000). |
+
+Another program that shows or reads the ledger (a dashboard, a review console) should resolve and
+read it through `@kontourai/flow-agents/learning-review-proposals`
+(`resolveLearningReviewLedger`, `readLearningReviewLedger`), which is the same code this command
+uses. See [Reading the ledger](../../../docs/specs/learning-review-proposals-contract.md#reading-the-ledger-from-another-program).
 
 Exit codes: 0 ran (including a dry run and too little history), 1 failed (including a ledger
 another writer holds, or one whose decisions changed during the run), 2 usage or configuration

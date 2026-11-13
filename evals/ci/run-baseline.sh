@@ -19,7 +19,7 @@ CHECKS=(
   "Context map drift|npm run context-map -- --check"
   "Capability matrix drift|npm run capability-matrix -- --check"
   "Host conformance drift|npm run host-conformance:check --"
-  "Static eval suite|bash evals/run.sh static"
+  "Static eval suite|node scripts/ci/readiness-source.mjs && npx --no @kontourai/veritas readiness --changed-from origin/main --changed-to HEAD"
   "Codex PR review action|node --test evals/ci/codex-pr-review-action.test.mjs"
   "Installed kit execution unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/kit-execution.test.mjs src/cli/installed-kit-run-binding.test.mjs"
   "Host adapter unit tests|node --test --import ./src/cli/unit-test-state.mjs integrations/codex-host/test/host-adapters.test.mjs integrations/codex-host/test/provider-budget.test.mjs"

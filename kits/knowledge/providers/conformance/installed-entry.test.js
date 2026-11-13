@@ -103,12 +103,10 @@ test("standalone Knowledge projection accepts erasure-capable Surface and reject
     result = runLiving(true);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
 
-    // An older Surface (before 6.3.0) has no deletion or derived-visibility API. Stand one in
-    // with the export the projection would otherwise use, so the refusal is what is tested.
     rmSync(publicName);
-    mkdirSync(publicName);
-    writeFileSync(join(publicName, "package.json"), JSON.stringify({ name: "@kontourai/surface", version: "5.0.0", type: "module", exports: "./index.js" }));
-    writeFileSync(join(publicName, "index.js"), "export class TrustBundleBuilder {}\n");
+    // Keep the real pre-upgrade release (exact dev-only package, never a runtime fallback) as
+    // the negative control: it has no deletion or derived-visibility API.
+    symlinkSync(packageRoot("@kontourai/surface-legacy"), publicName, "junction");
     result = run(false);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
     result = runLiving(false);

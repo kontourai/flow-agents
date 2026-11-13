@@ -30,7 +30,9 @@ import { modelJudge } from "./judge.js";
 import { learnError, toolInvoker } from "./model.js";
 import { DEFAULT_THRESHOLDS, SOURCE_FAMILY } from "./propose.js";
 import { DEFAULT_SINCE_DAYS, runLearn } from "./run.js";
-import { repoScope } from "./scope.js";
+import { defaultLedger, resolveLedgerTarget } from "./ledger.js";
+
+export { defaultLedger };
 import { defaultTranscriptRoots } from "./sessions.js";
 
 const CONFIGURATION_CODES = new Set([
@@ -38,7 +40,7 @@ const CONFIGURATION_CODES = new Set([
   "DREAM_CONFIG_INVALID", "DREAM_MODEL_UNCONFIGURED", "DREAM_MODEL_UNAVAILABLE", "DREAM_MODEL_UNSUPPORTED",
 ]);
 const DAY_MS = 86_400_000;
-const USAGE = "usage: flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--all-projects] [--infer-human] [--transcripts DIR]... [--ledger PATH] [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]";
+const USAGE = "usage: flow-agents learn [--since 30d|YYYY-MM-DD|ISO] [--dry-run] [--json] [--all-projects] [--infer-human] [--print-ledger-path] [--transcripts DIR]... [--ledger PATH] [--rules-file PATH] [--role NAME] [--min-occurrences N] [--min-sessions N] [--min-high-pain N]";
 
 /** `30d`, `YYYY-MM-DD` (UTC midnight) or a full ISO-8601 timestamp. Anything else is refused. */
 export function parseSince(value, nowMs) {
@@ -61,6 +63,7 @@ export function parseArgs(argv, nowMs = Date.now()) {
     else if (flag === "--json") out.json = true;
     else if (flag === "--all-projects") out.allProjects = true;
     else if (flag === "--infer-human") out.inferHuman = true;
+    else if (flag === "--print-ledger-path") out.printLedgerPath = true;
     else if (flag === "-h" || flag === "--help") out.help = true;
     else if (["--since", "--transcripts", "--ledger", "--rules-file", "--role", ...Object.keys(NUMERIC)].includes(flag)) {
       const value = argv[(i += 1)];
@@ -80,11 +83,6 @@ export function parseArgs(argv, nowMs = Date.now()) {
   return out;
 }
 
-export function defaultLedger(env = process.env, cwd = process.cwd()) {
-  return env.LEARNING_REVIEW_PROPOSALS_LEDGER
-    ? path.resolve(env.LEARNING_REVIEW_PROPOSALS_LEDGER)
-    : path.join(env.TELEMETRY_DATA_DIR ? path.resolve(env.TELEMETRY_DATA_DIR) : cwd, ".kontourai", "telemetry", "learning-review-proposals.jsonl");
-}
 
 /** AGENTS.md, else CLAUDE.md, in `dir` (a symlink to a file counts; readRulesFile then checks its target). */
 export function defaultRulesFile(dir = process.cwd()) {
@@ -145,18 +143,21 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       stdout.write(`${USAGE}\n`);
       return 0;
     }
+    // One resolver for the CLI and for `@kontourai/flow-agents/learning-review-proposals` (ledger.js).
+    const target = resolveLedgerTarget({ cwd, env, allProjects: args.allProjects });
+    const ledgerPath = args.ledger ?? target.ledgerPath;
+    if (args.printLedgerPath) {
+      stdout.write(`${ledgerPath}\n`);
+      return 0;
+    }
     const roots = args.transcripts.length ? args.transcripts : defaultTranscriptRoots(env);
     if (roots.length === 0) throw learnError("LEARN_CONFIG_INVALID", "no transcript directory found (~/.claude/projects, ~/.codex/sessions); pass --transcripts DIR");
     for (const root of roots) {
       if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw learnError("LEARN_CONFIG_INVALID", `transcript directory not found: ${root}`);
     }
-    let scope;
+    const scope = target.scope;
     if (args.allProjects) {
-      scope = { kind: "all-projects" };
       stderr.write("WARNING: --all-projects reads sessions from every repository on this machine; excerpts of corrections made in other repositories will be written into this repository's ledger.\n");
-    } else {
-      scope = repoScope(cwd);
-      if (!scope) throw learnError("LEARN_NOT_A_REPOSITORY", `${cwd} is not inside a Git repository; run flow-agents learn in the repository to learn for, or pass --all-projects`);
     }
     const rulesFile = args.rulesFile ?? defaultRulesFile(scope.kind === "repo" ? scope.root : cwd);
     let invoke;
@@ -167,8 +168,8 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     }
     const document = await runLearn({
       roots,
-      // The default ledger is at the repository's main checkout, shared by all of its worktrees (see scope.js).
-      ledgerPath: args.ledger ?? defaultLedger(env, scope.kind === "repo" ? scope.ledgerRoot : cwd),
+      // The default ledger is at the repository's main checkout, shared by all of its worktrees (ledger.js).
+      ledgerPath,
       inferHuman: args.inferHuman,
       sinceMs: args.sinceMs,
       nowMs,

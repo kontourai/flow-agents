@@ -141,6 +141,25 @@ with about two more seconds for finalization and upload. Combining those
 measurements projects roughly 15m24s, leaving about 14m36s under the new limit.
 This is a budget estimate, not proof that the repaired head passes hosted CI.
 
+## Pinned readiness
+
+The existing `Static eval suite` check in Source and Static records the installed
+Veritas version and compared Git commits, then runs readiness for `origin/main..HEAD`
+with the exact repository pin (1.12.2). Its unchanged required evidence command,
+`npm run eval:static`, executes the static suite once. The check ID, lane,
+30-minute job limit and 20-minute evidence limit remain unchanged; no runner or
+schedule is added. Registration checks follow the exact CLI, Repo Map and npm
+script chain and reject altered routes and known duplicate shell, npm or Veritas
+entries. Other wrappers still require source review.
+
+The existing Source and Static artifact also retains Veritas's generated evidence,
+including the static check's output. A pull-request checkout is GitHub's merge
+tree: its resolved HEAD is recorded separately from the PR head. A passing result
+applies to that checkout. The separately pinned shared advisory
+still runs Veritas 1.11.2; its result does not substitute for the installed pin.
+On a main push, `origin/main` may equal `HEAD`: the full static suite still runs,
+but the changed-file scope may be empty and does not qualify the pushed delta.
+
 ## Cancellation
 
 CI, Docs, Kit Gates Demo, Runtime Compatibility and Veritas advisory each cancel

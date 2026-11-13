@@ -273,6 +273,7 @@ are checked against the runtime exports by `src/cli/memory-host-subpaths.test.mj
 | `@kontourai/flow-agents/memory-marker` | `INJECTED_MEMORY_OPEN`, `INJECTED_MEMORY_CLOSE` | The markers that wrap injected memory, so a transcript reader can skip it instead of ingesting it as new memory. |
 | `@kontourai/flow-agents/memory-brief` | `compileBrief`, `rankItems`, `classifyCurrent`, `effectiveItems`, `isSealed`, `writeBriefs` and the budget defaults | Rank eligible claims with `rankItems`, then pass them to `compileBrief`; its byte budget covers joined display entries, not the serialized JSON. `writeBriefs` combines these steps. |
 | `@kontourai/flow-agents/memory-recall` | `recallMemoryClaims` | Select lexical matches and passages from claim excerpts, with labels, missing terms and abstention reasons. An `answered` result does not establish semantic answer correctness. |
+| `@kontourai/flow-agents/learning-review-proposals` | `resolveLearningReviewLedger`, `readLearningReviewLedger`, `validateLedgerLine`, `ledgerLineSchema`, `ledgerDocumentSchema`, `defaultLedger`, `scopeKey`, `scopeTag` and the proposal types | The supported way to find and read the learning-review-proposals ledger without the lock: it resolves the ledger exactly as `flow-agents learn` does (the CLI calls the same function) and reads every line as a typed entry or a typed gap. The document schema is also exported as `@kontourai/flow-agents/schemas/learning-review-proposals.schema.json`. It does not write, decide, or take the ledger lock. |
 
 The host must pass only claims the reader is authorized to see and supply trusted review and routing records. These helpers do not authenticate callers or enforce restricted-audience membership. Ranking and recall exclude sealed claims; `compileBrief` expects already-ranked inputs. `rankItems` uses `now` for ranking, while `classifyCurrent` has no as-of input.
 Recall's current, contested and superseded labels use the brief's local rules. They are not Surface's protected accumulation projection; the authority input needed for that projection is tracked in flow-agents#1586.
@@ -387,11 +388,15 @@ re-derives a stored bundle (the stop gate, the CI reconciler, `workflow-sidecar 
 the trust panel, the checkpoint seal, the Console trust projection and the narrative
 explanation reader) uses the version the bundle's writer stamped, through
 `scripts/lib/status-function-version.js`, so a bundle written under `"2"` or `"3"`
-keeps the status it recorded. Recall requires Surface 6.3.0 or later with derived
+keeps the status it recorded, subject to the historical v2 compatibility refusal
+described in the trust-reconcile decision; an unsupported stamp is still refused. Recall requires Surface 6.3.0 or later with derived
 visibility; a standalone Kit refuses an older Surface that lacks the deletion API.
 Survey is pinned to 9.0.0.
 Relay's optional SDK import and the engine-host's own integration imports are
-bound to packaged code instead of an ambient npm installation.
+bound to packaged code instead of an ambient npm installation. The optional
+Anthropic SDK range starts at 1.7.0; Relay retains its explicit zero-retry default,
+request abort signal and output-token limit. Dependency source inspection does not
+qualify provider execution or installed-runtime behavior.
 Flow's original schemas remain local to its vendor entry;
 packaging exposes its literal CommonJS imports to esbuild without changing the
 validators. A packaging-owned asset relocator reads the upstream validator's

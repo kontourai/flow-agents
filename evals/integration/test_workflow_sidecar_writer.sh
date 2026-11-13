@@ -3498,7 +3498,7 @@ NODEOF
   fi
 fi
 
-# Status function "3" conformance (#1422). The writer derives under Surface's default, "3", but
+# Status function "3" conformance (#1422). Surface 6 defaults to "4", but
 # the hachure reachable above (0.15, via @kontourai/flow) only carries "2" vectors. hachure 0.16.0's
 # vectors declare "3"; they are vendored as the unmodified npm tarball because
 # check:hachure-boundary forbids declaring hachure at all (see the fixture README). The tarball is
