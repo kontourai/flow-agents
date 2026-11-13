@@ -104,6 +104,15 @@ test("standalone Knowledge projection accepts ordinary erasure-capable Surface a
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
     rmSync(publicName);
     symlinkSync(packageRoot("@kontourai/surface"), publicName, "junction");
+    result = run(true);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+    result = runLiving(true);
+    assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
+
+    // Keep the real pre-upgrade release as a negative control after the direct
+    // pin advances. The exact dev-only alias is never a runtime fallback.
+    rmSync(publicName);
+    symlinkSync(packageRoot("@kontourai/surface-legacy"), publicName, "junction");
     result = run(false);
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
     result = runLiving(false);

@@ -3,6 +3,56 @@
   "repository": "kontourai/flow-agents",
   "reviews": [
     {
+      "id": "dependabot-pnpm611-ci-compute",
+      "reviewedAt": "2026-11-13T01:55:02.669836+00:00",
+      "note": "Reviewed the complete CI compute guide, the four changed workflow byte streams, the static baseline command, its registration audit, the identity preamble, package scripts and the unchanged Repo Map. Complete byte comparison to main proves only the eleven pnpm 6.1.1 pins and the explicit Source and Static evidence artifact paths/hidden-file option change the workflows. The existing static check now invokes pinned 1.12.2 readiness; its unchanged sole required npm static command runs the full suite once. All check IDs, lanes, runner expansion, permissions, checkout identities, time limits, reusable pins and per-ref cancellation remain unchanged. The guide now distinguishes merge-checkout evidence from PR-head identity and the separate 1.11.2 advisory. The reviewed registration refusal now also recognizes duplicate npm and bare Veritas aliases; arbitrary wrapper transitivity still requires source review. Main-push empty diff scope remains disclosed.",
+      "limits": "Source/document byte review and bounded route controls only; full pinned-CLI readiness and all original lanes still require actual hosted execution at the new candidate. No provider, native, deployment or publication acceptance.",
+      "inputs": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "sha256": "4f42b6fea05964ed96055d45a672a70dc5f1a4ad276c76fd80a3ea1544399322"
+        },
+        {
+          "path": ".github/workflows/kit-gates-demo.yml",
+          "sha256": "cc648d320126152f548a1b7270ea99f2670d0791f682819b7de032a5e64e609d"
+        },
+        {
+          "path": ".github/workflows/publish-npm.yml",
+          "sha256": "48d260cd21b04d4229d231052ecadf4f8c556a576d126e17deed87bdd34d3874"
+        },
+        {
+          "path": ".github/workflows/runtime-compat.yml",
+          "sha256": "3056de5bc3ccf051093974ec7dda1994808cc2ed2dcccda34273d6ce0ffbde56"
+        },
+        {
+          "path": "evals/ci/run-baseline.sh",
+          "sha256": "cb82ecee4dc2c28bc904cc71ec076b1d09967146a235b90690c1361437d14d87"
+        },
+        {
+          "path": "evals/static/test_ci_check_registration.sh",
+          "sha256": "1d0cf40228a7aff3aa45edbde7b0b0c8b6a23732787770a62acc01ba7dae6b26"
+        },
+        {
+          "path": "scripts/ci/readiness-source.mjs",
+          "sha256": "efe03365c4111cc9a5ae9ac4263b62190d9ecbe242e5ef28f53e237aed311363"
+        },
+        {
+          "path": "package.json",
+          "sha256": "0715470720565ef9a805889dac3626419228aa5d5eaeb11dd14a7de3ca505f83"
+        },
+        {
+          "path": ".veritas/repo-map.json",
+          "sha256": "0905682887e4e8c1ad97dd727c6530735ba9c823ac4a9b134e149fcf398f4896"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/ci-compute-budget.md",
+          "sha256": "5073ee246ba28408edce7a6a50ed96c943543f1fc54e3b0dce2c65b8a8034d89"
+        }
+      ]
+    },
+    {
       "id": "builder-assurance-architecture-engine-and-kits",
       "reviewedAt": "2026-11-13T00:00:00Z",
       "note": "kits/builder/kit.json adds reviewer_assurance to its four workflow.critique expectation bindings, and src/flow-kit/action-metadata.ts accepts that field only on workflow.critique bindings with a known level. This document describes the engine/kit split, the kit manifest's container and extension fields, and the shipped kits at the level of flows, skills and dependencies; it does not enumerate expectation-binding fields or gate evidence rules, so every statement in it remains accurate.",
@@ -104,7 +154,7 @@
       "outputs": [
         {
           "path": "docs/developer-architecture.md",
-          "sha256": "901f50ce6456af33ad14570e2668d1f40237f439ee883841c605ac1ad16a9c8c"
+          "sha256": "6ce5702e4c2cdb4ecee7bb421569cc387d341c1899e4badabc39d7389535ddb1"
         }
       ]
     }

@@ -522,7 +522,9 @@ Before starting:
    bash evals/ci/run-baseline.sh --manifest-json | jq '.[] | {id, command, lanes}'
    ```
 
-   In Flow Agents itself, `static-eval-suite` (`bash evals/run.sh static`) reaches
+   In Flow Agents itself, `static-eval-suite` records the installed Veritas version and
+   compared Git commits, then runs pinned readiness for `origin/main..HEAD`.
+   Its required `npm run eval:static` check reaches
    `evals/static/test_unit_helpers.sh`, which executes every `src/cli/*.test.mjs` file with
    the unit-state preload. This establishes CI coverage, but the shell suite does not expose
    a supported `tests-evidence` result protocol; declaration alone is insufficient for that claim.
