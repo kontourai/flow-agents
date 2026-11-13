@@ -440,7 +440,15 @@ matches the implementer's or any session that has held the claim, and
 session, so it is still `same-session`. A claim recorded without a runtime
 session (claimed before this was recorded, or from no runtime-derived source)
 leaves separation undetermined, and a passing critique is refused until the
-holder re-claims the assignment from its own runtime session. The shape follows the producer–verifier relation
+holder re-claims the assignment from its own runtime session. That is the normal
+state of an assignment an orchestrator acquired from its own process (#1648). The
+refusal names the exact recovery: from the worker's own runtime session, as the
+same actor, run `flow-agents assignment-provider claim --artifact-root <root>
+--subject-id <slug> --artifact-dir <slug> --branch <branch>`. In an observe run
+the worker's first command under Flow Agents hooks, its Stop, or `flow-agents
+observe verify` performs that re-claim automatically. The session is always
+derived from the calling process's own runtime environment and is never an input.
+The shape follows the producer–verifier relation
 proposed in [hachure-org/spec#37](https://github.com/hachure-org/spec/issues/37).
 Neither source is receipt-backed, so the relation is never `independent`.
 
