@@ -12,6 +12,8 @@ The package version versions these exports. Claim records independently carry `s
 
 Subject identity and optional `work_item_ref` are opaque in the core. Only the GitHub renderer requires an issue-shaped reference. The local provider retains its existing sanitized, 64-character filename mapping: hosts must select subject keys that do not collide under `sanitizeSegment`.
 
+Claim records may also carry the holder's runtime-derived session: `runtime_session_ref`, `runtime_session_source` and `runtime_session_refs`. The CLI's local writer records them only when the writing process is the holder. Builder's independent-review gate compares a reviewer against these, not against `actor_key`, which can be a coordination label. A host that writes records without them leaves reviewer separation undetermined, and a passing Builder critique is refused. See the [assignment provider contract](../context/contracts/assignment-provider-contract.md).
+
 Supply `AssignmentLivenessSource.freshHolders` from the host runtime. It returns only fresh holders, excludes the requesting actor, and uses canonical actor keys. `resolveEffectiveState` joins that reading with provider status: a live agent holds work, an absent agent makes it reclaimable, a human stays human-held, and absent assignment and liveness mean free. The stored `actor_key` takes precedence over re-serialized actor identity. Human-held work is never automatically eligible for takeover. `decideTakeover` returns eligibility and the required grace action; callers wait one heartbeat interval and re-read before superseding. The helper does not enforce a transaction or authorize a mutation. Builder retains when to claim/release and how to resume.
 
 ## Host selection remains a separate integration requirement

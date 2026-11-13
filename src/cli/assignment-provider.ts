@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagString, type ParsedArgs } from "../lib/args.js";
 import { readJson, isoNow } from "../lib/fs.js";
+import { sessionRefSourceForActorSource } from "../lib/reviewer-assurance.js";
 import {
   canonicalHolderActorKey,
   computeEffectiveState,
@@ -171,11 +172,37 @@ function loadActorStruct(args: ParsedArgs): { actor: ActorStruct; actorKey?: str
 }
 
 export function resolveCurrentAssignmentActor(): { actor: ActorStruct; actorKey: string } {
+  const { actor, actorKey } = resolveCurrentActorWithSource();
+  return { actor, actorKey };
+}
+
+/**
+ * #1092: the runtime-derived session of the CURRENT process, when that process is the holder
+ * `holderActorKey` names. Resolved with any FLOW_AGENTS_ACTOR override ignored, from the same
+ * sources a reviewer's runtime identity comes from (runtime session id, CI job, process ancestry).
+ * Returns undefined when the caller is not the holder (an operator reassigning to someone else) or
+ * no runtime-derived source resolves, so the record never claims a runtime session it did not see.
+ */
+export function resolveRuntimeSessionForHolder(holderActorKey: string): { ref: string; source: string } | undefined {
+  const helper = loadActorIdentityHelper();
+  const current = helper.resolveActorIdentity(process.env);
+  if (helper.isUnresolvedActor(current.actor) || current.actor !== holderActorKey) return undefined;
+  const runtime = helper.resolveActorIdentity({ ...process.env, FLOW_AGENTS_ACTOR: "" });
+  if (helper.isUnresolvedActor(runtime.actor) || sessionRefSourceForActorSource(runtime.source) !== "runtime_derived") return undefined;
+  return { ref: runtime.actor, source: runtime.source };
+}
+
+/**
+ * #1092: the current actor plus the resolver `source` that says how its identity was established
+ * (an explicit override or a runtime derivation). Kept separate so callers that serialize the
+ * actor do not publish the provenance field.
+ */
+export function resolveCurrentActorWithSource(): { actor: ActorStruct; actorKey: string; source: string } {
   const helper = loadActorIdentityHelper();
   const resolved = helper.resolveActorIdentity(process.env);
   if (helper.isUnresolvedActor(resolved.actor)) throw new Error("could not resolve an actor identity (no --actor-json and no resolvable environment actor); pass --actor-json explicitly");
   if (!resolved.actorStruct) throw new Error("actor identity resolved without a canonical actor struct");
-  return { actor: { ...resolved.actorStruct, human: resolved.actorStruct.human ?? null }, actorKey: resolved.actor };
+  return { actor: { ...resolved.actorStruct, human: resolved.actorStruct.human ?? null }, actorKey: resolved.actor, source: resolved.source };
 }
 
 function loadLivenessInputs(args: ParsedArgs): { events: AnyObj[] | null; selfActor: string | undefined } {
@@ -209,7 +236,8 @@ function claimLocalFile(argv: string[]): number {
   const artifactDir = requireFlag(args, "artifact-dir");
   const reason = flagString(args.flags, "reason") ?? "claim";
 
-  const record = performLocalClaim(artifactRoot, subjectId, actor, { ttlSeconds, branch, artifactDir, reason, actorKey });
+  const runtimeSession = resolveRuntimeSessionForHolder(actorKey ?? serializeActor(actor));
+  const record = performLocalClaim(artifactRoot, subjectId, actor, { ttlSeconds, branch, artifactDir, reason, actorKey, ...(runtimeSession ? { runtimeSession } : {}) });
   console.log(JSON.stringify({ role: "AssignmentClaimResult", subject_id: subjectId, record }, null, 2));
   return 0;
 }
@@ -241,11 +269,13 @@ function supersedeLocalFile(argv: string[]): number {
   const branchOverride = flagString(args.flags, "branch");
   const artifactDirOverride = flagString(args.flags, "artifact-dir");
 
+  const runtimeSession = resolveRuntimeSessionForHolder(serializeActor(toActor));
   const record = performLocalSupersede(artifactRoot, subjectId, fromActor, toActor, {
     ttlSeconds: ttlSecondsOverride != null ? Number(ttlSecondsOverride) : undefined,
     branch: branchOverride ?? undefined,
     artifactDir: artifactDirOverride ?? undefined,
     reason,
+    ...(runtimeSession ? { runtimeSession } : {}),
   });
   console.log(JSON.stringify({ role: "AssignmentSupersedeResult", subject_id: subjectId, record }, null, 2));
   return 0;

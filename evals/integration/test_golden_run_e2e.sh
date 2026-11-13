@@ -26,7 +26,8 @@ trap cleanup EXIT
 pass() { printf '  PASS  %s\n' "$1"; }
 fail() { printf '  FAIL  %s\n' "$1"; errors=$((errors + 1)); }
 public() { (cd "$PROJECT" && FLOW_AGENTS_ACTOR=golden-owner node "$ROOT/build/src/cli.js" workflow "$@"); }
-public_as() { local actor="$1"; shift; (cd "$PROJECT" && FLOW_AGENTS_ACTOR="$actor" node "$ROOT/build/src/cli.js" workflow "$@"); }
+# #1092: an independent reviewer is a separate runtime session, not a FLOW_AGENTS_ACTOR relabel.
+public_reviewer() { local session="$1"; shift; (cd "$PROJECT" && env -u FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID="$session" node "$ROOT/build/src/cli.js" workflow "$@"); }
 
 record() {
   local expectation="$1" artifact="$2" summary="$3"
@@ -141,7 +142,7 @@ assert_step execute
 record implementation-scope "$SESSION/$SLUG--deliver.md" 'Implemented fixture scope.'
 assert_step verify
 
-if public_as golden-reviewer critique --session-dir "$SESSION" --id golden-review --verdict pass --summary 'Independent fixture review is clean.' \
+if public_reviewer golden-reviewer critique --session-dir "$SESSION" --id golden-review --verdict pass --summary 'Independent fixture review is clean.' \
   --artifact-ref "$SESSION/$SLUG--deliver.md" \
   --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Fixture review completed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION/$SLUG--deliver.md\",\"summary\":\"Reviewed fixture delivery artifact.\"}]}" >"$TMP/critique.log" 2>&1; then
   pass 'public critique records clean review'

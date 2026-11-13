@@ -47,7 +47,7 @@ Behavioral evals should test whether the agent still preserves the contract afte
 
 - planning still includes Definition Of Done, stop-short risks, and evidence-bearing acceptance criteria
 - execution still updates artifacts between waves
-- review still records report-only critique in `critique.json`
+- review still records report-only critique in `trust.bundle`, from a reviewer outside the implementer's session
 - verification still reports PASS, FAIL, or NOT_VERIFIED with evidence per criterion
 - delivery still completes Goal Fit before final response
 - final acceptance still promotes durable docs after CI or merge

@@ -11,7 +11,8 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { assertSourceHeadStartable, currentGateVisit, gateRequiresFailureRouteReason, inspectBuilderFlowSession, pinnedRunSourceHead, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
+import { declaredCritiqueReviewerAssurance, declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
+import { describeReviewerAssurance, reviewerAssuranceMeets, reviewerVerifierRelation, sessionRefSourceForActorSource, type ReviewerAssurance, type ReviewerAssuranceLevel } from "../lib/reviewer-assurance.js";
 import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageMetadata, flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -27,7 +28,7 @@ import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, crit
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, declaredVerificationChecks, hasDeclaredVerificationChecks, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, preflightGateClaimEvidence, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { hasRegisteredInstalledKit, kitFlowSourceRoots, kitManifestFlowDeclarations, resolveKitFlowBinding } from "../lib/kit-flow-binding.js";
 import { catalogKitIds } from "../lib/kit-registry.js";
-import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
+import { readLocalAssignmentStatus, resolveCurrentActorWithSource, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
   recoverHostWorkflowSessionActor,
@@ -212,13 +213,13 @@ export type ExplainSpec = {
  */
 const VERB_PRECONDITIONS: Record<string, string[]> = {
   evidence: [
-    "a passing tests-evidence claim requires a current clean critique first — record one with `workflow critique` under a reviewer identity distinct from the implementation actor (FLOW_AGENTS_ACTOR=<reviewer-id>)",
+    "a passing tests-evidence claim requires a current clean critique first — record one with `workflow critique` from a separate reviewer runtime session, not a relabelled implementation process",
     "a passing tests-evidence claim requires captured clean Git provenance — the working tree must be clean at record time",
     "each --command must resolve through a known test/check/verify/eval runner and must reconcile against the CI manifest",
   ],
   critique: [
     "the run's current step must be one whose declaring kit binds an expectation to the workflow.critique interface",
-    "the reviewer identity must be distinct from the implementation actor (set FLOW_AGENTS_ACTOR=<reviewer-id>)",
+    "the reviewer identity must be distinct from the implementation actor, and a passing critique needs the reviewer assurance the kit declares (Builder: runtime-derived, so a FLOW_AGENTS_ACTOR override does not qualify)",
   ],
 };
 export function explainSpec(verb: string): ExplainSpec {
@@ -3054,7 +3055,7 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
   const { slug, projectRoot } = readBoundSession(sessionDir);
   const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json"]));
   const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
-    const caller = assertDistinctReviewActor(sessionDir, slug);
+    const { caller, reviewerAssurance } = assertDistinctReviewActor(sessionDir, slug);
     const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
     // #1336: `workflow.critique` is the interface a kit BINDS an expectation to. Asking the
     // declaring kit whether the run's current step carries that binding is the same question the
@@ -3062,10 +3063,16 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
     if (!declaredStepBindsInterface(current.definitionId, current.state.current_step, "workflow.critique", projectRoot)) {
       throw new Error(`workflow critique is allowed only at a step whose declaring kit binds an expectation to the workflow.critique interface; ${current.definitionId}/${current.state.current_step} declares none`);
     }
+    // #1092: record how the reviewer identity was established, and refuse a passing critique whose
+    // identity the caller chose when the kit requires more. The gate recomputes from the record.
+    const requiredAssurance = declaredCritiqueReviewerAssurance(current.definitionId, current.state.current_step, projectRoot);
+    if (flagString(parsed.flags, "verdict") === "pass" && requiredAssurance && !reviewerAssuranceMeets(reviewerAssurance, requiredAssurance)) {
+      throw new Error(insufficientReviewerAssuranceMessage(reviewerAssurance, requiredAssurance, `${current.definitionId}/${current.state.current_step}`));
+    }
     const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
     const beforeTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
     const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));
-    await mainFromPublicWorkflow(["record-critique", sessionDir, ...forwarded, "--reviewer", caller.actorKey]);
+    await mainFromPublicWorkflow(["record-critique", sessionDir, ...forwarded, "--reviewer", caller.actorKey], { reviewerAssurance });
     const result = await recoverBuilderFlowSession({ sessionDir });
     const digest = fileSha256(path.join(sessionDir, "trust.bundle"));
     if (!isDeepStrictEqual(result.run.manifest, beforeManifest)) {
@@ -3980,19 +3987,59 @@ function assertActiveAssignmentShape(assignment: JsonRecord, slug: string, sessi
   }
 }
 
-function assertDistinctReviewActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+function assertDistinctReviewActor(sessionDir: string, slug: string): { caller: ReturnType<typeof resolveCurrentActorWithSource>; reviewerAssurance: ReviewerAssurance } {
   const assignment = readActiveAssignment(sessionDir, slug);
-  const caller = resolveCurrentAssignmentActor();
-  if (assignment.actor_key === caller.actorKey) {
+  const caller = resolveCurrentActorWithSource();
+  // #1092: the inputs a gate computes reviewer assurance from. The implementer is identified by the
+  // runtime session recorded on its assignment, never by `actor_key`, which can be a coordination
+  // label the holder chose. A claim without a recorded runtime session leaves the implementer null,
+  // so separation is undetermined and a passing review is refused.
+  const runtimeRef = typeof assignment.runtime_session_ref === "string" && assignment.runtime_session_ref ? assignment.runtime_session_ref : null;
+  const reviewerAssurance: ReviewerAssurance = {
+    reviewer: { session_ref: caller.actorKey, session_ref_source: sessionRefSourceForActorSource(caller.source), resolved_by: caller.source },
+    implementer: runtimeRef
+      ? {
+        session_ref: runtimeRef,
+        session_ref_source: "runtime_derived",
+        ...(typeof assignment.runtime_session_source === "string" ? { resolved_by: assignment.runtime_session_source } : {}),
+        coordination_ref: String(assignment.actor_key),
+        ...(Array.isArray(assignment.runtime_session_refs) && assignment.runtime_session_refs.length
+          ? { held_by_session_refs: (assignment.runtime_session_refs as unknown[]).filter((ref): ref is string => typeof ref === "string") }
+          : {}),
+      }
+      : null,
+  };
+  // The holder's own coordination identity and the holder's runtime session are both same-session.
+  if (assignment.actor_key === caller.actorKey || reviewerVerifierRelation(reviewerAssurance) === "same-session") {
     throw new Error(
       "workflow critique requires a reviewer identity distinct from the active implementation assignment actor. " +
-        "The reviewer identity is derived from the runtime actor, so an orchestrator that implemented and now reviews " +
-        "resolves to the same actor. To record an independent review, run the reviewer under a distinct actor: set " +
-        "FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process, or run the reviewer in a separate runtime session " +
-        "(the runtime session id seeds the actor).",
+        "The reviewer resolves to the implementer's own session (relation same-session): an orchestrator that " +
+        "implemented, or an in-session subagent that shares its runtime session id, cannot review the work. " +
+        INDEPENDENT_REVIEW_REMEDIATION,
     );
   }
-  return caller;
+  return { caller, reviewerAssurance };
+}
+
+/**
+ * #1092: the remedy for a missing independent review. Relabelling the implementing process (for
+ * example by setting FLOW_AGENTS_ACTOR) is not one, so it is deliberately not offered.
+ */
+const INDEPENDENT_REVIEW_REMEDIATION =
+  "Record the review from a separate reviewer runtime session (a delegated agent or a new session with its own " +
+  "runtime session id, and FLOW_AGENTS_ACTOR unset). If no independent reviewer runtime is available, the review " +
+  "is NOT_VERIFIED: leave the gate blocked and report the gap rather than renaming the implementing process.";
+
+function insufficientReviewerAssuranceMessage(recorded: ReviewerAssurance, required: ReviewerAssuranceLevel, step: string): string {
+  if (!recorded.implementer) {
+    return `workflow critique cannot record a passing review at ${step}: the implementer's runtime session is not recorded on ` +
+      "its assignment (claimed before reviewer assurance was recorded, or from no runtime-derived source), so reviewer " +
+      "separation is undetermined. The assignment holder can record it by re-claiming the assignment from its own runtime " +
+      "session (`flow-agents assignment-provider claim`, same actor). Until then the independent review is NOT_VERIFIED.";
+  }
+  return `workflow critique cannot record a passing review at ${step}: the kit requires ${required} reviewer identity, ` +
+    `and this critique has ${describeReviewerAssurance(recorded)}. A self_declared identity such as a ` +
+    `FLOW_AGENTS_ACTOR override does not establish an independent reviewer. ${INDEPENDENT_REVIEW_REMEDIATION}`;
 }
 
 function assignmentClaimRemediation(sessionDir: string, slug: string, assignment: JsonRecord | null): string {

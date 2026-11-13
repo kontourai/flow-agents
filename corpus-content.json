@@ -53,9 +53,115 @@
       ]
     },
     {
+      "id": "builder-assurance-architecture-engine-and-kits",
+      "reviewedAt": "2026-11-13T00:00:00Z",
+      "note": "kits/builder/kit.json adds reviewer_assurance to its four workflow.critique expectation bindings, and src/flow-kit/action-metadata.ts accepts that field only on workflow.critique bindings with a known level. This document describes the engine/kit split, the kit manifest's container and extension fields, and the shipped kits at the level of flows, skills and dependencies; it does not enumerate expectation-binding fields or gate evidence rules, so every statement in it remains accurate.",
+      "limits": "Source and document byte review only. Does not verify runtime behaviour, and does not review other documents that cover these files.",
+      "inputs": [
+        {
+          "path": "kits/builder/kit.json",
+          "sha256": "19666363d564611aee58e87956e81b0790c7d5a7e409ae2dbbf7c578fe446db9"
+        },
+        {
+          "path": "src/flow-kit/action-metadata.ts",
+          "sha256": "e54752ba865b4560946252c3cbb46d75edd904c670cec07515cd8d3ae5cc48b3"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/architecture-engine-and-kits.md",
+          "sha256": "ded6768fad4cb5bbef1143ac6a7042cb324fb7c020da1815c1a088f018f86ecd"
+        }
+      ]
+    },
+    {
+      "id": "builder-assurance-flow-kit-repository-contract",
+      "reviewedAt": "2026-11-13T00:00:00Z",
+      "note": "src/flow-kit/action-metadata.ts accepts an optional reviewer_assurance on workflow.critique expectation bindings and still refuses every other unknown binding field. This document describes repository shape, declared paths, assets, fixtures and diagnostics for a Flow Kit repository and does not enumerate flow_step_actions expectation-binding fields, so every statement in it remains accurate. The new field is documented in docs/spec/builder-flow-runtime.md and docs/public-workflow-cli.md.",
+      "limits": "Source and document byte review only. Does not verify runtime behaviour, and does not review other documents that cover these files.",
+      "inputs": [
+        {
+          "path": "src/flow-kit/action-metadata.ts",
+          "sha256": "e54752ba865b4560946252c3cbb46d75edd904c670cec07515cd8d3ae5cc48b3"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/flow-kit-repository-contract.md",
+          "sha256": "54724ea6ebff7aba68d30e9b02b93165df607468d7a25f576f2bbd32a5e3bd48"
+        }
+      ]
+    },
+    {
+      "id": "builder-assurance-developer-architecture",
+      "reviewedAt": "2026-11-13T00:00:00Z",
+      "note": "The changed src files record reviewer-assurance inputs on critiques, compute the Builder verify-gate decision from them, resolve the declaring kit's reviewer_assurance policy, add resolveCurrentActorWithSource beside the unchanged resolveCurrentAssignmentActor, and record the holder's runtime-derived session on local assignment claims (documented in docs/assignment-host-contract.md and the assignment provider contract); the test files update fixtures to use a separate reviewer runtime session. This guide covers package layout, build, publication, documentation freshness, module ownership and installed kit discovery (whose root resolution this change calls but does not alter); it states that review-work and verify-work produce report-only critique and evidence, which remains true, and makes no claim about reviewer identity or gate assurance, so every statement in it remains accurate.",
+      "limits": "Source and document byte review only. Does not verify runtime behaviour, and does not review other documents that cover these files.",
+      "inputs": [
+        {
+          "path": "src/builder-flow-runtime.ts",
+          "sha256": "f3779215cfcb4ef07a0e0a2089f238d3bfc99e90d910c88b29286239e40dd10c"
+        },
+        {
+          "path": "src/builder-gate-action-envelope.ts",
+          "sha256": "21b0e09b0640f98ddfde56299c0a2ae5160d148e998d5f1f8420b088ba8da910"
+        },
+        {
+          "path": "src/cli/assignment-provider.ts",
+          "sha256": "34ec7589d01de38229c121dae64b400451c2ce66d26625d938e98dd6b4ee86c4"
+        },
+        {
+          "path": "src/cli/builder-deliver-existing.test.mjs",
+          "sha256": "063bbffa7c9c963ec0f4b549d10521618850986491c9749b8882db1f03c88936"
+        },
+        {
+          "path": "src/cli/builder-flow-runtime.test.mjs",
+          "sha256": "ebcfdb88c1534a2a900f4eabbeb7883072840da1741b44857b0f03437f3ee60e"
+        },
+        {
+          "path": "src/cli/builder-review-existing.test.mjs",
+          "sha256": "9a2f5fb04c664f60f47d02f5f7b03054dd92cbac752a808e0a22b5bd57d59685"
+        },
+        {
+          "path": "src/cli/reviewer-assurance.test.mjs",
+          "sha256": "a821ea972ea7eff0cd60a373bef8c82ad40c7e7f4a3e65d4145c2ade98d35c16"
+        },
+        {
+          "path": "src/cli/workflow-sidecar.ts",
+          "sha256": "f3bd9b917f42a9b6bad2d73a6b02293ff087c65c405e136b5d95d06598f0b116"
+        },
+        {
+          "path": "src/cli/workflow.ts",
+          "sha256": "97b9a70ab0aa46de3ca17283ed7e645a227b5e55f544e541794c3ca1c1aad33c"
+        },
+        {
+          "path": "src/flow-kit/action-metadata.ts",
+          "sha256": "e54752ba865b4560946252c3cbb46d75edd904c670cec07515cd8d3ae5cc48b3"
+        },
+        {
+          "path": "src/lib/assignment-local-store.ts",
+          "sha256": "a0a49e2bdd0bd346b72dd1fe868e80413d06c26f75e2fa37406d4b1690d86c31"
+        },
+        {
+          "path": "src/lib/assignment-model.ts",
+          "sha256": "20b0cc7d0585b52121d646ea7d538b9dd649758715d4c05bc12374a0a753932c"
+        },
+        {
+          "path": "src/lib/reviewer-assurance.ts",
+          "sha256": "52d703c5ee6d1211290157138ae17145bc1d993de3e1589f760dd07523ca071f"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/developer-architecture.md",
+          "sha256": "6ce5702e4c2cdb4ecee7bb421569cc387d341c1899e4badabc39d7389535ddb1"
+        }
+      ]
+    },
+    {
       "id": "workflow-shared-contracts-rejected-evidence",
       "reviewedAt": "2026-11-13T00:00:00Z",
-      "note": "schemas/workflow-state.schema.json gains one optional, closed property, next_action.evidence_submission.rejected_evidence (gate_id, expectation_id, reason, specific_reason, next_step). docs/workflow-shared-contracts.md is an index of the shared contract files and their roles; it does not enumerate next_action fields, so every statement in it remains accurate. The field itself is documented in docs/public-workflow-cli.md and docs/workflow-usage-guide.md.",
+      "note": "schemas/workflow-state.schema.json gains one optional, closed property, next_action.evidence_submission.rejected_evidence (gate_id, expectation_id, reason, specific_reason, next_step). docs/workflow-shared-contracts.md is an index of the shared contract files and their roles; it does not enumerate next_action fields (re-read after #1643 changed its review-evidence line), so every statement in it remains accurate. The field itself is documented in docs/public-workflow-cli.md and docs/workflow-usage-guide.md.",
       "limits": "Source and document byte review only. Does not verify the schema against runtime output beyond the repository's tests.",
       "inputs": [
         {
@@ -66,7 +172,7 @@
       "outputs": [
         {
           "path": "docs/workflow-shared-contracts.md",
-          "sha256": "96fefd6498209d5b02f928dad8230d2a27794c8ad3660146f22da5f1fa7b4ab1"
+          "sha256": "a4d8506cd7aa39e09f5c9c443346a6f5a821cc2835dc97ed6c77aaabfdb872d2"
         }
       ]
     }

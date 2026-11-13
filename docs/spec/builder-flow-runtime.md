@@ -159,7 +159,10 @@ the same rule:
 - A passing claim of the type a gate declares for its `tests-evidence` expectation is
   command-backed and must satisfy verified-tests trust: a current clean critique by a
   reviewer distinct from the implementation actor, complete verified acceptance criteria,
-  and clean observed command provenance.
+  and clean observed command provenance. When the declaring kit's `workflow.critique`
+  binding declares a minimum `reviewer_assurance`, each current critique must also meet
+  it, computed from its recorded `metadata.reviewer_assurance` inputs: a `same-session`
+  relation or a missing record never does (#1092).
 - Only the claim type a gate declares for its `selected-work` expectation may predate
   the run's first visit boundary, by the 30-second acquisition allowance.
 
@@ -388,7 +391,9 @@ the public operation to be retried only after the underlying condition is correc
 
 `flow_step_actions` must explicitly declare `artifacts`, `artifact_bindings`,
 `expectation_ids`, `expectation_bindings`, and `implementation_allowed`, including
-empty lists for terminal actions. Expectation ids must exactly equal the resolved
+empty lists for terminal actions. A `workflow.critique` binding may also declare
+`reviewer_assurance` (`caller-asserted` or `runtime-derived`), the minimum reviewer
+assurance a passing critique at that step needs; Builder declares `runtime-derived`. Expectation ids must exactly equal the resolved
 Flow expectation set. Artifact bindings map each artifact to its owning
 expectations, allowing optional artifacts to remain declared without appearing
 under `stop_condition.required`. The same ownership is projected publicly as

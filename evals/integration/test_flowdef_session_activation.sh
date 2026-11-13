@@ -199,7 +199,7 @@ record_passing_producer_evidence "implementation-scope" "$SESSION_DIR/$SLUG--del
 echo ""
 echo "=== 3. verify step: clean critique and criterion-backed producer evidence ==="
 
-if FLOW_AGENTS_ACTOR=activation-reviewer node "$ROOT/build/src/cli.js" workflow critique \
+if env -u FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID=activation-reviewer node "$ROOT/build/src/cli.js" workflow critique \
   --session-dir "$SESSION_DIR" \
   --id "activation-review" \
   --verdict pass \
@@ -214,7 +214,7 @@ fi
 # A same-reviewer revision must retain its predecessor for chain validation
 # while only the current critique participates in the clean-review decision.
 printf '\nClarified after the first review revision.\n' >> "$SESSION_DIR/$SLUG--deliver.md"
-if FLOW_AGENTS_ACTOR=activation-reviewer node "$ROOT/build/src/cli.js" workflow critique \
+if env -u FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID=activation-reviewer node "$ROOT/build/src/cli.js" workflow critique \
   --session-dir "$SESSION_DIR" \
   --id "activation-review" \
   --verdict pass \
@@ -349,7 +349,7 @@ git -C "$TAMPER_DIR" add checks/tamper-flow-step.test.mjs
 git -C "$TAMPER_DIR" commit -qm "add tamper verification command"
 
 # Create every reviewable byte before capturing the critique workspace snapshot.
-if ! tamper_critique_output="$(FLOW_AGENTS_ACTOR=tamper-reviewer node "$ROOT/build/src/cli.js" workflow critique \
+if ! tamper_critique_output="$(env -u FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID=tamper-reviewer node "$ROOT/build/src/cli.js" workflow critique \
   --session-dir "$TAMPER_SESSION" \
   --id "tamper-review" \
   --verdict pass \
