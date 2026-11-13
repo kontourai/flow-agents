@@ -5636,16 +5636,6 @@ else
   _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate (ran 'npm run build' first?)"
 fi
 
-# Run historical replay and authority-boundary controls in the protected writer
-# baseline as well as test:unit. Keep the shared unit-test state isolation.
-if (cd "$ROOT" && node --import ./src/cli/unit-test-state.mjs --test --test-concurrency=2 \
-  src/cli/surface-status-function.test.mjs \
-  src/cli/surface-v2-authority-compatibility.test.mjs); then
-  _pass "stored Surface version selection and authority-boundary controls"
-else
-  _fail "stored Surface version selection or authority-boundary controls failed"
-fi
-
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."
   exit 0

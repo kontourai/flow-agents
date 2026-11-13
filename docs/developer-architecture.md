@@ -382,7 +382,8 @@ use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
 The shared workflow trust gates pin Surface 6.3.0 and use its default status
 function `"4"` for new bundles. Stored bundle readers retain explicit `"2"`/`"3"`
-stamps through Surface's versioned API; an unsupported stamp is still refused.
+stamps through Surface's versioned API, subject to the historical v2 compatibility
+refusal described in the trust-reconcile decision; an unsupported stamp is still refused.
 Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
 through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
 and accumulation. Standalone Knowledge projection can use an erasure-capable
