@@ -28,7 +28,7 @@ const buildReviewDecisionsFromSession = (session, reviewerKind = "human") => sur
 const HOST_FLOW = {
   id: "probe.memory-route", version: "1.0",
   steps: [{ id: "route", next: "done" }, { id: "done", next: null }],
-  gates: { "route-gate": { step: "route", expects: [{ id: "bundle", kind: "trust.bundle", required: false, description: "Not required: memory routing evidence is recorded, not gated, under Flow 5.4.", bundle_claim: { claimType: "probe", subjectType: "artifact", accepted_statuses: ["trusted"] } }] } },
+  gates: { "route-gate": { step: "route", expects: [{ id: "bundle", kind: "trust.bundle", required: false, description: "Not required: memory routing evidence is recorded, not gated, under Flow 6.0.", bundle_claim: { claimType: "probe", subjectType: "artifact", accepted_statuses: ["trusted"] } }] } },
 };
 
 const base = {

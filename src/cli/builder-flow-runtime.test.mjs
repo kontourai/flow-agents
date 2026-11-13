@@ -7,6 +7,7 @@ import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import childProcess, { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { pathToFileURL } from "node:url";
+import { generateClaimId } from "@kontourai/surface";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir, validateDefinition, withRunMutationLock } from "@kontourai/flow";
 import {
@@ -3457,7 +3458,23 @@ function restampCritiqueClaim(claim) {
   return claim;
 }
 
+// Two critiques in one bundle need distinct claim ids (Surface >= 4 rejects duplicates). Derive
+// each the way the sidecar does for an identity-v2 critique: from its subject and a salt of its
+// summary and review time (workflow-sidecar.ts, `claimIdSalt` / `generateClaimId`).
+function withProductionCritiqueClaimId(entry) {
+  const claimId = generateClaimId(entry.claim.subjectId, "flow-agents.workflow", `${entry.claim.fieldOrBehavior}::reviewed::${entry.claim.metadata.reviewed_at}`);
+  entry.claim.id = claimId;
+  entry.evidence.id = `evidence.${claimId}`;
+  entry.evidence.claimId = claimId;
+  entry.event.id = `event.${claimId}`;
+  entry.event.claimId = claimId;
+  entry.event.evidenceIds = [entry.evidence.id];
+  return entry;
+}
+
 function appendCritiqueAfter(prior, current) {
+  withProductionCritiqueClaimId(prior);
+  withProductionCritiqueClaimId(current);
   restampCritiqueClaim(prior);
   current.claim.metadata.critique_sequence = prior.claim.metadata.critique_sequence + 1;
   current.claim.metadata.critique_predecessor_hash = prior.claim.metadata.critique_record_hash;
@@ -10268,4 +10285,23 @@ test("builder.build-lean runs end to end to terminal completion and terminal del
   assert.equal(terminalCheckpoint.status, "delivered");
   assert.equal(terminalCheckpoint.phase, "release");
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("a gate rejection with a Flow 6 specific reason projects an actionable next step", async () => {
+  const session = makeSession("specific-reason-guidance");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  // A normal fixture bundle, then the policies removed: the claim keeps its verification event
+  // and evidence but no policy resolves for it, which Flow 6's Surface 6 gate keeps `proposed`.
+  writeBundle(session.sessionDir, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const bundle = readJson(bundleFile);
+  bundle.policies = [];
+  for (const claim of bundle.claims) delete claim.verificationPolicyId;
+  writeJson(bundleFile, bundle);
+  const result = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(result.run.state.current_step, "pull-work", "a claim with no resolving policy must not advance pull-work");
+  const nextAction = readJson(path.join(session.sessionDir, "state.json")).next_action;
+  assert.deepEqual(nextAction.evidence_submission.rejected_evidence.map((entry) => [entry.gate_id, entry.expectation_id, entry.reason, entry.specific_reason]),
+    [["pull-work-gate", "selected-work", "rejected", "policy_unresolved"]]);
+  assert.match(nextAction.summary, /Rejected evidence: `selected-work` \(policy_unresolved\): The claim has no verification policy that resolves/);
 });

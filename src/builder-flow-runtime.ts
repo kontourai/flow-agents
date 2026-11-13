@@ -64,6 +64,7 @@ import {
 import { retireHostWorkflowSession } from "./lib/host-workflow-binding.js";
 import { atomicWriteFile } from "./lib/fs.js";
 import { replaceStateIfUnchanged } from "./lib/state-file-lock.js";
+import { evidenceRejectionGuidance } from "./flow-specific-reason-guidance.js";
 
 type AnyRecord = Record<string, any>;
 
@@ -2830,6 +2831,8 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
         run,
         definition: definition as AnyRecord,
       });
+  // Flow 6 adds a Surface-specific reason beside its coarse gate diagnostic; name the next step.
+  const rejectedEvidence = evidenceRejectionGuidance(run.state.gate_outcomes, gates.map((gate) => String(gate.id)));
   const action = envelope ? {
     skills: envelope.action.skills.map((skill) => skill.id),
     operations: envelope.action.operations,
@@ -2856,6 +2859,7 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
       schemas: envelope.public_interfaces.schemas,
       unresolved_expectation_ids: envelope.stop_condition.required.unresolved_evidence_ids,
       adapter_evidence_is_gate_evidence: envelope.stop_condition.adapter_evidence_is_gate_evidence,
+      ...(rejectedEvidence.length > 0 ? { rejected_evidence: rejectedEvidence } : {}),
     },
     sync_command: syncCommand,
     command: syncCommand,
@@ -2868,6 +2872,9 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   const gateText = gates.length
     ? `Complete ${gates.map((gate) => `\`${gate.id}\``).join(", ")} by recording: ${required.join(", ") || "its declared evidence"}.`
     : "No Flow gate is open.";
+  const rejectionText = rejectedEvidence.length > 0
+    ? ` Rejected evidence: ${rejectedEvidence.map((entry) => `\`${entry.expectation_id}\` (${entry.specific_reason}): ${entry.next_step}`).join(" ")}`
+    : "";
   const routeText = routeBack
     ? ` Route-back history: attempt ${routeBack.attempt ?? "n/a"}${routeBack.max_attempts ? `/${routeBack.max_attempts}` : ""} returned to \`${routeBack.route_back_to ?? "an earlier step"}\`${routeBack.route_reason ? ` for \`${routeBack.route_reason}\`` : ""}.`
     : "";
@@ -2892,7 +2899,7 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
           }
     : {
         status: "continue",
-        summary: `Flow step \`${run.state.current_step}\`: ${skillText}${operationText} Produce the declared artifacts and submit their evidence through the bound public interfaces. ${gateText}${routeText} Then run sync_command to inspect canonical state, inspect the resulting next action, and continue orchestration. Status does not execute skills or submit evidence.`,
+        summary: `Flow step \`${run.state.current_step}\`: ${skillText}${operationText} Produce the declared artifacts and submit their evidence through the bound public interfaces. ${gateText}${rejectionText}${routeText} Then run sync_command to inspect canonical state, inspect the resulting next action, and continue orchestration. Status does not execute skills or submit evidence.`,
         skills,
         operations,
         ...execution,

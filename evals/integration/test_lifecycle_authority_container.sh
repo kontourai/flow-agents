@@ -73,7 +73,7 @@ if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
 NODE
 sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
-# The privileged coordinator is pinned to the audited Flow 5.4.0 reducer closure, and that pin is
+# The privileged coordinator is pinned to the audited Flow 6.0.0 reducer closure, and that pin is
 # a digest over the whole staged tree -- so the tree has to be REPRODUCIBLE or the digest is a
 # clock, not a control.
 #
@@ -606,10 +606,10 @@ const [flowRoot, project, runId] = process.argv.slice(2);
 const flow = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
 await flow.pauseRun(runId, {
   cwd: project,
-  reason: 'installed Flow 5.4.0 mutation after reseal',
+  reason: 'installed Flow 6.0.0 mutation after reseal',
   authority: {
     kind: 'operator_request',
-    actor: 'installed-flow-5.4.0-container',
+    actor: 'installed-flow-6.0.0-container',
     request_ref: 'container:reseal-native-lock',
     requested_at: '2026-07-20T00:20:00Z'
   },
@@ -645,7 +645,7 @@ const runRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
 const pinnedFlowRoot = process.env.PINNED_FLOW_ROOT;
 if (!pinnedFlowRoot || !fs.realpathSync(pinnedFlowRoot).startsWith(path.dirname(process.env.LIFECYCLE_HELPER_PATH))) throw new Error('pinned Flow root is not the helper-installed closure');
 const packageJson = JSON.parse(fs.readFileSync(path.join(pinnedFlowRoot, 'package.json'), 'utf8'));
-if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '5.4.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@5.4.0');
+if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '6.0.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@5.4.0');
 if (fs.realpathSync(pinnedFlowRoot).startsWith('/work/node_modules')) throw new Error('local Flow dependency substituted for the installed closure');
 const lockRoot = path.join(runRoot, '.mutation.lock'), readyFile = '/tmp/reseal-lock-ready', releaseFile = '/tmp/reseal-lock-release';
 for (const file of [readyFile, releaseFile]) if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -662,7 +662,7 @@ const spawnAsNode = (script, args) => {
 };
 const installedStore = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'index.js')).href);
 if (['withRunRecoveryLock', 'writeRunRecoveryFence', 'finalizeRunRecoveryFence'].some((name) => typeof installedStore[name] !== 'function')) {
-  throw new Error('installed exact @kontourai/flow@5.4.0 does not expose the public recovery contract');
+  throw new Error('installed exact @kontourai/flow@6.0.0 does not expose the public recovery contract');
 }
 const waitFor = async (label, predicate) => {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
@@ -710,7 +710,7 @@ if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref 
 const manifest = JSON.parse(fs.readFileSync(path.join(runRoot, 'evidence', 'manifest.json'), 'utf8'));
 if (manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${completion.request_sha256}`).length !== 1) throw new Error('reseal attachment is absent or duplicated');
 if (ticketCount() !== 0) throw new Error('native Flow tickets were not released');
-console.log('PASS: installed exact @kontourai/flow@5.4.0 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
+console.log('PASS: installed exact @kontourai/flow@6.0.0 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
 NODE
 node /work/reseal-native-lock-e2e.mjs
 

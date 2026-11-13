@@ -65,7 +65,7 @@ memory; every other piece stays with its owner.
 
 ## Consequences
 
-- Flow 5.4 gate expectations accept only `trust.bundle`, so routing evidence is
+- Flow 6.0 gate expectations accept only `trust.bundle`, so routing evidence is
   recorded and recomputable but a gate cannot yet require it.
 - Review time is selection-to-submission dwell of the session that submitted the decision, from Survey
   session events, and is absent, not estimated, when there are none or when the history can be read two ways

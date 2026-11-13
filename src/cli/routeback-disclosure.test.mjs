@@ -63,6 +63,16 @@ const EXECUTE_PRE_FACTS = "[workflow] NOTICE: recording fail for implementation-
 // verify) step — the same claim shapes the builder-runtime suite uses.
 // ---------------------------------------------------------------------------
 
+// Surface >= 5 (Flow 6's gate) keeps a claim with no resolving verification policy at
+// `proposed`, so every fixture claim names a policy that requires the attestation it carries.
+function attestationPolicy(claimType) {
+  return {
+    id: `policy.${claimType}`, claimType, requiredEvidence: ["human_attestation"], requiredMethods: ["attestation"],
+    requiresCorroboration: false, acceptanceCriteria: [`An attested ${claimType} review supports the claim.`],
+    reviewAuthority: "human", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel: "high",
+  };
+}
+
 function bundleClaim({ expectation, claimType, subjectType, stepId, subject }) {
   const timestamp = new Date().toISOString();
   const claimId = `claim.${expectation}`;
@@ -82,6 +92,8 @@ function bundleClaim({ expectation, claimType, subjectType, stepId, subject }) {
       },
       createdAt: timestamp,
       updatedAt: timestamp,
+      impactLevel: "high",
+      verificationPolicyId: `policy.${claimType}`,
     },
     evidence: {
       id: `evidence.${expectation}`, claimId, evidenceType: "human_attestation", method: "attestation",
@@ -108,7 +120,7 @@ async function writeAndSync(session, entries) {
     source: "flow-agents-routeback-disclosure-test",
     claims: entries.map((entry) => entry.claim),
     evidence: entries.map((entry) => entry.evidence),
-    policies: [],
+    policies: [...new Set(entries.map((entry) => entry.claim.claimType))].map(attestationPolicy),
     events: entries.map((entry) => entry.event),
   }, null, 2));
   return syncBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -385,6 +397,7 @@ test("publish-first suppression keys off the provisional RECORD, never the whole
     const critique = {
       id: "claim.clean-critique", subjectType: "workflow-critique", subjectId: `${slug}/gate-claim-clean-critique`,
       claimType: "workflow.critique.review", fieldOrBehavior: "clean critique fixture", value: "pass", status: "verified",
+      impactLevel: "high", verificationPolicyId: "policy.workflow.critique.review",
       metadata: {
         workflow_subject_ref: subject, origin: "critique", reviewer: "reviewer-actor", findings: [],
         lanes: critiqueRecord.lanes, review_target: critiqueRecord.review_target,
@@ -396,6 +409,7 @@ test("publish-first suppression keys off the provisional RECORD, never the whole
     const tests = {
       id: "claim.tests-evidence", subjectType: "flow-step", subjectId: `${slug}/gate-claim-tests-evidence`,
       claimType: "builder.verify.tests", fieldOrBehavior: "tests fixture", value: "pass", status: "verified",
+      impactLevel: "high", verificationPolicyId: "policy.builder.verify.tests",
       metadata: {
         workflow_subject_ref: subject, origin: "check", check_kind: "external",
         gate_claim: { expectation_id: "tests-evidence", claim_type: "builder.verify.tests", subject_type: "flow-step", step_id: "verify", recorded_at: timestamp, identity_version: 2 },
@@ -411,7 +425,7 @@ test("publish-first suppression keys off the provisional RECORD, never the whole
         { id: "evidence.clean-critique", claimId: critique.id, evidenceType: "human_attestation", method: "attestation", sourceRef: "fixture", excerptOrSummary: "critique fixture", observedAt: timestamp, collectedBy: "flow-agents-test" },
         { id: "evidence.tests-evidence", claimId: tests.id, evidenceType: "human_attestation", method: "attestation", sourceRef: "fixture", excerptOrSummary: "tests fixture", observedAt: timestamp, collectedBy: "flow-agents-test", passing: true, execution: { runner: "bash", label: tests.metadata.observed_commands[0].command, isError: false, exitCode: 0 } },
       ],
-      policies: [],
+      policies: [attestationPolicy("workflow.critique.review"), attestationPolicy("builder.verify.tests")],
       events: [
         { id: "event.clean-critique", claimId: critique.id, status: "verified", actor: "flow-agents-test", method: "attestation", evidenceIds: ["evidence.clean-critique"], createdAt: timestamp, verifiedAt: timestamp },
         { id: "event.tests-evidence", claimId: tests.id, status: "verified", actor: "flow-agents-test", method: "attestation", evidenceIds: ["evidence.tests-evidence"], createdAt: timestamp, verifiedAt: timestamp },

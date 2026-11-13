@@ -21,8 +21,8 @@ importers:
         specifier: 0.8.0
         version: 0.8.0
       '@kontourai/flow':
-        specifier: 5.4.0
-        version: 5.4.0
+        specifier: 6.0.0
+        version: 6.0.0
       '@kontourai/relay':
         specifier: 0.8.0
         version: 0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.8.0(zod@4.6.7))
@@ -68,7 +68,7 @@ importers:
         version: 9.2.3
       promptfoo:
         specifier: ^0.125.1
-        version: 0.125.1(@anthropic-ai/claude-agent-sdk@0.3.283(@anthropic-ai/sdk@1.8.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(zod@4.6.7))(zod@4.6.7))(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.6.7))(@openai/codex-sdk@0.156.1)(@slack/web-api@7.17.0(debug@4.4.3))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.6.6)(ibm-cloud-sdk-core@5.5.0)(jks-js@1.1.7)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10)
+        version: 0.125.1(@anthropic-ai/claude-agent-sdk@0.3.283(@anthropic-ai/sdk@1.8.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(zod@4.6.7))(zod@4.6.7))(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.6.7))(@openai/codex-sdk@0.156.1)(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.6.6)(ibm-cloud-sdk-core@5.5.0)(jks-js@1.1.7)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -1096,8 +1096,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/flow@5.4.0':
-    resolution: {integrity: sha512-jGimrSdVxzEuI2NvQ++t2xmEEAXoXCXtHat2pfBTSsOAdXzn2OQbHO9WskpmuE6F7zvPrJrky7GUAVOtixDFRg==}
+  '@kontourai/flow@6.0.0':
+    resolution: {integrity: sha512-CBI0+5omN7jdENklNW+kSHiwDPNk5iP5fp8ExV64sOizymFqhJiUkEAdGeUEUUrV1aFGT0ZatnOGIwDV7LKekQ==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1157,11 +1157,6 @@ packages:
     peerDependenciesMeta:
       '@anthropic-ai/sdk':
         optional: true
-
-  '@kontourai/surface@2.14.0':
-    resolution: {integrity: sha512-OiSOUHStjZvfWJe1nXXm3vfbgUvkc3Dc3THqTXbMK70wjKAHfDgz06TwBLeRp3oNJKEIh9xNDYCFT+TqQ7EYrQ==}
-    engines: {node: '>=22'}
-    hasBin: true
 
   '@kontourai/surface@5.0.0':
     resolution: {integrity: sha512-PSMiy6M1Hd8FxuaL1QDxWw42jU6NNBbMiLoBTBGIeg+3Ed3S3UH4YZ3ODuc8wWD4rZeoVaDwmBtWIN3GZ6xhNQ==}
@@ -2789,10 +2784,6 @@ packages:
 
   guid-typescript@1.0.9:
     resolution: {integrity: sha512-Y8T4vYhEfwJOTbouREvG+3XDsjr8E3kIr7uf+JZ0BYloFsttiHU0WfvANVsR7TxNUJa/WpCnw/Ino/p+DeBhBQ==}
-
-  hachure@0.15.0:
-    resolution: {integrity: sha512-4YKLShbDKG+k52lJvH9shup7UYAX7pW+EA8c/4dx3RQFqCmORHl9gjJrM9vUljuTml/haTJgWYPd1G1MWmrm8Q==}
-    hasBin: true
 
   hachure@0.18.0:
     resolution: {integrity: sha512-DnSAPYqUxPEehNLPBoFoRNGeCNo8JdeB/Yy6DOFBPJg5zo+WcxZSx5RiR/Y6BQCSPkOqS7H5DYwTcx5H9lBTmw==}
@@ -5296,12 +5287,12 @@ snapshots:
       commander: 15.0.0
       zod: 4.6.7
 
-  '@kontourai/flow@5.4.0':
+  '@kontourai/flow@6.0.0':
     dependencies:
-      '@kontourai/surface': 2.14.0
+      '@kontourai/surface': 6.3.0
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
-      hachure: 0.15.0
+      hachure: 0.18.0
     transitivePeerDependencies:
       - kerberos
       - supports-color
@@ -5345,14 +5336,6 @@ snapshots:
       '@ai-sdk/provider': 3.0.19
     optionalDependencies:
       '@anthropic-ai/sdk': 1.8.0(zod@4.6.7)
-
-  '@kontourai/surface@2.14.0':
-    optionalDependencies:
-      '@sigstore/sign': 5.0.0
-      '@sigstore/verify': 4.1.2
-    transitivePeerDependencies:
-      - kerberos
-      - supports-color
 
   '@kontourai/surface@5.0.0':
     optionalDependencies:
@@ -5921,13 +5904,13 @@ snapshots:
   '@slack/types@2.21.1':
     optional: true
 
-  '@slack/web-api@7.17.0(debug@4.4.3)':
+  '@slack/web-api@7.17.0(debug@4.3.4)':
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.21.1
       '@types/node': 26.6.6
       '@types/retry': 0.12.0
-      axios: 1.18.0(debug@4.4.3)
+      axios: 1.18.0(debug@4.3.4)
       eventemitter3: 5.0.4
       form-data: 4.0.6
       is-electron: 2.2.2
@@ -6254,17 +6237,6 @@ snapshots:
   axios@1.18.0(debug@4.3.4):
     dependencies:
       follow-redirects: 1.16.0(debug@4.3.4)
-      form-data: 4.0.6
-      https-proxy-agent: 5.0.1
-      proxy-from-env: 2.1.0
-    transitivePeerDependencies:
-      - debug
-      - supports-color
-    optional: true
-
-  axios@1.18.0(debug@4.4.3):
-    dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -6873,11 +6845,6 @@ snapshots:
       debug: 4.3.4
     optional: true
 
-  follow-redirects@1.16.0(debug@4.4.3):
-    optionalDependencies:
-      debug: 4.4.3
-    optional: true
-
   form-data@4.0.6:
     dependencies:
       asynckit: 0.4.0
@@ -7017,8 +6984,6 @@ snapshots:
 
   guid-typescript@1.0.9:
     optional: true
-
-  hachure@0.15.0: {}
 
   hachure@0.18.0: {}
 
@@ -7867,7 +7832,7 @@ snapshots:
 
   promise-limit@2.7.0: {}
 
-  promptfoo@0.125.1(@anthropic-ai/claude-agent-sdk@0.3.283(@anthropic-ai/sdk@1.8.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(zod@4.6.7))(zod@4.6.7))(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.6.7))(@openai/codex-sdk@0.156.1)(@slack/web-api@7.17.0(debug@4.4.3))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.6.6)(ibm-cloud-sdk-core@5.5.0)(jks-js@1.1.7)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10):
+  promptfoo@0.125.1(@anthropic-ai/claude-agent-sdk@0.3.283(@anthropic-ai/sdk@1.8.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(zod@4.6.7))(zod@4.6.7))(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.6.7))(@openai/codex-sdk@0.156.1)(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.6.6)(ibm-cloud-sdk-core@5.5.0)(jks-js@1.1.7)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10):
     dependencies:
       '@anthropic-ai/sdk': 0.133.0(zod@4.6.7)
       '@apidevtools/json-schema-ref-parser': 16.0.5(@types/json-schema@7.0.15)
@@ -7966,7 +7931,7 @@ snapshots:
       '@openai/agents': 0.11.6(ws@8.22.0)(zod@4.6.7)
       '@openai/codex-sdk': 0.156.1
       '@opencode-ai/sdk': 1.19.1
-      '@slack/web-api': 7.17.0(debug@4.4.3)
+      '@slack/web-api': 7.17.0(debug@4.3.4)
       '@smithy/node-http-handler': 4.12.1
       google-auth-library: 11.3.1
       hono: 4.13.13

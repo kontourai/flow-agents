@@ -175,6 +175,21 @@ test("Flow evidence matching rejects narrative-shaped entries", () => {
     value: "pass",
     createdAt: now,
     updatedAt: now,
+    // Surface >= 5 (Flow 6's gate) verifies only a claim whose policy resolves and requires the
+    // evidence it carries.
+    verificationPolicyId: "policy.builder.execute.scope",
+  };
+  const policy = {
+    id: "policy.builder.execute.scope",
+    claimType: "builder.execute.scope",
+    requiredEvidence: ["human_attestation"],
+    requiredMethods: ["attestation"],
+    acceptanceCriteria: ["An attested scope review supports the claim."],
+    reviewAuthority: "human",
+    validityRule: { kind: "manual" },
+    stalenessTriggers: [],
+    conflictRules: [],
+    impactLevel: "high",
   };
   const evidence = {
     id: "evidence.implementation-scope",
@@ -206,7 +221,7 @@ test("Flow evidence matching rejects narrative-shaped entries", () => {
       source: "narrative-arch-isolation-positive-control",
       claims: [claim],
       evidence: [evidence],
-      policies: [],
+      policies: [policy],
       events: [event],
     },
   };

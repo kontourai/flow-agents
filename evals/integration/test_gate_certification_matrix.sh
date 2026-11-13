@@ -55,6 +55,7 @@ function bundle(entries) {
   const claims = entries.map((entry) => ({
     id: `claim.${entry.id}`, subjectType: entry.subjectType, subjectId: entry.subjectId ?? `subject/${entry.id}`,
     claimType: entry.claimType, fieldOrBehavior: entry.note ?? `${entry.id} fixture`, value: 'pass', createdAt: now, updatedAt: now,
+    verificationPolicyId: `policy.${entry.claimType}`,
   }));
   const evidence = entries.map((entry) => ({
     id: `evidence.${entry.id}`, claimId: `claim.${entry.id}`, evidenceType: 'human_attestation', method: 'attestation',
@@ -64,7 +65,13 @@ function bundle(entries) {
     id: `event.${entry.id}`, claimId: `claim.${entry.id}`, status: 'verified', actor: 'test_gate_certification_matrix',
     method: 'attestation', evidenceIds: [`evidence.${entry.id}`], createdAt: now, verifiedAt: now,
   }));
-  return { schemaVersion: 5, source: 'test_gate_certification_matrix', claims, evidence, policies: [], events };
+  // Flow 6 gates (Surface >= 5) verify only claims whose policy resolves and requires their evidence.
+  const policies = [...new Set(entries.map((entry) => entry.claimType))].map((claimType) => ({
+    id: `policy.${claimType}`, claimType, requiredEvidence: ['human_attestation'], requiredMethods: ['attestation'],
+    acceptanceCriteria: [`An attested ${claimType} review supports the claim.`], reviewAuthority: 'human',
+    validityRule: { kind: 'manual' }, stalenessTriggers: [], conflictRules: [], impactLevel: 'high',
+  }));
+  return { schemaVersion: 5, source: 'test_gate_certification_matrix', claims, evidence, policies, events };
 }
 function passingEntries(id, definition = original) {
   return gate(id, definition).expects.filter((entry) => entry.required).map((entry) => ({
