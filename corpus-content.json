@@ -157,6 +157,24 @@
           "sha256": "6ce5702e4c2cdb4ecee7bb421569cc387d341c1899e4badabc39d7389535ddb1"
         }
       ]
+    },
+    {
+      "id": "workflow-shared-contracts-rejected-evidence",
+      "reviewedAt": "2026-11-13T00:00:00Z",
+      "note": "schemas/workflow-state.schema.json gains one optional, closed property, next_action.evidence_submission.rejected_evidence (gate_id, expectation_id, reason, specific_reason, next_step). docs/workflow-shared-contracts.md is an index of the shared contract files and their roles; it does not enumerate next_action fields (re-read after #1643 changed its review-evidence line), so every statement in it remains accurate. The field itself is documented in docs/public-workflow-cli.md and docs/workflow-usage-guide.md.",
+      "limits": "Source and document byte review only. Does not verify the schema against runtime output beyond the repository's tests.",
+      "inputs": [
+        {
+          "path": "schemas/workflow-state.schema.json",
+          "sha256": "839e412443dff501177572ab885afe4ac0f068b5c995265a9328569db1a39b6a"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/workflow-shared-contracts.md",
+          "sha256": "a4d8506cd7aa39e09f5c9c443346a6f5a821cc2835dc97ed6c77aaabfdb872d2"
+        }
+      ]
     }
   ]
 }

@@ -708,9 +708,9 @@ test("public Flow wrapper blocks on external evidence, then re-invokes the seat 
   const previousClaim = f.state.observations[0].claim.claim_id;
   const evidence = path.join(f.cwd, "external.json"), at = new Date().toISOString();
   fs.writeFileSync(evidence, JSON.stringify({ schemaVersion: 5, source: "controlled-external-evidence",
-    claims: [{ id: "external-claim", subjectType: "flow-step", subjectId: "first", claimType: "fixture.external", fieldOrBehavior: "external observation", value: "pass", createdAt: at, updatedAt: at }],
+    claims: [{ id: "external-claim", subjectType: "flow-step", subjectId: "first", claimType: "fixture.external", fieldOrBehavior: "external observation", value: "pass", createdAt: at, updatedAt: at, verificationPolicyId: "policy.fixture.external" }],
     evidence: [{ id: "external-evidence", claimId: "external-claim", evidenceType: "human_attestation", method: "attestation", sourceRef: "controlled:external", excerptOrSummary: "External evidence arrived", observedAt: at, collectedBy: "fixture-host" }],
-    policies: [], events: [{ id: "external-verified", claimId: "external-claim", status: "verified", actor: "fixture-host", method: "attestation", evidenceIds: ["external-evidence"], createdAt: at, verifiedAt: at }] }));
+    policies: [{ id: "policy.fixture.external", claimType: "fixture.external", requiredEvidence: ["human_attestation"], requiredMethods: ["attestation"], acceptanceCriteria: ["An attested external observation supports the claim."], reviewAuthority: "human", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel: "high" }], events: [{ id: "external-verified", claimId: "external-claim", status: "verified", actor: "fixture-host", method: "attestation", evidenceIds: ["external-evidence"], createdAt: at, verifiedAt: at }] }));
   await attachEvidence(flow.runId, { cwd: f.cwd, gate: "first", file: evidence, kind: "trust.bundle" });
   await reopenMultiCursorStep(flow.runId, { cwd: f.cwd, step_id: "first" });
   const resumed = await orchestrateDelegationFlow(input);
@@ -840,10 +840,11 @@ async function flowRelease(f, key, selections) {
   return f.cmd("release", p, key, { checkpoint: ref(key), flowHead: flowRunHead(run.state), seats: selections });
 }
 const invoke = (seatId, previousInvocationId = null, retryRef = null) => ({ seatId, mode: "invoke", previousInvocationId, retryRef });
+// Surface >= 5 (Flow 6's gate) needs a resolving policy for an attested claim to verify.
 async function externalEvidence(f, gate = "first") {
   const file = path.join(f.cwd, "external.json"), at = new Date().toISOString();
-  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 5, source: "controlled-external", policies: [],
-    claims: [{ id: "external", subjectType: "flow-step", subjectId: "first", claimType: "fixture.external", fieldOrBehavior: "External report", value: "pass", createdAt: at, updatedAt: at }],
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 5, source: "controlled-external", policies: [{ id: "policy.fixture.external", claimType: "fixture.external", requiredEvidence: ["human_attestation"], requiredMethods: ["attestation"], acceptanceCriteria: ["An attested external observation supports the claim."], reviewAuthority: "human", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel: "high" }],
+    claims: [{ id: "external", subjectType: "flow-step", subjectId: "first", claimType: "fixture.external", fieldOrBehavior: "External report", value: "pass", createdAt: at, updatedAt: at, verificationPolicyId: "policy.fixture.external" }],
     evidence: [{ id: "external-evidence", claimId: "external", evidenceType: "human_attestation", method: "attestation", sourceRef: "controlled:external", excerptOrSummary: "External observation arrived", observedAt: at, collectedBy: "fixture-host" }],
     events: [{ id: "external-event", claimId: "external", status: "verified", actor: "fixture-host", method: "attestation", evidenceIds: ["external-evidence"], createdAt: at, verifiedAt: at }] }));
   await attachEvidence(f.spec.topology.runId, { cwd: f.cwd, gate, file, kind: "trust.bundle" });

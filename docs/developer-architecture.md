@@ -21,7 +21,7 @@ the build checks that artifact before compiling. A YAML dependency update must
 regenerate it alongside the lockfile. The optional Anthropic SDK remains behind
 the optional-dependency boundary.
 
-The Knowledge Kit also loads `neo4j-driver` 6.3 lazily as an optional dependency.
+The Knowledge Kit also loads `neo4j-driver` 6.3.2 lazily as an optional dependency.
 Its connection adapter uses the public `driver`, `auth.basic`, session and
 connectivity APIs; selecting no graph or an unavailable graph retains the file
 provider fallback. Provider unit and conformance tests use an injected driver.
@@ -215,7 +215,7 @@ records, review items and reviewer decisions; Flow owns the evidence; Surface ow
 which claims are current. A change no rule flags is recorded as `proposed`; a flagged
 one also becomes a Survey review item. Each routing decision embeds the input and
 policy it was computed from, so `recomputeMemoryRouting` can re-derive it, and is
-recorded as custom-kind Flow evidence on a gate the host names. Flow 5.4 gates accept
+recorded as custom-kind Flow evidence on a gate the host names. Flow 6.0 gates accept
 only `trust.bundle` expectations, so that evidence is recomputable but not yet
 required. The visibility order is Surface's (`meetVisibility`) and entity proposals are Survey's contract; both are consumed from the pinned releases (surface 6.3.0, survey 8.3.0), not restated. The host supplies the model call, the Survey verifier and the Flow run. See
 the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
@@ -254,7 +254,7 @@ records, review items and reviewer decisions; Flow owns the evidence; Surface ow
 which claims are current. A change no rule flags is recorded as `proposed`; a flagged
 one also becomes a Survey review item. Each routing decision embeds the input and
 policy it was computed from, so `recomputeMemoryRouting` can re-derive it, and is
-recorded as custom-kind Flow evidence on a gate the host names. Flow 5.4 gates accept
+recorded as custom-kind Flow evidence on a gate the host names. Flow 6.0 gates accept
 only `trust.bundle` expectations, so that evidence is recomputable but not yet
 required. The visibility order is Surface's (`meetVisibility`) and entity proposals are Survey's contract; both are consumed from the pinned releases (surface 6.3.0, survey 9.0.0), not restated. The host supplies the model call, the Survey verifier and the Flow run. See
 the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
@@ -297,14 +297,16 @@ controller explicitly adopts renewed authority. These additive modules preserve
 existing v2 entrypoints. The rounds controller composes
 Flow-owned scheduling rather than maintaining another ready-frontier model.
 
-The package and privileged lifecycle coordinator both pin Flow 5.4.0. The
+The package and privileged lifecycle coordinator both pin Flow 6.0.0. The
 coordinator's separate staged closure retains its complete npm lockfile and
 whole-closure digest; changing the package dependency alone cannot authorize a
 new reducer. A pin migration verifies the published release commit and reducer
 identity, updates the staged closure and exact admission check together, and
 retains refusal of stale pins and mismatched installed package versions. The
-5.4.0 migration preserves the reducer's 1.3.8 identity and existing dependency
-integrities. This package alignment does not establish that a consumer loads
+6.0.0 migration moves the reducer identity to 2.0.0 (Hachure 0.18.0, Surface
+6.3.0): Surface's `buildReport` helper integrity changes and the other helper
+integrities are unchanged. The closure lockfile, digest and reducer identity
+were regenerated from the published release, not hand-edited. This package alignment does not establish that a consumer loads
 one shared Flow module instance.
 
 Hosts that also call Flow import `assertDelegationFlowRuntime` from
@@ -384,6 +386,10 @@ The shared workflow trust gates pin Surface 6.3.0 and use its default status
 function `"4"` for new bundles. Stored bundle readers retain explicit `"2"`/`"3"`
 stamps through Surface's versioned API, subject to the historical v2 compatibility
 refusal described in the trust-reconcile decision; an unsupported stamp is still refused.
+Every reader that re-derives a stored bundle selects the stamp through
+`scripts/lib/status-function-version.js`: the CI reconciler, `workflow-sidecar claim`,
+the stop gate, the checkpoint seal, the trust panel, the Console trust projection and
+the narrative explanation reader.
 Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
 through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
 and accumulation. Standalone Knowledge projection can use an erasure-capable

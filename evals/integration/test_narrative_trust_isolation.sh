@@ -378,10 +378,12 @@ if (blocked.status==='pass') process.exit(1);
 // claims/evidence/events at evaluation time (never a separately supplied,
 // possibly-stale bundle_report, and never an omitted evaluation clock) — so
 // the positive control must be a genuinely valid, self-consistent bundle.
-const scopeClaim={id:'scope',subjectType:'change',subjectId:'isolation/scope',claimType:'builder.execute.scope',fieldOrBehavior:'positive control fixture',value:'pass',createdAt:now,updatedAt:now};
+const scopeClaim={id:'scope',subjectType:'change',subjectId:'isolation/scope',claimType:'builder.execute.scope',fieldOrBehavior:'positive control fixture',value:'pass',createdAt:now,updatedAt:now,verificationPolicyId:'policy.scope'};
+// Flow 6 (Surface 6.3.0) verifies only a claim whose policy resolves and requires the evidence it carries.
+const scopePolicy={id:'policy.scope',claimType:'builder.execute.scope',requiredEvidence:['human_attestation'],requiredMethods:['attestation'],acceptanceCriteria:['An attested scope review supports the claim.'],reviewAuthority:'human',validityRule:{kind:'manual'},stalenessTriggers:[],conflictRules:[],impactLevel:'high'};
 const scopeEvidence={id:'evidence.scope',claimId:scopeClaim.id,evidenceType:'human_attestation',method:'attestation',sourceRef:'test_narrative_trust_isolation.sh',excerptOrSummary:'positive control fixture',observedAt:now,collectedBy:'flow-agents-eval'};
 const scopeEvent={id:'event.scope',claimId:scopeClaim.id,status:'verified',actor:'flow-agents-eval',method:'attestation',evidenceIds:[scopeEvidence.id],createdAt:now,verifiedAt:now};
-const trust={id:'trust',gate_id:'gate',kind:'trust.bundle',requested_kind:'trust.bundle',status:'passed',bundle:{schemaVersion:5,source:'positive',claims:[scopeClaim],evidence:[scopeEvidence],policies:[],events:[scopeEvent]}};
+const trust={id:'trust',gate_id:'gate',kind:'trust.bundle',requested_kind:'trust.bundle',status:'passed',bundle:{schemaVersion:5,source:'positive',claims:[scopeClaim],evidence:[scopeEvidence],policies:[scopePolicy],events:[scopeEvent]}};
 const passed=evaluateGate(definition,state,{schema_version:'1',evidence:[trust]},'gate',undefined,now);
 if (passed.status!=='pass') process.exit(2);
 NODE

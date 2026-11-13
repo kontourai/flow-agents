@@ -385,7 +385,9 @@ produce its artifacts, submit the bound
 evidence, inspect canonical status, and continue from the resulting action until completion or
 a concrete blocker. Starting Builder creates governed state; it does not start an external worker.
 `next_action.execution_action` identifies the producer skills and artifact targets;
-`evidence_submission` supplies the public mutations, unresolved expectations and evidence schemas.
+`evidence_submission` supplies the public mutations, unresolved expectations and evidence schemas,
+and, when Flow rejected submitted evidence for a specific reason, `rejected_evidence` with the next
+step that resolves each rejection.
 `sync_command` is a status observation command; legacy `command` is its alias with
 `command_role: synchronization`. `workflow evidence` records and synchronizes evidence for Flow
 evaluation. Status only observes that result: it does not execute skills, submit evidence or

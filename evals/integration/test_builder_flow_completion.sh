@@ -74,11 +74,17 @@ function bundleFor(entries) {
   const evidence = [];
   const events = [];
   for (const { claimType, subjectType, id } of entries) {
-    claims.push({ id: `claim.${id}`, subjectType, subjectId: `subject/${id}`, claimType, fieldOrBehavior: `${id} fixture`, value: "pass", createdAt: now, updatedAt: now });
+    claims.push({ id: `claim.${id}`, subjectType, subjectId: `subject/${id}`, claimType, fieldOrBehavior: `${id} fixture`, value: "pass", createdAt: now, updatedAt: now, verificationPolicyId: `policy.${claimType}` });
     evidence.push({ id: `evidence.${id}`, claimId: `claim.${id}`, evidenceType: "human_attestation", method: "attestation", sourceRef: "test_builder_flow_completion", excerptOrSummary: `${id} fixture`, observedAt: now, collectedBy: "test_builder_flow_completion" });
     events.push({ id: `event.${id}`, claimId: `claim.${id}`, status: "verified", actor: "test_builder_flow_completion", method: "attestation", evidenceIds: [`evidence.${id}`], createdAt: now, verifiedAt: now });
   }
-  return { schemaVersion: 5, source: "test_builder_flow_completion", claims, evidence, policies: [], events };
+  // Flow 6 gates (Surface >= 5) verify only claims whose policy resolves and requires their evidence.
+  const policies = [...new Set(entries.map((entry) => entry.claimType))].map((claimType) => ({
+    id: `policy.${claimType}`, claimType, requiredEvidence: ["human_attestation"], requiredMethods: ["attestation"],
+    acceptanceCriteria: [`An attested ${claimType} review supports the claim.`], reviewAuthority: "human",
+    validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel: "high",
+  }));
+  return { schemaVersion: 5, source: "test_builder_flow_completion", claims, evidence, policies, events };
 }
 
 async function driveGate(runId, cwd, gateId, entries) {

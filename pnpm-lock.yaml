@@ -21,8 +21,8 @@ importers:
         specifier: 0.8.0
         version: 0.8.0
       '@kontourai/flow':
-        specifier: 5.4.0
-        version: 5.4.0
+        specifier: 6.0.0
+        version: 6.0.0
       '@kontourai/relay':
         specifier: 0.8.0
         version: 0.8.0(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@1.8.0(zod@4.6.7))
@@ -83,8 +83,8 @@ importers:
         specifier: ^1.7.0
         version: 1.8.0(zod@4.6.7)
       neo4j-driver:
-        specifier: ^6.3.0
-        version: 6.3.0
+        specifier: ^6.3.2
+        version: 6.3.2
 
 packages:
 
@@ -1099,8 +1099,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/flow@5.4.0':
-    resolution: {integrity: sha512-jGimrSdVxzEuI2NvQ++t2xmEEAXoXCXtHat2pfBTSsOAdXzn2OQbHO9WskpmuE6F7zvPrJrky7GUAVOtixDFRg==}
+  '@kontourai/flow@6.0.0':
+    resolution: {integrity: sha512-CBI0+5omN7jdENklNW+kSHiwDPNk5iP5fp8ExV64sOizymFqhJiUkEAdGeUEUUrV1aFGT0ZatnOGIwDV7LKekQ==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1160,11 +1160,6 @@ packages:
     peerDependenciesMeta:
       '@anthropic-ai/sdk':
         optional: true
-
-  '@kontourai/surface@2.14.0':
-    resolution: {integrity: sha512-OiSOUHStjZvfWJe1nXXm3vfbgUvkc3Dc3THqTXbMK70wjKAHfDgz06TwBLeRp3oNJKEIh9xNDYCFT+TqQ7EYrQ==}
-    engines: {node: '>=22'}
-    hasBin: true
 
   '@kontourai/surface@5.0.0':
     resolution: {integrity: sha512-PSMiy6M1Hd8FxuaL1QDxWw42jU6NNBbMiLoBTBGIeg+3Ed3S3UH4YZ3ODuc8wWD4rZeoVaDwmBtWIN3GZ6xhNQ==}
@@ -2793,10 +2788,6 @@ packages:
   guid-typescript@1.0.9:
     resolution: {integrity: sha512-Y8T4vYhEfwJOTbouREvG+3XDsjr8E3kIr7uf+JZ0BYloFsttiHU0WfvANVsR7TxNUJa/WpCnw/Ino/p+DeBhBQ==}
 
-  hachure@0.15.0:
-    resolution: {integrity: sha512-4YKLShbDKG+k52lJvH9shup7UYAX7pW+EA8c/4dx3RQFqCmORHl9gjJrM9vUljuTml/haTJgWYPd1G1MWmrm8Q==}
-    hasBin: true
-
   hachure@0.18.0:
     resolution: {integrity: sha512-DnSAPYqUxPEehNLPBoFoRNGeCNo8JdeB/Yy6DOFBPJg5zo+WcxZSx5RiR/Y6BQCSPkOqS7H5DYwTcx5H9lBTmw==}
     hasBin: true
@@ -3245,14 +3236,14 @@ packages:
     resolution: {integrity: sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==}
     engines: {node: '>= 0.6'}
 
-  neo4j-driver-bolt-connection@6.3.0:
-    resolution: {integrity: sha512-UFKE7Tl/9EVw79qtbnJsU+BDbK3OXSdnQA+PlRzTohM+pFdQYcE7+pP77sXUr7UVKoXWP5tZ+jr3TAnkCFsEiA==}
+  neo4j-driver-bolt-connection@6.3.2:
+    resolution: {integrity: sha512-YZ3kMSOi12xWvouAuCFrDdHbtN6XdSdg2WQEUhtu2kA3MYLDCbdIIJA3aUUVw3hHL0J1+JKHtvsPT4VDXWDXKQ==}
 
-  neo4j-driver-core@6.3.0:
-    resolution: {integrity: sha512-HS3J1dqzbppeVShCvb48NYE9N+qcAVvGxU15LF7uLlC09Cdn1mU10UHY0AUyUJ7aeYGpQMR9d4K3t0xmPlCyfA==}
+  neo4j-driver-core@6.3.2:
+    resolution: {integrity: sha512-ZUhY1hon81bdsFeYsPqlngKOCEZPbmaUeJADyyYBLHMFYF9vpxRxN1Fdig2pLZCTySKq6L9nxxdcAwk60kwrqw==}
 
-  neo4j-driver@6.3.0:
-    resolution: {integrity: sha512-ky7Esn9sdwzwKXgQiuJ3veK5NJNpWhZDK6Qoi0JzKchJgexA5fyl1WMC0IvEFNIER/BrZQ/UfvR1JFz1m10ZRQ==}
+  neo4j-driver@6.3.2:
+    resolution: {integrity: sha512-rc4R6KpTG+a434toE9iFYQhsBqs2pvp4FlGXSA6eW3jGZQNe5g12FhE/ZjetfMUnXI9bxjWPaw0JOUiM9svl3Q==}
     engines: {node: '>=18.0.0'}
 
   netmask@2.1.1:
@@ -5299,12 +5290,12 @@ snapshots:
       commander: 15.0.0
       zod: 4.6.7
 
-  '@kontourai/flow@5.4.0':
+  '@kontourai/flow@6.0.0':
     dependencies:
-      '@kontourai/surface': 2.14.0
+      '@kontourai/surface': 6.3.0
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
-      hachure: 0.15.0
+      hachure: 0.18.0
     transitivePeerDependencies:
       - kerberos
       - supports-color
@@ -5348,14 +5339,6 @@ snapshots:
       '@ai-sdk/provider': 3.0.19
     optionalDependencies:
       '@anthropic-ai/sdk': 1.8.0(zod@4.6.7)
-
-  '@kontourai/surface@2.14.0':
-    optionalDependencies:
-      '@sigstore/sign': 5.0.0
-      '@sigstore/verify': 4.1.2
-    transitivePeerDependencies:
-      - kerberos
-      - supports-color
 
   '@kontourai/surface@5.0.0':
     optionalDependencies:
@@ -7005,8 +6988,6 @@ snapshots:
   guid-typescript@1.0.9:
     optional: true
 
-  hachure@0.15.0: {}
-
   hachure@0.18.0: {}
 
   has-property-descriptors@1.0.2:
@@ -7535,20 +7516,20 @@ snapshots:
 
   negotiator@1.0.0: {}
 
-  neo4j-driver-bolt-connection@6.3.0:
+  neo4j-driver-bolt-connection@6.3.2:
     dependencies:
       buffer: 6.0.3
-      neo4j-driver-core: 6.3.0
+      neo4j-driver-core: 6.3.2
       string_decoder: 1.3.0
     optional: true
 
-  neo4j-driver-core@6.3.0:
+  neo4j-driver-core@6.3.2:
     optional: true
 
-  neo4j-driver@6.3.0:
+  neo4j-driver@6.3.2:
     dependencies:
-      neo4j-driver-bolt-connection: 6.3.0
-      neo4j-driver-core: 6.3.0
+      neo4j-driver-bolt-connection: 6.3.2
+      neo4j-driver-core: 6.3.2
       rxjs: 7.8.2
     optional: true
 

@@ -266,7 +266,23 @@
               "items": { "type": "string", "minLength": 1 },
               "uniqueItems": true
             },
-            "adapter_evidence_is_gate_evidence": { "const": false }
+            "adapter_evidence_is_gate_evidence": { "const": false },
+            "rejected_evidence": {
+              "description": "Evidence the open gate's latest Flow outcome rejected with a Flow 6 Surface-specific reason, with the next step that resolves it. The coarse reason is Flow's routing reason, unchanged.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["gate_id", "expectation_id", "reason", "specific_reason", "next_step"],
+                "properties": {
+                  "gate_id": { "type": "string", "minLength": 1 },
+                  "expectation_id": { "type": "string", "minLength": 1 },
+                  "reason": { "type": "string", "minLength": 1 },
+                  "specific_reason": { "type": "string", "minLength": 1 },
+                  "next_step": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
           }
         },
         "enforcement": {

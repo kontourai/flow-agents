@@ -68,7 +68,9 @@ removing it from the active working set.
 The Knowledge Kit also ships `ingest/cli.js` and the
 `knowledge.ingest-flow-pilot` adapter. This pilot delegates ingest gate evaluation
 and advancement to the installed public Flow CLI, while the kit produces
-capture, classification and routing operation claims. Missing capture evidence
+capture, classification and routing operation claims. Each claim names its
+verification policy and records the operation's read-back check with an explicit
+passing result, which Flow 6 gates require. Missing capture evidence
 holds the run before any store write. The pilot requires POSIX Python 3 for
 descriptor-relative artifact publication and refuses if that prerequisite is
 unavailable. Source text and provenance stay in the raw

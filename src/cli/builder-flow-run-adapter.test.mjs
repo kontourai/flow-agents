@@ -30,6 +30,7 @@ import {
   createRunCorrelationEnvelope,
 } from "../../build/src/run-correlation.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { evidenceRejectionGuidance } from "../../build/src/flow-specific-reason-guidance.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const BUILDER_BUILD_DEFINITION = path.join(REPO_ROOT, "kits/builder/flows/build.flow.json");
@@ -177,7 +178,10 @@ function assertAdapterRejectedInput(error) {
 }
 
 function trustBundle({ claims, status = "verified", waiver = false, stale = false, now = FIXTURE_NOW }) {
-  const policyId = "policy.duration";
+  // Every claim names a verification policy that resolves and requires the evidence it carries:
+  // Surface >= 5 (Flow 6's gate) keeps a claim with no resolving policy, or a required check with
+  // no explicit passing result, at `proposed`. The stale fixture keeps its one-day validity window.
+  const policyIdFor = (claimType) => `policy.${claimType}`;
   const evidence = claims.map((claim, index) => ({
     id: `evidence.${index + 1}`,
     claimId: claim.id,
@@ -187,7 +191,35 @@ function trustBundle({ claims, status = "verified", waiver = false, stale = fals
     excerptOrSummary: `fixture for ${claim.claimType}`,
     observedAt: stale ? "2026-01-01T00:00:00.000Z" : now,
     collectedBy: "flow-agents-test",
+    ...(stale ? { passing: true } : {}),
   }));
+  const policies = [...new Set(claims.map((claim) => claim.claimType))].map((claimType) => stale
+    ? {
+        id: policyIdFor(claimType),
+        claimType,
+        requiredEvidence: ["test_output"],
+        requiredMethods: ["validation"],
+        requiresCorroboration: false,
+        acceptanceCriteria: ["fresh test result"],
+        reviewAuthority: "ci",
+        validityRule: { kind: "duration", durationDays: 1 },
+        stalenessTriggers: ["validity window expires"],
+        conflictRules: [],
+        impactLevel: "high",
+      }
+    : {
+        id: policyIdFor(claimType),
+        claimType,
+        requiredEvidence: ["human_attestation"],
+        requiredMethods: ["attestation"],
+        requiresCorroboration: false,
+        acceptanceCriteria: [`An attested ${claimType} review supports the claim.`],
+        reviewAuthority: "human",
+        validityRule: { kind: "manual" },
+        stalenessTriggers: [],
+        conflictRules: [],
+        impactLevel: "high",
+      });
   return {
     schemaVersion: 5,
     source: "flow-agents-builder-flow-run-adapter-test",
@@ -204,24 +236,11 @@ function trustBundle({ claims, status = "verified", waiver = false, stale = fals
       },
       createdAt: stale ? "2026-01-01T00:00:00.000Z" : now,
       updatedAt: stale ? "2026-01-01T00:00:00.000Z" : now,
-      ...(stale ? { impactLevel: "high", verificationPolicyId: policyId } : {}),
+      impactLevel: "high",
+      verificationPolicyId: policyIdFor(claim.claimType),
     })),
     evidence,
-    policies: stale
-      ? [{
-          id: policyId,
-          claimType: claims[0].claimType,
-          requiredEvidence: ["test_output"],
-          requiredMethods: ["validation"],
-          requiresCorroboration: false,
-          acceptanceCriteria: ["fresh test result"],
-          reviewAuthority: "ci",
-          validityRule: { kind: "duration", durationDays: 1 },
-          stalenessTriggers: ["validity window expires"],
-          conflictRules: [],
-          impactLevel: "high",
-        }]
-      : [],
+    policies,
     events: claims.map((claim, index) => ({
       id: `event.${index + 1}.${status}`,
       claimId: claim.id,
@@ -942,4 +961,49 @@ test("failed execute evidence routes declared plan_gap to plan without replacing
   assert.equal(transition.gate_id, "execute-gate");
   assert.deepEqual(transition.expectation_ids, ["implementation-scope"]);
   assert.equal(persisted.state.transitions.length, before.state.transitions.length + 1);
+});
+
+// Review of #1642 (EXECUTED on Flow 5.4.0): the adapter attaches a bundle and delegates the gate
+// decision to Flow. Flow 5.4.0 re-derived with its internal Surface 2.14 (status function "2"), so
+// a policy-free claim that Surface 6 derives `proposed` still passed and the run advanced. Flow 6
+// gates on Surface 6.3.0; the same bundle must hold the run at pull-work, with a policy reason.
+test("a policy-free stamped-4 pull-work bundle does not advance the run", async () => {
+  const cwd = makeWorkspace();
+  const runId = "policy-free-stamped-4";
+  await startActiveRun(cwd, runId);
+  const selected = claim("builder.pull-work.selected", "work-item");
+  const bundle = {
+    schemaVersion: 5,
+    source: "flow-agents/workflow-sidecar;statusFunctionVersion=4",
+    claims: [{
+      id: selected.id, subjectType: selected.subjectType, subjectId: selected.subjectId, claimType: selected.claimType,
+      fieldOrBehavior: "selected work", value: `builder.pull-work.selected for ${SUBJECT}`,
+      metadata: { workflow_subject_ref: SUBJECT }, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW, impactLevel: "high",
+    }],
+    evidence: [{
+      id: "evidence.selected", claimId: selected.id, evidenceType: "human_attestation", method: "attestation",
+      sourceRef: "src/cli/builder-flow-run-adapter.test.mjs", excerptOrSummary: "selected work", observedAt: FIXTURE_NOW, collectedBy: "flow-agents-test",
+    }],
+    policies: [],
+    events: [{
+      id: "event.selected.verified", claimId: selected.id, status: "verified", actor: "flow-agents-test", method: "attestation",
+      evidenceIds: ["evidence.selected"], createdAt: FIXTURE_NOW, verifiedAt: FIXTURE_NOW,
+    }],
+  };
+  const result = await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, { gate: "pull-work-gate", claimType: "builder.pull-work.selected", subjectType: "work-item", name: "policy-free", bundle }),
+  });
+  const persisted = snapshotRun(cwd, runId);
+  assert.equal(persisted.state.current_step, "pull-work", "a claim with no resolving verification policy must not satisfy pull-work-gate");
+  assert.notEqual(result.outcomes.at(-1)?.status, "pass");
+  assert.equal(persisted.manifest.evidence.at(-1).bundle_report.claims[0].status, "proposed");
+  // Flow 6 keeps the coarse reason and adds the Surface-specific one; Builder names the next step.
+  const diagnostic = result.outcomes.at(-1).diagnostics.claim_evaluation.find((entry) => entry.expectation_id === "selected-work");
+  assert.equal(diagnostic.reason, "rejected");
+  assert.equal(diagnostic.specific_reason, "policy_unresolved");
+  const [guidance] = evidenceRejectionGuidance(persisted.state.gate_outcomes, ["pull-work-gate"]);
+  assert.deepEqual({ ...guidance, next_step: undefined }, { gate_id: "pull-work-gate", expectation_id: "selected-work", reason: "rejected", specific_reason: "policy_unresolved", next_step: undefined });
+  assert.match(guidance.next_step, /no verification policy that resolves/);
 });

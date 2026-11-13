@@ -16,9 +16,15 @@ concurrency:
 
 jobs:
   gate:
-    uses: kontourai/.github/.github/workflows/docs-gate.yml@fd058ed6fcc780d60cc22e26d8c327281a197932
+    uses: kontourai/.github/.github/workflows/docs-gate.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c
     with:
       corpus-ref: b127e35a818b532369843731b3c64792baade83e
+      # Freshness reports without failing only on Dependabot's own runs of its own pull
+      # requests: Dependabot cannot write the corpus-content.json review that clears a
+      # covered package.json, lockfile or workflow change, so the strict check could
+      # never pass there. A push by anyone else to such a branch makes the actor that
+      # person, and every other pull request, merge group and push stays strict.
+      advisory-freshness: ${{ github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' }}
   pages:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: gate
@@ -26,4 +32,4 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    uses: kontourai/.github/.github/workflows/docs-pages.yml@fd058ed6fcc780d60cc22e26d8c327281a197932
+    uses: kontourai/.github/.github/workflows/docs-pages.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c

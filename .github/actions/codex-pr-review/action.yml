@@ -127,7 +127,7 @@ runs:
       id: codex
       if: inputs.engine == 'codex' && (inputs['api-key'] != '' || inputs['openai-api-key'] != '')
       continue-on-error: true
-      uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e
+      uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
       with:
         openai-api-key: ${{ inputs['api-key'] != '' && inputs['api-key'] || inputs['openai-api-key'] }}
         prompt-file: ${{ steps.prepare.outputs['prompt-file'] }}

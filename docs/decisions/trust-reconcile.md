@@ -235,7 +235,7 @@ that predicate rather than treating a structural match as authenticated authorit
 Console/narrative reports and live gates continue to use their current evaluator;
 they do not promise historical re-derivation from the producer's stamp.
 
-The separately staged lifecycle authority retains its exact Flow 5.4.0 reducer,
-Surface 2.14.0 dependency, helper integrities and dependency-closure pin. That
+The separately staged lifecycle authority pins its exact Flow 6.0.0 reducer (2.0.0),
+Surface 6.3.0 dependency, helper integrities and dependency-closure pin. That
 identity is separate from a session bundle's scalar status-function stamp; this
 compatibility fence does not alter or qualify the staged reducer.

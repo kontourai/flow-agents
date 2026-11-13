@@ -71,7 +71,8 @@ Use `flow-agents workflow status --session-dir <session-dir> --json` to inspect
 an existing canonical run. For an interrupted active run, follow the returned
 `next_action.execution_action` and its version-bound skill sources. Its
 `evidence_submission` identifies the public mutations and unresolved evidence
-expectations. Use the exact idempotent command returned in `sync_command` to
+expectations; when evidence was rejected, its `rejected_evidence` gives each
+rejection's specific reason and the next step to resolve it before resubmitting. Use the exact idempotent command returned in `sync_command` to
 observe canonical status after evidence submission;
 the legacy `command` field is the same synchronization command, identified by
 `command_role: synchronization`. Neither command executes the skills or

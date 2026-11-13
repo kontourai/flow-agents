@@ -244,10 +244,11 @@ The initial Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`
 injection over real temporary paths exercises pre-rename preservation and post-rename unavailable/read
 repair. These checks do not simulate power loss or establish hardware/filesystem crash guarantees.
 They are source diagnostics, not installed-runtime or live-provider acceptance. The package now pins
-Flow 5.4.0 alongside the privileged coordinator and its independently locked staged closure. A
-previous dependency-only trial failed the coordinator's 5.2.0 identity check; the migration updates
-the package/release pin and closure digest together while preserving the reducer's 1.3.8 identity.
-The installed lifecycle harness checks exact 5.4.0 admission and FIFO interoperability.
+Flow 6.0.0 alongside the privileged coordinator and its independently locked staged closure. A
+previous dependency-only trial failed the coordinator's 5.2.0 identity check; each migration updates
+the package/release pin, closure lockfile, closure digest and reducer identity together (6.0.0 moves
+the reducer to 2.0.0). The installed lifecycle harness checks exact 6.0.0 admission and FIFO
+interoperability.
 This alignment does not establish a consuming host's shared-module composition or live execution.
 
 The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
@@ -1045,7 +1046,7 @@ a fresh child lease for each Flow call; releasing a child must not release the
 parent. Neither acquisition may own or re-enter Flow's native mutation ticket.
 The earlier callback-level mutation seams alone are insufficient.
 
-Flow Agents uses the public Flow 5.4.0 checked-operation identity and receipt
+Flow Agents uses the public Flow 6.0.0 checked-operation identity and receipt
 APIs. It binds the identity to the original command and effective journal prefix,
 and joins every receipt transition reference to the canonically loaded run. A
 unique requested-gate result is required. The retained observation contains the

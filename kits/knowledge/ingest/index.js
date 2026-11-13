@@ -153,6 +153,9 @@ export class KnowledgeIngestFlow {
         id: `${claimId}:evidence`, evidenceType: "runtime_observation", method: "validation",
         sourceRef: sourceFile, excerptOrSummary: `${stage} operation readback; sha256=${digest}`,
         observedAt: now, collectedBy: producer,
+        // The operation completed and its output was read back before this claim is recorded, so
+        // the required check reports an explicit pass (Flow 6's gate refuses a check with no result).
+        passing: true,
       },
       policy: {
         id: `${stage}-policy`, claimType: `${producer}.${stage}`, requiredEvidence: ["runtime_observation"],

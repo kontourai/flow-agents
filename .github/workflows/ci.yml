@@ -19,7 +19,7 @@ jobs:
   # normative source). Scans git-tracked history; gitignored runtime/.env excluded.
   secret-scan:
     name: Secret Scan
-    uses: kontourai/.github/.github/workflows/secret-scan.yml@fd058ed6fcc780d60cc22e26d8c327281a197932
+    uses: kontourai/.github/.github/workflows/secret-scan.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c
     permissions:
       contents: read
 

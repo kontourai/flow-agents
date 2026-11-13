@@ -1,18 +1,18 @@
 {
-  "kontourai/.github/.github/workflows/veritas-advisory.yml@ea4c99c803a565f56cd18abbf9041f3467d1ee93": {
+  "kontourai/.github/.github/workflows/veritas-advisory.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c": {
     "file": "veritas-advisory.yml",
-    "sha256": "843f5c4bdd32b991617304bfd756081f63102b5f424245c9a071a8a9ed30d7a8"
+    "sha256": "69732f7f9cb3d420e0852b943b079eb5ca7628ceada558c70a1feec2d24798e8"
   },
-  "kontourai/.github/.github/workflows/docs-gate.yml@fd058ed6fcc780d60cc22e26d8c327281a197932": {
+  "kontourai/.github/.github/workflows/docs-gate.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c": {
     "file": "docs-gate.yml",
-    "sha256": "a8f2bd3c3e7f077cad63a65051c7b05ba6f274341355953a6ffdeebb05b7ae48"
+    "sha256": "dfd6100d53c8223dbf861b30002c4d677737933b2278b8a8ec16df5a78724f1a"
   },
-  "kontourai/.github/.github/workflows/secret-scan.yml@fd058ed6fcc780d60cc22e26d8c327281a197932": {
+  "kontourai/.github/.github/workflows/secret-scan.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c": {
     "file": "secret-scan.yml",
     "sha256": "b46b4811306942e920898fd7b8cd08d44926b2add38649099e85d6bdee37d8b7"
   },
-  "kontourai/.github/.github/workflows/docs-pages.yml@fd058ed6fcc780d60cc22e26d8c327281a197932": {
+  "kontourai/.github/.github/workflows/docs-pages.yml@a5a3d3e6a93f4bdb6017164a1917507394b6912c": {
     "file": "docs-pages.yml",
-    "sha256": "948212055a336ed07067098a2f81226efd9a4418c50c8fdd3460193a52ef3517"
+    "sha256": "dc2fde2d40b355df0be93b5416f265e790e12592b62844214af80c52323b62be"
   }
 }

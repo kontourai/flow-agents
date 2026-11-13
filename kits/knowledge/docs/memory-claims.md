@@ -250,7 +250,7 @@ One evidence entry holds a batch of decisions rather than one entry per decision
 because a run decides hundreds of changes and each entry is a locked manifest write.
 Each decision is individually addressable by its `id`.
 
-Flow 5.4 gate expectations accept only `trust.bundle`, so a gate cannot yet *require*
+Flow 6.0 gate expectations accept only `trust.bundle`, so a gate cannot yet *require*
 this evidence. It is recorded and recomputable, not gated.
 
 ## Metrics

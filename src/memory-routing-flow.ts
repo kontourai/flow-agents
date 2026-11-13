@@ -6,7 +6,7 @@
  * and digest-addressed) and the run's metrics. Flow stamps the attachment time
  * and the file digest; nothing here has a clock.
  *
- * Flow 5.4 gate expectations accept only `trust.bundle`, so these entries are
+ * Flow 6.0 gate expectations accept only `trust.bundle`, so these entries are
  * recorded and recomputable but a gate cannot yet require them.
  */
 import { createHash } from "node:crypto";

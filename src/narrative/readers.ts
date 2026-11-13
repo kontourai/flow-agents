@@ -324,9 +324,17 @@ export function readFlowReportCandidate(input: { flowRoot: string; runId: string
 }
 
 interface SurfaceModule {
-  buildTrustReport(bundle: Record<string, unknown>): unknown;
+  buildTrustReport(bundle: Record<string, unknown>, options?: { statusFunctionVersion?: string }): unknown;
   explainClaim(report: unknown, claimId: string): unknown;
+  statusFunctionVersion?: string;
+  supportedStatusFunctionVersions?: readonly string[];
 }
+
+// The shared reader rule for persisted bundles: re-derive with the status function the writer
+// stamped, so an explanation matches the status the bundle recorded across Surface upgrades.
+const statusFunctionVersions = require(path.resolve(moduleDir, "../../../scripts/lib/status-function-version.js")) as {
+  statusFunctionVersionForBundle(bundle: unknown, surface: SurfaceModule): { version: string; stamped: boolean };
+};
 
 let surfaceModule: { api: SurfaceModule; version: string } | null | undefined;
 
@@ -393,7 +401,8 @@ export function readSurfaceExplanationCandidate(input: {
       policies: bundle["policies"] ?? [],
       events: bundle["events"] ?? [],
     };
-    const report = surface.api.buildTrustReport(surfaceBundle);
+    const { version: statusFunctionVersion } = statusFunctionVersions.statusFunctionVersionForBundle(surfaceBundle, surface.api);
+    const report = surface.api.buildTrustReport(surfaceBundle, { statusFunctionVersion });
     explanation = surface.api.explainClaim(report, input.claimId);
   } catch {
     return readerError("not_captured", "surface explanation", "surface claim explanation could not be produced");
