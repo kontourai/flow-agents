@@ -33,8 +33,10 @@ Usage: learning-review-proposals.sh [economics.jsonl ...] [--since VAL] [--until
   --until VAL           ISO-8601 (no fractional seconds) or epoch-ms upper bound on record .at
   --sessions-root DIR   root for <task_slug>/trust.bundle + <task_slug>/gate-review.inquiries.json
                         joins (default: .kontourai/flow-agents)
-  --ledger PATH         proposal ledger path (default: .kontourai/telemetry/learning-review-proposals.jsonl,
-                        override via LEARNING_REVIEW_PROPOSALS_LEDGER)
+  --ledger PATH         proposal ledger path (default: the one `flow-agents learn --print-ledger-path` prints:
+                        <main checkout>/.kontourai/telemetry/learning-review-proposals.jsonl, overridden by
+                        LEARNING_REVIEW_PROPOSALS_LEDGER or TELEMETRY_DATA_DIR, relative values against the main
+                        checkout; outside a repository, the current directory)
   -h, --help            show this help
 
 Advisory only — never writes kits/**, .datum/config.json, or any gate/flow config file.
@@ -65,12 +67,11 @@ take_ledger_lock() {
 }
 default_log="${TELEMETRY_ECONOMICS_LOG_FILE:-${TELEMETRY_DATA_DIR:-${SCRIPT_DIR}/../..}/.kontourai/telemetry/economics.jsonl}"
 default_sessions_root="${SCRIPT_DIR}/../../.kontourai/flow-agents"
-default_ledger="${LEARNING_REVIEW_PROPOSALS_LEDGER:-${TELEMETRY_DATA_DIR:-${SCRIPT_DIR}/../..}/.kontourai/telemetry/learning-review-proposals.jsonl}"
 
 since_arg=""
 until_arg=""
 sessions_root="$default_sessions_root"
-ledger_path="$default_ledger"
+ledger_path=""
 sources=()
 
 while [[ "$#" -gt 0 ]]; do
@@ -84,6 +85,14 @@ while [[ "$#" -gt 0 ]]; do
     *) sources+=("$1"); shift ;;
   esac
 done
+
+# The default ledger comes from the shared resolver (scripts/telemetry/ledger-path.mjs -> kits/knowledge/learn/ledger.js),
+# so this writer and `flow-agents learn` always pick the same file. A resolution failure refuses: never a guessed path.
+if [[ -z "$ledger_path" ]]; then
+  command -v node >/dev/null 2>&1 || { echo "learning-review-proposals: node is required to resolve the default ledger; pass --ledger PATH" >&2; exit 1; }
+  ledger_path="$(node "$SCRIPT_DIR/ledger-path.mjs")" || { echo "learning-review-proposals: could not resolve the default ledger; pass --ledger PATH" >&2; exit 1; }
+  [[ -n "$ledger_path" ]] || { echo "learning-review-proposals: the default ledger resolved to nothing; pass --ledger PATH" >&2; exit 1; }
+fi
 
 min_window_sample="${LR_MIN_WINDOW_SAMPLE:-5}"
 min_kit_sample="${LR_MIN_KIT_SAMPLE:-6}"
