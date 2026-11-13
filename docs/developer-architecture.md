@@ -472,6 +472,33 @@ Both installers verify that inventory before destination writes. No destination
 build or npm install occurs. Kits retain their declarations and selection rules;
 this distribution repair does not move methodology or policy into the adapter.
 
+Kit discovery and canonical run binding share `canonicalKitsRoot`. Runtime artifact
+storage remains excluded, with one installation-specific exception: the exact
+physical `kits/` directory beside the executing package, compared by real path.
+The identity is derived from the loaded module, never project metadata, cwd or an
+environment override. A sibling kit directory under `.flow-agents/` and a symlink
+into such a sibling remain refused; a symlink to the executing package's exact
+kit bytes is only an alias. Redirecting the package's own `kits/` symlink outside
+its physical root grants no exception. Replacing the executing installation's
+code or bytes is still same-uid code tampering, outside this local protection's
+external CI/owner-review trust boundary.
+
+This also applies to OpenCode global and Kiro's default `~/.flow-agents` install.
+Those bundles now receive the same standalone public dependency closure and
+`build/runtime-imports.json` marker; without them the CLI could fail module loading
+before discovery and the loaded resolver could not identify its kit tree.
+The Stop hook loads the installed resolver for Builder gate expectations; before
+this exception, artifact-root refusal could make its lookup return null and use
+the generic `workflow.*` fallback. Unknown-flow admission diagnostics now name
+skipped sources and their refusal reasons. The `delivery` rule remains unchanged:
+non-git cwd roots also declare `delivery/` as artifact storage, so narrowing only
+kit discovery would disagree with artifact protection.
+
+`node --test src/cli/vendored-runtime-kits.test.mjs` performs global installs in
+scratch HOMEs, checks workflow admission and the installed hook's Builder gate
+lookup, and refuses copied package metadata in agent artifact storage. This
+establishes local lookup behavior, not live harness or provider qualification.
+
 The existing ownership plan and `.flow-agents/owned-files.json` cover runtime,
 skills and agents together. The runtime retains the canonical `.claude/settings.json`
 seed so its own uninstall command needs no source package or build. Runtime collisions refuse installation even with
