@@ -153,7 +153,7 @@ bash evals/ci/run-baseline.sh
 
 It runs deterministic credential-free checks: source tree validation, context-map drift, static evals, workflow artifact checks, publish-change helper coverage, sidecar writer coverage, Goal Fit and workflow steering hooks, hook-influence contract checks, Flow Kit repository checks, runtime adapter activation, and bundle install smoke tests. It writes logs plus Markdown provider evidence summaries under `evals/results/ci-baseline/`. GitHub Actions uploads separate per-lane artifacts: `flow-agents-ci-source-and-static`, `flow-agents-ci-workflow-contracts`, and `flow-agents-ci-runtime-and-kit`.
 
-Default CI intentionally skips live GitHub mutation checks, LLM behavioral/acceptance evals, and Veritas/governance provider evidence unless a maintainer opts into those lanes. The CI summary must name those skips so evidence-gate and release-readiness can classify them as accepted skips or `NOT_VERIFIED` according to change risk.
+Default CI intentionally skips live GitHub mutation checks, LLM behavioral/acceptance evals, and external governance-provider evidence unless a maintainer opts into those lanes. Repository-local Veritas readiness is required: the existing static check runs the pinned CLI, whose required evidence command executes the static suite once. The CI summary must name the external skips so evidence-gate and release-readiness can classify them as accepted skips or `NOT_VERIFIED` according to change risk.
 
 Surface trust artifact attachment is covered by deterministic schema, runtime, and report checks, not by live provider authority. The targeted local command is:
 

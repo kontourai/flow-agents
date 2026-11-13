@@ -4,13 +4,13 @@
   "reviews": [
     {
       "id": "dependabot-pnpm611-ci-compute",
-      "reviewedAt": "2026-11-13T00:33:14.679799+00:00",
-      "note": "Reviewed the complete CI compute guide and all four changed workflow byte streams. Each workflow is exactly its prior bytes with pnpm/action-setup 6.1.0 replaced by the immutable 6.1.1 SHA in eleven setup steps. Per-ref groups, cancel-in-progress, triggers, job inventory, matrices, runner expansion, permissions, reusable pins, deadlines and finalizers are byte-identical. The guide remains accurate, including publication exclusions and hosted-observation limits.",
-      "limits": "Local source/document byte review only; no assertion of action execution, hosted acceptance, runtime, provider or publication success.",
+      "reviewedAt": "2026-11-13T01:46:59.753743+00:00",
+      "note": "Reviewed the complete CI compute guide, the four changed workflow byte streams, the static baseline command, its registration audit, the identity preamble, package scripts and the unchanged Repo Map. Complete byte comparison to main proves only the eleven pnpm 6.1.1 pins and the explicit Source and Static evidence artifact paths/hidden-file option change the workflows. The existing static check now invokes pinned 1.12.2 readiness; its unchanged sole required npm static command runs the full suite once. All check IDs, lanes, runner expansion, permissions, checkout identities, time limits, reusable pins and per-ref cancellation remain unchanged. The guide now distinguishes merge-checkout evidence from PR-head identity and the separate 1.11.2 advisory.",
+      "limits": "Source/document byte review and bounded route controls only; full pinned-CLI readiness and all original lanes still require actual hosted execution at the new candidate. No provider, native, deployment or publication acceptance.",
       "inputs": [
         {
           "path": ".github/workflows/ci.yml",
-          "sha256": "9b4c510d47adea03f27bd109ed77c8e0927d1f1866fd8033822fa574f7ae07c9"
+          "sha256": "4f42b6fea05964ed96055d45a672a70dc5f1a4ad276c76fd80a3ea1544399322"
         },
         {
           "path": ".github/workflows/kit-gates-demo.yml",
@@ -23,12 +23,32 @@
         {
           "path": ".github/workflows/runtime-compat.yml",
           "sha256": "3056de5bc3ccf051093974ec7dda1994808cc2ed2dcccda34273d6ce0ffbde56"
+        },
+        {
+          "path": "evals/ci/run-baseline.sh",
+          "sha256": "cb82ecee4dc2c28bc904cc71ec076b1d09967146a235b90690c1361437d14d87"
+        },
+        {
+          "path": "evals/static/test_ci_check_registration.sh",
+          "sha256": "d57c37c0ab195f3e01dd021ab2bab4706cc6cbbedb2fcad926463736b9128728"
+        },
+        {
+          "path": "scripts/ci/readiness-source.mjs",
+          "sha256": "6ff41e9b68c340aa3f5080b9cf42ea850290b2432a75b09764519d56dd8749b4"
+        },
+        {
+          "path": "package.json",
+          "sha256": "0715470720565ef9a805889dac3626419228aa5d5eaeb11dd14a7de3ca505f83"
+        },
+        {
+          "path": ".veritas/repo-map.json",
+          "sha256": "0905682887e4e8c1ad97dd727c6530735ba9c823ac4a9b134e149fcf398f4896"
         }
       ],
       "outputs": [
         {
           "path": "docs/ci-compute-budget.md",
-          "sha256": "91e905b2884c85b137cdcc4102c2127154c23d1cb7f9c422ab5546cc147b558e"
+          "sha256": "87cfd92f7952db894a8c10b2deca35f2b1a0156280176be41d7475bbb84a034a"
         }
       ]
     }
