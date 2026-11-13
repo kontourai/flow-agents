@@ -430,13 +430,14 @@
     "@kontourai/flow": "6.0.0",
     "@kontourai/relay": "0.8.0",
     "@kontourai/surface": "6.3.0",
+    "@kontourai/surface-knowledge": "npm:@kontourai/surface@6.3.0",
     "@kontourai/survey": "9.0.0",
     "@kontourai/thread": "0.7.0",
     "@kontourai/traverse": "5.0.3",
     "esbuild": "0.28.2"
   },
   "optionalDependencies": {
-    "@anthropic-ai/sdk": "^1.8.0",
+    "@anthropic-ai/sdk": "^1.7.0",
     "neo4j-driver": "^6.3.2"
   },
   "packageManager": "pnpm@11.25.0"

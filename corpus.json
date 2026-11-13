@@ -35,7 +35,12 @@
     {
       "product": "surface",
       "via": "@kontourai/surface",
-      "for": "Validate evidence bundles, derive workflow claim trust reports, and project Knowledge erasure, visibility, and memory."
+      "for": "Validate evidence bundles and derive workflow claim trust reports."
+    },
+    {
+      "product": "surface",
+      "via": "@kontourai/surface-knowledge",
+      "for": "Project Knowledge erasure, visibility, and memory using Surface 6.3.0."
     },
     {
       "product": "survey",

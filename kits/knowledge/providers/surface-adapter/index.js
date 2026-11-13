@@ -81,12 +81,19 @@ function deletedRetention(mutationLog) {
  * @param {string[]} [options.recordTypes] - Filter by record types
  * @param {boolean} [options.includeRetired=false] - Include retired records
  * @param {Object} [options.agent] - Agent identity for provenance
- * @returns {Promise<import("@kontourai/surface").TrustBundle>}
+ * @returns {Promise<import("@kontourai/surface-knowledge").TrustBundle>}
  */
 export async function buildKnowledgeTrustBundle(options = {}) {
-  // Vault and health consumers do not require the optional Surface projection,
-  // so Surface is loaded only here.
-  const surface = await import("@kontourai/surface");
+  // Vault and health consumers do not require the optional Surface projection.
+  // The installed Flow Agents package supplies an explicit Knowledge alias; a standalone
+  // Kit may instead have the public Surface 6 package under its ordinary name.
+  let surface;
+  try {
+    surface = await import("@kontourai/surface-knowledge");
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND" || !error.message.includes("'@kontourai/surface-knowledge'")) throw error;
+    surface = await import("@kontourai/surface");
+  }
   if (typeof surface.TrustBundleBuilder !== "function" || typeof surface.isDeletedClaim !== "function") {
     throw new Error("Knowledge Surface projection requires @kontourai/surface 6.3.0 or a compatible erasure-capable release");
   }

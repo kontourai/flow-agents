@@ -25,8 +25,16 @@ import {
   authorityAtRevision, retrievalProvenance, reconciliationFor, proposalFor, writeResult,
 } from "./index.js";
 
-// Recall needs Surface 6.3.0 or later (derived visibility); Flow Agents pins it.
-const Surface = await import("@kontourai/surface");
+// The kit and shared workflow gates both pin Surface 6.3.0. The alias remains
+// the explicit Knowledge dependency for standalone packaging.
+// Standalone installations may instead provide Surface 6 under its usual name.
+let Surface;
+try {
+  Surface = await import("@kontourai/surface-knowledge");
+} catch (error) {
+  if (error?.code !== "ERR_MODULE_NOT_FOUND" || !error.message.includes("'@kontourai/surface-knowledge'")) throw error;
+  Surface = await import("@kontourai/surface");
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INPUT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../schemas/knowledge/living-context-input.schema.json"), "utf8"));

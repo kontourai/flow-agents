@@ -217,7 +217,7 @@ one also becomes a Survey review item. Each routing decision embeds the input an
 policy it was computed from, so `recomputeMemoryRouting` can re-derive it, and is
 recorded as custom-kind Flow evidence on a gate the host names. Flow 6.0 gates accept
 only `trust.bundle` expectations, so that evidence is recomputable but not yet
-required. The visibility order is Surface's (`meetVisibility`) and entity proposals are Survey's contract; both are consumed from the pinned releases (surface 6.3.0, survey 9.0.0), not restated. The host supplies the model call, the Survey verifier and the Flow run. See
+required. The visibility order is Surface's (`meetVisibility`) and entity proposals are Survey's contract; both are consumed from the pinned releases (surface 6.3.0, survey 8.3.0), not restated. The host supplies the model call, the Survey verifier and the Flow run. See
 the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
 evidence and the metrics.
 
@@ -382,18 +382,20 @@ Surface's original trust-panel element and exact package
 metadata also ship with its entry; synchronous narrative reads and panel rendering
 use those owned files. Survey retains the version metadata of its own resolved
 Surface dependency, including when that differs from Flow Agents' direct pin.
-One Surface pin, 6.3.0, serves both the workflow trust gates and the Knowledge
-projection, Living Context recall and memory routing (erasure, derived visibility
-and accumulation); there is no second Surface alias. New trust bundles are derived
-and stamped with Surface's default status function `"4"`. Every reader that
-re-derives a stored bundle (the stop gate, the CI reconciler, `workflow-sidecar claim`,
-the trust panel, the checkpoint seal, the Console trust projection and the narrative
-explanation reader) uses the version the bundle's writer stamped, through
-`scripts/lib/status-function-version.js`, so a bundle written under `"2"` or `"3"`
-keeps the status it recorded, subject to the historical v2 compatibility refusal
-described in the trust-reconcile decision; an unsupported stamp is still refused. Recall requires Surface 6.3.0 or later with derived
-visibility; a standalone Kit refuses an older Surface that lacks the deletion API.
-Survey is pinned to 9.0.0.
+The shared workflow trust gates pin Surface 6.3.0 and use its default status
+function `"4"` for new bundles. Stored bundle readers retain explicit `"2"`/`"3"`
+stamps through Surface's versioned API, subject to the historical v2 compatibility
+refusal described in the trust-reconcile decision; an unsupported stamp is still refused.
+Every reader that re-derives a stored bundle selects the stamp through
+`scripts/lib/status-function-version.js`: the CI reconciler, `workflow-sidecar claim`,
+the stop gate, the checkpoint seal, the trust panel, the Console trust projection and
+the narrative explanation reader.
+Knowledge projection, Living Context recall, and memory routing use Surface 6.3.0
+through the `@kontourai/surface-knowledge` alias for erasure, derived visibility,
+and accumulation. Standalone Knowledge projection can use an erasure-capable
+Surface under its ordinary name; recall requires Surface 6.3.0 or later with derived
+visibility. Packaged memory modules include their alias through Flow Agents. Survey
+is pinned to 9.0.0.
 Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation. The optional
 Anthropic SDK range starts at 1.7.0; Relay retains its explicit zero-retry default,

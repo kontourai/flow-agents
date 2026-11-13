@@ -379,7 +379,7 @@ test("purged graph records round-trip as Surface deleted claims without content 
   });
   assert.ok(!JSON.stringify(bundle).includes("must-not-escape"));
   assert.ok(bundle.evidence.every((e) => e.claimId !== claim.id && !e.sourceRef.includes(erased.id)));
-  const { validateTrustBundle } = await import("@kontourai/surface");
+  const { validateTrustBundle } = await import("@kontourai/surface-knowledge");
   validateTrustBundle(bundle);
 });
 
@@ -499,15 +499,14 @@ test("default projection retains a bounded tombstone whose record type was omitt
   assert.equal(filtered.claims.some((item) => item.subjectId === "bounded"), false);
 });
 
-test("one Surface serves Knowledge and the shared gate: status function 4, with the pre-upgrade v3 control preserved", async () => {
-  const surface = await import("@kontourai/surface");
+test("Surface 6 shares the v4 default while preserving the pre-upgrade v3 control", async () => {
+  const gate = await import("@kontourai/surface");
+  const knowledge = await import("@kontourai/surface-knowledge");
   const legacy = await import("@kontourai/surface-legacy");
   assert.equal(legacy.statusFunctionVersion, "3");
-  assert.equal(surface.statusFunctionVersion, "4");
-  assert.deepEqual(surface.supportedStatusFunctionVersions, ["2", "3", "4"], "bundles stamped by the Surface 5 gate must stay re-derivable");
-  // The behavior change the Surface 5 -> 6 move brings to the gate: two events 0.1 ms apart
-  // share one millisecond. Status function 3 compares them as Dates and lets the dispute stand;
-  // 4 compares the exact instants, so the later verification wins.
+  assert.equal(gate.statusFunctionVersion, "4");
+  assert.equal(knowledge.statusFunctionVersion, "4");
+  assert.deepEqual(gate.supportedStatusFunctionVersions, ["2", "3", "4"]);
   const claim = { id: "c", claimType: "test", status: "verified" };
   const evidence = [{ id: "e", claimId: "c", evidenceType: "test_output", method: "validation", passing: true, observedAt: "2026-01-01T00:00:00Z" }];
   const policies = [{ id: "p", claimType: "test", requiredEvidence: ["test_output"], requiredMethods: ["validation"], validityRule: { kind: "manual" } }];
@@ -516,6 +515,7 @@ test("one Surface serves Knowledge and the shared gate: status function 4, with 
     { id: "v", claimId: "c", status: "verified", createdAt: "2026-01-01T00:00:00.0002Z" },
   ];
   assert.equal(legacy.deriveClaimStatus({ claim, evidence, policies, events }).status, "disputed");
-  assert.equal(surface.deriveClaimStatus({ claim, evidence, policies, events, statusFunctionVersion: "3" }).status, "disputed");
-  assert.equal(surface.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
+  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events, statusFunctionVersion: "3" }).status, "disputed");
+  assert.equal(gate.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
+  assert.equal(knowledge.deriveClaimStatus({ claim, evidence, policies, events }).status, "verified");
 });

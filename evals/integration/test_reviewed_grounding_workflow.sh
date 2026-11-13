@@ -34,12 +34,6 @@ assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && 
 // Survey 9 changes the Trust Bundle projection (buildSurveyTrustBundle emits the review-outcome
 // policy and attestation evidence); this workflow imports only importExtractionEnvelope and
 // buildReviewDecision, and every assertion above holds unchanged.
-// surface: 5.0.0 -> 6.3.0 when the shared workflow and Knowledge moved to one Surface pin.
-// Safe on evidence: src/reviewed-grounding-policy.ts, src/reviewed-extraction-evidence.ts and
-// the modules they import (canonical-digest, reviewed-extraction-evidence-browser) are
-// byte-identical between surface v5.0.0 and v6.3.0; src/types.ts only widens SchemaVersion to 9
-// and adds retention, evidence-collector and stale-reason types.
-// Every behavior assertion above passed on 6.3.0 before this pin moved.
 // Knowledge and the shared workflow both pin Surface 6.3.0; historical bundle
 // readers still select the stored status-function version.
 // Lookout 0.8.9 requires acquisition's exact snapshot store and the recorder's
