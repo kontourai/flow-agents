@@ -1,5 +1,25 @@
 # Changelog
 
+## [11.0.0](https://github.com/kontourai/flow-agents/compare/v10.0.0...v11.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** Flow 6 gate semantics apply to every Builder run. Required claims need a resolved verification policy and an explicit passing result, and stored bundles without them stop satisfying verified-only gates. The coordinator's pinned Flow reducer identity changes to 2.0.0. New trust bundles are stamped status function "4", which Surface 5 and earlier cannot re-derive.
+* **builder:** Builder's clean-critique gate requires a reviewer in a separate runtime session from the implementer. Reviews by in-session Claude Code subagents (which share the parent's session id), self-declared reviewer labels, and critiques or assignment claims recorded before this change are refused. The holder recovers by re-claiming from its own session; reviews need a separate session or another engine.
+
+### Features
+
+* **deps:** adopt Flow 6.0.0 and re-derive stored bundles with their stamped status function ([#1642](https://github.com/kontourai/flow-agents/issues/1642)) ([415e685](https://github.com/kontourai/flow-agents/commit/415e685be1b9597567023c78ce0c99032e10c2da))
+* **learning:** export the learning-review ledger contract for read-only consumers ([#1637](https://github.com/kontourai/flow-agents/issues/1637)) ([073f9c1](https://github.com/kontourai/flow-agents/commit/073f9c1aac841065d499d437f199b05e17e0a46c))
+
+
+### Fixes
+
+* **builder:** fail closed when clean critique uses a self-declared or same-session reviewer ([#1643](https://github.com/kontourai/flow-agents/issues/1643)) ([b0cd559](https://github.com/kontourai/flow-agents/commit/b0cd559f2cceb37bc7ea0cdec7fb7bd3f6ce5849))
+* **deps:** consolidate updates with replay and pinned-tool qualification ([#1631](https://github.com/kontourai/flow-agents/issues/1631)) ([1d962d4](https://github.com/kontourai/flow-agents/commit/1d962d464aa71c345dd424923a3acd0b7b564064))
+* restore packaged kit discovery in vendored runtimes ([#1638](https://github.com/kontourai/flow-agents/issues/1638)) ([5e304e1](https://github.com/kontourai/flow-agents/commit/5e304e177dd854505a6cc64464f61fd0d4262b6d))
+
 ## [10.0.0](https://github.com/kontourai/flow-agents/compare/v9.14.0...v10.0.0) (2026-11-12)
 
 
