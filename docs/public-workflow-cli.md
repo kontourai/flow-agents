@@ -980,7 +980,7 @@ For an actionable run, `next_action` separates the work from evidence submission
 | --- | --- |
 | `executor` | `agent`: the calling agent owns orchestration. |
 | `execution_action` | Execute the version/hash-bound skill sources, perform the declared operations through their authorized executors, and produce the declared artifact targets in the canonical stop-condition sequence. |
-| `evidence_submission` | Use the canonical public mutation bindings and parameters to submit genuine evidence for the unresolved expectations. Its `schemas` supplies the evidence-reference format and examples. |
+| `evidence_submission` | Use the canonical public mutation bindings and parameters to submit genuine evidence for the unresolved expectations. Its `schemas` supplies the evidence-reference format and examples. When the open gate's latest Flow outcome rejected evidence with a Flow 6 Surface-specific reason (for example `policy_unresolved`, `check_result_missing`, `check_failed` or `validity_unevaluable`), its optional `rejected_evidence` names each expectation, Flow's unchanged coarse `reason`, the `specific_reason` and the `next_step` that resolves it. |
 | `sync_command` | Run the version-pinned public status command to inspect canonical state after submission. |
 | `command`, `command_role` | Compatibility alias of `sync_command`, explicitly labeled `synchronization`. |
 
