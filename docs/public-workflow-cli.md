@@ -491,7 +491,7 @@ flow-agents observe verify [--session-dir <dir>]            # optional: run lock
 
 `observe status` locks nothing, runs nothing, and never counts as a reminder. `observe verify`
 runs the locked checks that have no result at the current commit through the writer-observed
-runner. Use it for suites slower than the Stop hook's budget.
+runner. Use it for suites slower than the Stop hook's budget, and always on hosts that do not re-run checks at Stop (Kiro and unknown hosts): there the Stop uses the latest `observe verify` result for the current commit and lock.
 
 ## Review and verify an existing change
 

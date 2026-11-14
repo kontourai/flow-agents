@@ -34,7 +34,8 @@ This step produces two artifacts, as files the gate reads: `<slug>--plan-work.md
 3. Edit `acceptance.json`: give every criterion a command evidence ref that proves it,
    `{"kind": "command", "excerpt": "<runnable command>"}`, and optionally `"file"` naming the test it
    runs. At least one check must be a real test run. A criterion that no command can prove is
-   `"status": "accepted_gap"` with `"notes"` explaining why; it goes to the human.
+   `"status": "accepted_gap"` with `"notes"` explaining why. A gap never passes: the Stop hands it
+   to the human as "not demonstrated".
 4. Work freely. Run whatever you like. Commit your work: checks only count against a committed tree.
 5. Ask a separate reviewer session (`review-work`) to review the committed head and record
    `workflow critique`. The implementing session cannot review its own work.
@@ -43,8 +44,9 @@ This step produces two artifacts, as files the gate reads: `<slug>--plan-work.md
 
 ## Rules The Hook Enforces
 
-- At the first Stop, each criterion's check is **locked**: its command and the test files and
-  package scripts it runs are hashed. Editing a locked check does not change what runs. Editing a
+- At the first Stop, each criterion's check is **locked**: its command, every package script it
+  reaches (nested scripts included, at most 5 deep), and the test files those run are hashed. A
+  check that cannot be resolved statically is reported, never passed. Editing a locked check does not change what runs. Editing a
   locked test file is reported. Revert it, or give a one-line reason under `## Check Changes`.
   The human sees that reason.
 - A file changed outside `## Expected Modified Files` needs a one-line reason under

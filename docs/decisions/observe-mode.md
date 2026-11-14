@@ -67,10 +67,17 @@ The lean flow is not a substitute. It is blocked by #1645 and enforces fewer gat
    The agent writes the plan (`<slug>--plan-work.md`) and the acceptance definition
    (`acceptance.json`) as files. Each criterion names the command that proves it as a `command`
    evidence ref, the shape the Stop hook's backstop already reads. The gate reads these files;
-   nothing submits them. At the first boundary where `acceptance.json` defines a check for every
-   criterion, the harness **locks** the checks. It records each check's SHA-256 in a hash-chained
-   observe ledger. From then on the harness runs only the locked commands. An edit to a locked
-   check is reported and never executed. Optional human plan approval (a checkpoint, like a full
+   nothing submits them. At the first boundary that sees a criterion's check, the harness **locks**
+   it in a hash-chained observe ledger. The lock is resolved **transitively**. It covers the command
+   string, every package-script body the command reaches through npm/pnpm/yarn script indirection
+   and `&&`/`;`/`|` chains (including pre/post scripts), and the test files and directories the
+   leaf commands name. Resolution refuses rather than truncates. An undefined script, a script
+   cycle, indirection deeper than 5 levels, or shell expansion that cannot be read statically
+   leaves the check **unverifiable**, and that is reported, never passed. The harness always runs
+   the locked command string, never an edited one. A changed check-file or script byte is
+   different: the harness still runs the command, but the change is reported. A changed script
+   must be reverted. A changed test file must be reverted, or given a reason under
+   `## Check Changes` that the human sees. Optional human plan approval (a checkpoint, like a full
    spec against a quick one) is off by default and follows in the next PR.
 2. **Path: the agent works freely.** Orchestration (multi-agent work, ordering) belongs to the
    host, Station, or an external recipe, not to Builder. The flow has one working step, `verify`: the agent works there and the harness verifies.
@@ -96,11 +103,11 @@ the canonical run's `params.source_base`. Scope is diffed against that commit.
 | `implementation-plan` | **Removed as a submission.** The plan file is read for `## Expected Modified Files`. | A recorded plan claim | The plan's operative content (files, acceptance) is consumed directly by derivations. |
 | `implementation-scope` | **Derived.** `git diff` from `params.source_base` to the worktree, compared with the declared files or globs. An extra file needs a one-line reason under `## Scope Changes`, a judgment record. The worktree must also be committed. | Nothing. #1249: the old claim carried no file set, so it could not see this defect class. | The derivation is exactly the defect class's input. |
 | `tests-evidence` | **Observed.** At least one locked check is a recognised test command (`testExecutionProof`). It has a passing observation at the current commit, from the capture log or the hook-triggered writer re-run. | Nothing | Same observation sources and fold as `record-gate-claim`. |
-| `acceptance-criteria` | **Derived.** Each criterion's locked check has a passing observation at the current commit. | Criteria whose proof is not a command | Such a criterion is an explicit `accepted_gap` (with `notes`), which goes to the human, never to a pass. |
+| `acceptance-criteria` | **Derived.** Each criterion's locked check has a passing observation at the current commit. A required criterion can never be satisfied by an agent-declared gap: any `accepted_gap` makes the derived acceptance claim unverified. | Criteria whose proof is not a command | Such a criterion is an explicit `accepted_gap` (with `notes`). It goes to the human as a handoff, never to a pass. |
 | `clean-critique` | **Judgment record, kept.** `workflow critique` from a separate reviewer session. Same-session and self-declared reviewers are still refused (#1643). | Nothing | Review cannot be observed. #1644's authenticated reviewer remains open. |
 | `merge-readiness`, `ci-merge-readiness`, learning | **Not in this flow yet.** | Publication and learning gates | They follow with the publish boundary (PR series below). |
 | Status syncs, provisional publish | **Removed.** | Nothing. Provisional publish only served the retired CI anchor (`trust-reconcile.md`). | |
-| Accepted gaps | **Judgment record, kept.** A criterion with `status: "accepted_gap"` and `notes`. | They never satisfied a gate before either; they derive `assumed`. | A gap ends reminders for that criterion and goes into the handoff summary. |
+| Accepted gaps | **Judgment record for a human, not a truth.** A criterion with `status: "accepted_gap"` and `notes`. Any gap blocks a pass: a Stop whose only remaining items are gaps is released as a **handoff**, never as "all met". Each gap is listed as "criterion X not demonstrated; agent reason: …". | They never satisfied a gate before either; they derive `assumed`. | The agent is not reminded about a gap it already declared. A human decides it. |
 
 ## Reminder-engine contract
 
@@ -119,8 +126,9 @@ and handed to a human, never allowed through. The derived bundle is written to
 
 **Message.** One line per unmet fact, citing where it lives and the last observation. Example:
 `acceptance.json:rejects-empty — locked check "npm test" last FAIL (exit 1) at 3f2a1c0; changed
-since last reminder: src/parse.ts`. Satisfied facts are never listed again. The message stays
-short and ends with the optional query (`flow-agents observe status`).
+since last reminder: src/parse.ts`. Satisfied facts are never listed again. Output is bounded: a
+reminder lists at most 12 facts, a handoff at most 25 per section, each line is clipped, and the
+overflow is counted and pointed at `flow-agents observe status`.
 
 **Cap and handoff.** Unmet boundaries are counted since the last handoff or satisfaction. The
 default cap is 5, set by `FLOW_AGENTS_OBSERVE_MAX_REMINDERS`, and counts boundaries the way
@@ -134,16 +142,26 @@ Stop's `systemMessage` (Claude Code; Codex uses the same field).
 
 **Loop safety.** When `stop_hook_active` is true and the unmet set is identical to the previous
 reminder's, the agent made no progress on a reminder it has already seen. The engine hands off
-immediately instead of spending the rest of the budget. Hosts without that signal stay bounded by
-the cap and by the adapter backstop.
+immediately instead of spending the rest of the budget. That check does not depend only on saved
+state: a continuation Stop with no reminder state also hands off, because progress cannot be shown.
+Hosts without the signal stay bounded by the cap and by the adapter backstop.
+
+**Fail-closed state.** The reminder count is the cap. If the reminder state cannot be saved, the
+Stop is released as an immediate handoff that says so; it never becomes an endless "reminder 1".
+The state also keeps every lock it has seen, a record that only grows. A ledger that exists but is
+empty, or that has lost or rewritten a lock the state recorded, is a **reset**. A reset is handed
+off and never passes, even after a weakened check is re-locked.
 
 **Bounded verification.** The engine re-runs a locked check only when no observation at the
 current commit confirms or refutes it and the worktree is clean. It uses the writer-observed
 runner (`runObservedCommand`) and appends with `source: canonical-writer-execution`. The
-re-runs share a time budget, `FLOW_AGENTS_OBSERVE_VERIFY_BUDGET_MS`, default 20000, below the
-adapters' 30 s hook timeout. A check cut off by the budget is not recorded, because a killed
-process cannot confirm or refute. Its reminder names `flow-agents observe verify`, the same runner
-outside the Stop timeout.
+re-run budget is per host: min(`FLOW_AGENTS_OBSERVE_VERIFY_BUDGET_MS`, default 20000, and the
+host's Stop deadline minus 8 s). Claude Code and Codex (30 s) get 20 s. Kiro (5 s) and any host
+whose deadline is unknown get **no Stop-time re-run**. There the Stop uses the latest
+`flow-agents observe verify` result bound to the current commit and lock, and if none exists it
+says exactly that, instead of being killed by the host. A check cut off by the budget is not
+recorded, because a killed process cannot confirm or refute. It is started again at a later
+Stop, until `observe verify` records a result.
 
 ## Per-host behavior
 
@@ -151,7 +169,7 @@ outside the Stop timeout.
 | --- | --- | --- | --- |
 | Claude Code | Yes (`Stop`, reason reaches the model, #1172) | Full | PostToolUse carries no exit code, so captures are `ambiguous` and the hook-triggered re-run provides the pass. |
 | Codex | Yes (`Stop`) | Full | Exit codes come from the rollout banner. No adapter turn-ending path (#1172 gap), so the cap is the only bound. |
-| Kiro CLI | Host can block | Reminders only. Evidence capture is now wired (`agents/dev.json`). | The Stop hook timeout is 5 s, so the hook-triggered re-run cannot fit and checks run through `observe verify`. |
+| Kiro CLI | Host can block | Reminders only. Evidence capture is now wired (`agents/dev.json`). | The Stop hook timeout is 5 s, so no check is re-run at Stop. The Stop uses the latest `observe verify` result for the commit and lock, or says to run it. Verified by simulation; not tested on a live Kiro host. |
 | OpenCode | No (`session.idle` is advisory) | Advisory | The reminder is emitted. Nothing holds the agent. |
 | pi | No stop hook | Unavailable | Declared gap in the policy table. |
 | Cursor | Advisory stop | Unavailable | Flow Agents installs no hooks there today (`hook_enforcement: NOT_INSTALLED`). |
@@ -173,16 +191,35 @@ binds its own session on its first observed activity:
   `holder runtime session bound on first observed activity (#1648)`.
 - The session reference is never an input. It comes only from the calling process's own runtime
   environment (`resolveRuntimeSessionForHolder`), and only when that process resolves to the
-  assignment's holder actor. The orchestrator therefore cannot bind the worker's session. It can
-  pass none, and a non-holder's activity (a reviewer's, for example) binds nothing. A process that
-  forges its own runtime environment is out of scope, exactly as for #1092; #1644 tracks
-  authenticated identity.
-- Binding only adds to the held set. Once the worker is bound, the worker reviewing itself is
-  `same-session` and refused.
+  assignment's holder actor. Only a **host runtime session** (a Claude Code, Codex, … session id)
+  counts. Process ancestry identifies whatever process ran the hook, so it never counts. That
+  includes an orchestrator's own process, whether it ran a capture or `workflow start`. A
+  non-holder's activity (a reviewer's, for example) binds nothing. A process that forges its own
+  runtime environment is out of scope, exactly as for #1092; #1644 tracks authenticated identity.
+- A critique recorded **before** the holder's host session was bound does not count: separation
+  was undetermined then. In an observe run the critique writer refuses it outright.
+- Every boundary re-evaluates every critique against the assignment's **current** held sessions.
+  A review whose reviewer session later turns out to have held the assignment is self-review and
+  stops counting. Binding only adds to the held set, so once the worker is bound, the worker
+  reviewing itself is `same-session` and refused at write time too.
 - If the binding is missing, the critique refusal, every Stop reminder, and `observe status` name
-  the exact recovery command: from the worker's own runtime session, the same-actor
-  `flow-agents assignment-provider claim --artifact-root … --subject-id <slug> --artifact-dir <slug>
-  --branch <branch>`. In an observe run, the worker's next command under hooks does the same.
+  the exact recovery command, with the assignment's real artifact root, slug and branch filled
+  in: from the worker's own runtime session, the same-actor `flow-agents assignment-provider claim`.
+  In an observe run, the worker's next command under hooks does the same.
+
+**Refusals (fix round for #1649).** Each of these is reported and never passes:
+
+- Any accepted gap: handed off to the human, and the acceptance claim stays unverified.
+- A check that cannot be locked statically: undefined script, cycle, indirection deeper than 5,
+  or unresolvable shell expansion.
+- A nested script or nested test file changed after the lock. A test file may instead carry a
+  `## Check Changes` reason, which the human sees.
+- A critique recorded before the holder's host session was bound.
+- A critique whose reviewer session has held the assignment.
+- A recorded base that is not an ancestor of HEAD.
+- An unsavable reminder state: immediate handoff.
+- A continuation Stop with no reminder state: immediate handoff.
+- An emptied or lock-losing ledger: immediate handoff.
 
 ## Anti-gaming posture
 
@@ -200,8 +237,9 @@ existing catch still applies**:
   never treated as proof.
 - **Log-chain tamper.** A broken `command-log.jsonl` chain still blocks. The observe ledger uses
   the same chain primitives, so an in-place edit to a lock record breaks the chain.
-- **Locked-check edit.** The engine runs the locked command, never the edited one. The edit is
-  reported until reverted, and the handoff lists it.
+- **Locked-check edit.** The engine runs the locked command string, never an edited one. Edited
+  check-file or script bytes are run but reported: a script edit until it is reverted, and a
+  test-file edit until it is reverted or given a reason the human sees. The handoff lists them.
 - **Same-session review.** `workflow critique` refuses it at write time, unchanged.
 - **Reviewer independence of the catches.** No observe catch depends on the reviewer's content
   judgment. The baseline showed a reviewer that passes without looking. The lock, the re-run and
@@ -209,16 +247,18 @@ existing catch still applies**:
 
 Residuals, accepted and disclosed:
 
-- Deleting the observe ledger and then weakening the checks re-locks them. This is the same class
-  as deleting `command-log.jsonl`. Backstops: the lock digest is printed in every reminder,
-  handoff and status, so a reviewer sees the check set. The next PR also attaches the lock claim
-  to the canonical `trust.bundle`, which `config-protection` already guards.
+- Deleting or emptying the observe ledger is detected while the reminder state survives. Deleting
+  **both** the ledger and the reminder state, then weakening the checks, re-locks them. This is the
+  same class as deleting `command-log.jsonl`. Backstops: the lock digest is printed in every
+  reminder, handoff and status, so a reviewer sees the check set. The next PR also attaches the
+  lock claim to the canonical `trust.bundle`, which `config-protection` already guards.
 - Evidence capture still resolves its session through the per-thread binding (#1647), so with two
   runs in one thread a captured command can land in the other run's log. The observe boundary does
   not depend on it: the writer re-run appends to the evaluated run's own log. The capture fix
   belongs to #1647.
-- A test suite slower than the Stop budget is never re-run by the hook. The agent must run
-  `observe verify`, or the handoff says the check was not verified.
+- A test suite slower than the Stop budget is started at each Stop and killed at the budget,
+  without a recorded result, until the agent runs `observe verify`. Until then the handoff says the
+  check was not verified.
 
 No new shell-parsing rule is added (ADR 0018). Integrity rides existing primitives.
 
