@@ -87,6 +87,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       head: decision.head,
       base: decision.base,
       lock_digest: decision.lock_digest,
+      check_inputs_changed: decision.checkInputsChanged,
       reruns: decision.reruns,
       latency_ms: decision.latency_ms,
       engagement: { observe_mode: true, host: runtime, stop_blocks: capability.blocks, note: capability.note },

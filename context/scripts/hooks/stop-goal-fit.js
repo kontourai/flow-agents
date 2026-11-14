@@ -3818,6 +3818,7 @@ function recordObserveBoundary(root, result, decision) {
       session: path.basename(result.latestArtifactDir || ''), action: decision.action,
       latency_ms: decision.latency_ms ?? null, reruns: Array.isArray(decision.reruns) ? decision.reruns.length : 0,
       reminder: decision.reminder ?? null, gate_status: decision.gate ? decision.gate.status : null,
+      check_inputs_changed: Array.isArray(decision.checkInputsChanged) ? decision.checkInputsChanged : [],
     })}\n`, 'utf8');
   } catch { /* best-effort: telemetry must never fail or delay the Stop hook */ }
 }

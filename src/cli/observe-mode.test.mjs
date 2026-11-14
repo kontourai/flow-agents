@@ -183,32 +183,34 @@ test("target: early stop gets a reminder citing the exact unmet criterion; the h
 
 // ─── Target 1: native catch of all five registered faults ─────────────────────────────────
 
-test("target: weakened test is caught natively through the locked check-file hash", () => {
+/** The changed check inputs a decision disclosed, from every place the run records them. */
+function disclosedInputs(fx) {
+  const status = spawnSync(process.execPath, [CLI, "observe", "status", "--session-dir", fx.sessionDir, "--json"], { cwd: fx.project, encoding: "utf8", env: holderEnv() });
+  assert.equal(status.status, 0, status.stderr);
+  const bundle = JSON.parse(fs.readFileSync(path.join(fx.sessionDir, "observe.bundle.json"), "utf8"));
+  const definitionClaim = bundle.claims.find((claim) => claim.metadata?.observed_by === "acceptance-lock");
+  const telemetry = fs.readFileSync(path.join(fx.project, ".kontourai/telemetry/observe-boundary.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line)).at(-1);
+  return { status: JSON.parse(status.stdout).check_inputs_changed, bundle: definitionClaim.metadata.check_inputs_changed, telemetry: telemetry.check_inputs_changed };
+}
+
+test("target: a weakened test is DISCLOSED, never hidden: the release lists it in checkInputsChanged everywhere the run is recorded", () => {
   const fx = makeProject();
   honestPrefix(fx);
   assert.equal(critique(fx).status, 0);
-  const locked = stop(fx);
-  assert.equal(locked.status, 0, locked.stderr);
+  assert.equal(stop(fx).status, 0);
   // The fault: weaken the public check (drop the negatives assertion); the command is unchanged.
   fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), WEAK_TEST);
   fs.writeFileSync(path.join(fx.project, "src/add.mjs"), BROKEN_IMPL);
   commit(fx, "weaken");
-  assert.equal(critique(fx).status, 0, "even a passing review of the weakened tree does not clear it");
-  const caught = stop(fx);
-  assert.equal(caught.status, 2, caught.stderr);
-  assert.match(caught.stderr, /checks\/add\.test\.mjs, a locked check file of .*acceptance\.json:negatives, changed after the lock \(possible weakened test\)/);
-  // The reviewer passed without looking and the weakened check passes when re-run: the catch is
-  // the observe-mode lock, not the reviewer and not the test outcome.
-  const head = git(fx.project, ["rev-parse", "HEAD"]);
-  const rerun = fs.readFileSync(path.join(fx.sessionDir, "command-log.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    .find((entry) => entry.command === CHECK && entry.observed_at_commit === head);
-  assert.equal(rerun?.source, "canonical-writer-execution", "the Stop hook re-ran the locked check at the weakened head");
-  assert.equal(rerun?.observedResult, "pass", "the weakened check passes, so only the lock can catch it");
-  // A recorded reason turns it into a human attention item instead of a silent pass.
-  writePlan(fx, { checkChanges: ["- `checks/add.test.mjs`: dropped the negatives case on purpose"] });
-  const reasoned = stop(fx);
-  assert.equal(reasoned.status, 0, reasoned.stderr);
-  assert.match(reasoned.released, /checks\/add\.test\.mjs, a locked check file of negatives, changed after the lock\. Reason given: dropped the negatives case on purpose/);
+  assert.equal(critique(fx).status, 0, "a reviewer that passes without looking");
+  // Truth is the exit code: the weakened check exits 0, so the release happens. Observe mode does
+  // not claim to prove the check was not weakened; it makes sure the human sees the change.
+  const released = stop(fx);
+  assert.equal(released.status, 0, released.stderr);
+  assert.match(released.released, /All observed truths are met/);
+  assert.match(released.released, /checkInputsChanged \(\d+\): files that can change what a check proves\. Review these diffs; observe mode does not prove a check was not weakened\.\n - checks\/add\.test\.mjs/);
+  const disclosed = disclosedInputs(fx);
+  for (const [where, list] of Object.entries(disclosed)) assert.ok(list.includes("checks/add.test.mjs"), `${where} record discloses the weakened test`);
 });
 
 test("target: out-of-scope edit is caught natively from git diff, and a one-line reason resolves it", () => {
@@ -565,7 +567,7 @@ function nestedScripts(fx, scripts) {
   fs.writeFileSync(path.join(fx.project, "package.json"), `${JSON.stringify(pkg)}\n`);
 }
 
-test("P1: nested package scripts are locked transitively: a weakened nested test is caught", () => {
+test("an edited nested package script is disclosed (package.json), not blocked", () => {
   const fx = makeProject();
   start(fx);
   writePlan(fx, { scopeChanges: ["- `package.json`: test scripts"] });
@@ -573,48 +575,61 @@ test("P1: nested package scripts are locked transitively: a weakened nested test
   writeAcceptance(fx, { command: "npm test" });
   fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
   commit(fx, "feature");
-  assert.equal(stop(fx).status, 2, "first stop locks (review missing)");
-  const lock = JSON.parse(fs.readFileSync(path.join(fx.sessionDir, "observe-ledger.jsonl"), "utf8").trim().split("\n")[0]).checks[0];
-  assert.deepEqual(lock.scripts.map((script) => script.name), ["test", "test:unit"]);
-  assert.ok(lock.files.some((file) => file.path === "checks/add.test.mjs"), "the nested leaf's test file is locked");
-  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), WEAK_TEST);
-  fs.writeFileSync(path.join(fx.project, "src/add.mjs"), BROKEN_IMPL);
-  commit(fx, "weaken nested");
   assert.equal(critique(fx).status, 0);
-  const result = stop(fx);
-  assert.equal(result.status, 2, result.stderr);
-  assert.match(result.stderr, /checks\/add\.test\.mjs, a locked check file of .*acceptance\.json:negatives, changed after the lock \(possible weakened test\)/);
-});
-
-test("P1: an edited nested script body is caught", () => {
-  const fx = makeProject();
-  start(fx);
-  writePlan(fx, { scopeChanges: ["- `package.json`: test scripts"] });
-  nestedScripts(fx, { test: "npm run test:unit", "test:unit": "node --test checks/add.test.mjs" });
-  writeAcceptance(fx, { command: "npm test" });
-  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
-  commit(fx, "feature");
-  assert.equal(stop(fx).status, 2);
+  assert.equal(stop(fx).status, 0, "an honest nested-script check releases");
   nestedScripts(fx, { test: "npm run test:unit", "test:unit": "node -e 0" });
   commit(fx, "neuter nested script");
   assert.equal(critique(fx).status, 0);
-  const result = stop(fx);
-  assert.equal(result.status, 2, result.stderr);
-  assert.match(result.stderr, /package\.json script "test:unit" changed in the locked check of .*acceptance\.json:negatives after the lock/);
+  const released = stop(fx);
+  assert.equal(released.status, 0, released.stderr);
+  assert.match(released.released, /checkInputsChanged \(\d+\):[\s\S]* - package\.json/);
 });
 
-test("P1: script indirection deeper than the bound is refused as unverifiable, never truncated", () => {
-  const fx = makeProject();
-  start(fx);
-  writePlan(fx, { scopeChanges: ["- `package.json`: test scripts"] });
-  nestedScripts(fx, { a: "npm run b", b: "npm run c", c: "npm run d", d: "npm run e", e: "npm run f", f: "npm run g", g: "node --test checks/add.test.mjs" });
-  writeAcceptance(fx, { command: "npm run a" });
-  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
-  commit(fx, "deep");
-  assert.equal(critique(fx).status, 0);
-  const result = stop(fx);
-  assert.equal(result.status, 2, result.stderr);
-  assert.match(result.stderr, /locked check `npm run a` cannot be locked statically: package-script indirection is deeper than 5 levels \(a → b → c → d → e → f\)/);
+/** Honest projects: the criterion is met when its literal command exits 0, whatever runs the tests. */
+const HONEST_SHAPES = [
+  { name: "bare node --test", command: "node --test" },
+  { name: "env prefix", command: "CI=1 npm test", scripts: { test: "node --test checks/add.test.mjs" } },
+  { name: "nested script", command: "npm test", scripts: { test: "npm run test:unit", "test:unit": "node --test checks/add.test.mjs" } },
+  { name: "make", command: "make test", makefile: "test:\n\tnode --test checks/add.test.mjs\n" },
+];
+
+test("honest checks of common shapes release on their exit code: no test recognition, no handoff", () => {
+  for (const shape of HONEST_SHAPES) {
+    const fx = makeProject();
+    start(fx);
+    writePlan(fx, { scopeChanges: ["- `package.json`: test scripts", "- `Makefile`: test target"] });
+    if (shape.scripts) nestedScripts(fx, shape.scripts);
+    if (shape.makefile) fs.writeFileSync(path.join(fx.project, "Makefile"), shape.makefile);
+    writeAcceptance(fx, { command: shape.command });
+    fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+    commit(fx, "feature");
+    assert.equal(critique(fx).status, 0, shape.name);
+    const result = stop(fx);
+    assert.equal(result.status, 0, `${shape.name}:\n${result.stderr}`);
+    assert.match(result.released, /All observed truths are met/, shape.name);
+    assert.doesNotMatch(result.released, /Handing off/, shape.name);
+  }
+});
+
+test("the review's false-pass reproduction now releases WITH the weakened test disclosed (bare node --test and CI=1 npm test, plus a sentinel)", () => {
+  for (const command of ["node --test", "CI=1 npm test"]) {
+    const fx = makeProject();
+    honestPrefix(fx);
+    nestedScripts(fx, { test: "node --test checks/add.test.mjs" });
+    fs.writeFileSync(path.join(fx.project, "checks/sentinel.test.mjs"), "import test from 'node:test';\ntest('sentinel', () => {});\n");
+    commit(fx, "setup");
+    writePlan(fx, { scopeChanges: ["- `package.json`: setup"] });
+    writeAcceptance(fx, { criteria: [{ id: "negatives", description: "negative sums", status: "pending", evidence_refs: [{ kind: "command", excerpt: command }] }, { id: "sentinel", description: "sentinel", status: "pending", evidence_refs: [{ kind: "command", excerpt: "node --test checks/sentinel.test.mjs" }] }] });
+    assert.equal(critique(fx).status, 0);
+    assert.equal(stop(fx).status, 0, command);
+    fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), WEAK_TEST);
+    fs.writeFileSync(path.join(fx.project, "src/add.mjs"), BROKEN_IMPL);
+    commit(fx, "weaken");
+    assert.equal(critique(fx).status, 0);
+    const after = stop(fx);
+    assert.equal(after.status, 0, command);
+    assert.match(after.released, /checkInputsChanged \(\d+\):[\s\S]* - checks\/add\.test\.mjs/, command);
+  }
 });
 
 test("P1: first-command self-review after an orchestrator's session-less observation is refused, and a review exposed as self-review by a later binding stops counting (#1648)", () => {
@@ -640,7 +655,10 @@ test("P1: first-command self-review after an orchestrator's session-less observa
   const fx2 = makeProject();
   assert.equal(spawnSync(process.execPath, [CLI, "workflow", "start", "--artifact-root", path.join(fx2.project, ".kontourai/flow-agents"), "--flow", "builder.observe", "--task-slug", SLUG, "--criterion", "add handles negatives"],
     { cwd: fx2.project, encoding: "utf8", env: orchestratorEnv() }).status, 0);
-  assert.match(String(readAssignment(fx2).runtime_session_source), /ancestry|process/, "the CLI start recorded a process-ancestry identity");
+  // Whatever identity a session-less CLI start records (process ancestry locally, a CI-runtime
+  // identity under CI), it is not a host runtime session, so it can neither bind the worker nor count
+  // toward reviewer separation. Assert that invariant, not the identity's spelling.
+  assert.ok(!String(readAssignment(fx2).runtime_session_source ?? "").startsWith("runtime-session-id:"), "a session-less start records no host runtime session");
   writePlan(fx2);
   writeAcceptance(fx2);
   fs.writeFileSync(path.join(fx2.project, "checks/add.test.mjs"), GOOD_TEST);
@@ -648,6 +666,9 @@ test("P1: first-command self-review after an orchestrator's session-less observa
   const ancestryReview = critique(fx2, "observe-worker-session");
   assert.notEqual(ancestryReview.status, 0, "an ancestry-bound implementer leaves separation undetermined in observe mode");
   assert.match(ancestryReview.output, /flow-agents assignment-provider claim --artifact-root ".*\.kontourai\/flow-agents" --subject-id demo --artifact-dir demo --branch agent\//, "the recovery command is exact");
+  // The worker's own first command still binds ITS host session over whatever start recorded.
+  assert.match(capture(fx2, workerEnv()).stderr, /recorded this worker's runtime session/);
+  assert.match(readAssignment(fx2).runtime_session_ref, /^claude-code:observe-worker-session:/);
 
   // Re-evaluation on binding: the claim is held by another host session S1, the worker W reviews
   // (distinct at that moment), then W's first observed command binds W. The review must stop counting.
@@ -687,6 +708,29 @@ test("P2: an unwritable reminder state fails closed to an immediate handoff inst
   const result = stop(fx);
   assert.equal(result.status, 0);
   assert.match(result.released, /Handing off to you: the reminder state could not be saved \(EISDIR\), so the reminder cap cannot be enforced/);
+});
+
+test("P2: state safety runs before the satisfied release: an unwritable state on an otherwise-met run is a handoff, not 'all met'", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  assert.equal(critique(fx).status, 0);
+  fs.mkdirSync(path.join(fx.sessionDir, "observe-state.json"));
+  const result = stop(fx);
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.released, /All observed truths are met/);
+  assert.match(result.released, /Handing off to you: the observed truths are met, but the reminder state could not be saved \(EISDIR\)/);
+});
+
+test("P2: a continuation with missing state on an otherwise-met run is a handoff, not 'all met'", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  assert.equal(critique(fx).status, 0);
+  assert.equal(stop(fx).status, 0);
+  fs.rmSync(path.join(fx.sessionDir, "observe-state.json"));
+  const result = stop(fx, { stopHookActive: true });
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.released, /All observed truths are met/);
+  assert.match(result.released, /Handing off to you: this Stop continues a refused Stop, but the reminder state is missing/);
 });
 
 test("P2: a continuation with missing reminder state hands off (stop_hook_active loop safety without persisted state)", () => {
