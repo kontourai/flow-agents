@@ -123,6 +123,7 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | eval-rebuild | skills/eval-rebuild/SKILL.md | Project-specific build and install commands for the eval feedback loop. Injected into eval-builder agent. Replace this skill for different build systems. |
 | github-cli | skills/github-cli/SKILL.md | Interact with GitHub via gh CLI — PRs, issues, repos, releases, workflows, gists. |
 | knowledge-capture | kits/knowledge/skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
+| observe-work | kits/builder/skills/observe-work/SKILL.md | Observe-and-remind Builder profile: write the plan and acceptance.json as files, work freely, and let the Stop hook remind you of exactly what is unmet. |
 | pickup-probe | kits/builder/skills/pickup-probe/SKILL.md | Provider-grounded pickup probe used at the Builder design-probe step before planning. |
 | review-existing | kits/builder/skills/review-existing/SKILL.md | Record an existing exact-head change as pre-existing implementation for a builder.review-existing or builder.deliver-existing run; no implementation claim. |
 | search-first | skills/search-first/SKILL.md | Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. |

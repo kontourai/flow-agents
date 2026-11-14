@@ -76,6 +76,12 @@ The engine is kit-neutral. No kit gets special runtime branches just because it 
 
 Kits steer the engine only through structured `workflow_triggers`. For example, Builder declares a trigger for `implementation-work-detected` that points at `builder.build` and names `deliver` as the default skill. Knowledge declares a trigger for `knowledge-capture-detected` that points at `knowledge.ingest` and names `knowledge.knowledge-capture` as the default skill.
 
+Kits also select engine behavior through declared Flow Definition fields, never by flow name.
+For example, Builder's `builder.observe` declares `evidence_mode: "observed"` and
+`source_binding: {"base": "recorded-at-start"}`, and its expectations name an `observed_by`
+derivation. The engine then derives those claims from observations instead of expecting
+submissions ([observe mode](decisions/observe-mode.md)).
+
 The engine renders those structured fields through one steering path. It does not accept freeform kit steering text, and it does not grant runtime privilege based on provenance.
 
 `first_party` is legacy catalog or marketplace metadata. It can help a marketplace label a kit, but it does not change runtime authority. Built-in, official, and community kits all participate through the same manifest, catalog, activation, and trigger model.

@@ -115,6 +115,7 @@ const expected = {
   'verify-work': ['step', 'builder.build', ['verify']],
   'evidence-gate': ['step', 'builder.build', ['merge-ready']],
   'review-existing': ['step', 'builder.review-existing', ['existing-change']],
+  'observe-work': ['step', 'builder.observe', ['verify']],
   'release-readiness': ['step', 'builder.publish-learn', ['merge-ready-ci']],
   'learning-review': ['step', 'builder.publish-learn', ['learn']],
   'design-probe': ['shared-primitive', null, []],
@@ -131,6 +132,7 @@ const expectedExpectations = {
   'verify-work': ['acceptance-criteria', 'tests-evidence', 'policy-compliance'],
   'evidence-gate': ['merge-readiness'],
   'review-existing': ['pre-existing-implementation'],
+  'observe-work': ['acceptance-definition', 'implementation-scope', 'tests-evidence', 'acceptance-criteria'],
   'release-readiness': ['ci-merge-readiness'],
   'learning-review': ['decision-evidence', 'learning-evidence'],
 };
@@ -144,6 +146,7 @@ const expectedArtifacts = {
   'verify-work': ['trust.bundle#acceptance-criteria', 'trust.bundle#tests-evidence', 'trust.bundle#policy-compliance'],
   'evidence-gate': ['<slug>--evidence-gate.md', 'trust.bundle#merge-readiness'],
   'review-existing': ['<slug>--existing-change.md', 'trust.bundle#pre-existing-implementation'],
+  'observe-work': ['<slug>--plan-work.md', 'acceptance.json'],
   'release-readiness': ['release.json', 'trust.bundle#ci-merge-readiness'],
   'learning-review': ['learning.json', 'trust.bundle#decision-evidence', 'trust.bundle#learning-evidence'],
   'gate-review': ['<slug>--gate-review.md', 'gate-review.inquiries.json'],
@@ -184,6 +187,8 @@ const expectedActions = {
   'builder.review-existing/existing-change': { skills: ['review-existing'], expectation_ids: ['pre-existing-implementation'] },
   'builder.review-existing/verify': { skills: ['review-work', 'verify-work'], expectation_ids: ['clean-critique', 'acceptance-criteria', 'tests-evidence', 'policy-compliance'] },
   'builder.review-existing/done': { skills: [], expectation_ids: [] },
+  'builder.observe/verify': { skills: ['observe-work', 'review-work'], expectation_ids: ['acceptance-definition', 'implementation-scope', 'tests-evidence', 'acceptance-criteria', 'clean-critique'] },
+  'builder.observe/done': { skills: [], expectation_ids: [] },
   // #1415 slice 2 existing-change delivery: review-existing's producers, then the same closeout
   // producers as builder.build. pr-open is the publish-change operation, which adopts here.
   'builder.deliver-existing/pull-work': { skills: ['pull-work'], expectation_ids: ['selected-work'] },
@@ -202,7 +207,7 @@ const rows = Array.isArray(kit.skill_roles) ? kit.skill_roles : [];
 const declared = (kit.skills || []).map((entry) => entry.id.replace(/^builder\./, '')).sort();
 const classified = rows.map((entry) => entry.skill_id.replace(/^builder\./, '')).sort();
 if (JSON.stringify(declared) !== JSON.stringify(classified)) failures.push('skill_roles must classify every declared Builder skill exactly once');
-if (rows.length !== 18) failures.push(`skill_roles must contain 18 rows, found ${rows.length}`);
+if (rows.length !== 19) failures.push(`skill_roles must contain 19 rows, found ${rows.length}`);
 
 for (const [skill, [role, flow, steps]] of Object.entries(expected)) {
   const row = rows.find((entry) => entry.skill_id === `builder.${skill}`);
@@ -280,9 +285,9 @@ for (const [key, expectedAction] of Object.entries(expectedActions)) {
     failures.push(`${key}: operations differ from the canonical producer matrix`);
   }
 }
-if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build, builder.build-lean, builder.review-existing, builder.deliver-existing and builder.shape step exactly once');
+if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build, builder.build-lean, builder.review-existing, builder.deliver-existing, builder.observe and builder.shape step exactly once');
 const implementationRows = (kit.flow_step_actions || []).filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`);
-if (JSON.stringify(implementationRows) !== JSON.stringify(['builder.build/execute', 'builder.build-lean/execute'])) failures.push('only builder.build and builder.build-lean execute may allow implementation; builder.review-existing and builder.deliver-existing must allow none');
+if (JSON.stringify(implementationRows) !== JSON.stringify(['builder.build/execute', 'builder.build-lean/execute', 'builder.observe/verify'])) failures.push('only builder.build and builder.build-lean execute, and builder.observe verify (its one working step), may allow implementation; builder.review-existing and builder.deliver-existing must allow none');
 const publishAction = (kit.flow_step_actions || []).find((entry) => entry.flow_id === 'builder.build' && entry.step_id === 'pr-open');
 if (!publishAction || JSON.stringify(publishAction.operations) !== JSON.stringify(['publish-change']) || JSON.stringify(publishAction.expectation_ids) !== JSON.stringify(['pull-request-opened'])) failures.push('publish-change must explicitly own pull-request-opened');
 

@@ -175,6 +175,24 @@
           "sha256": "a4d8506cd7aa39e09f5c9c443346a6f5a821cc2835dc97ed6c77aaabfdb872d2"
         }
       ]
+    },
+    {
+      "id": "repository-structure-observe-engagement-hook-lib",
+      "reviewedAt": "2026-11-13T00:00:00Z",
+      "note": "src/tools/validate-source-tree.ts gains one hookFilePolicies row for the new shared hook library scripts/hooks/lib/observe-engagement.js (observe mode). docs/repository-structure.md says runtime hook helpers live under scripts/hooks/lib/ and are validated by npm run validate:source -- plus the relevant hook integration eval, and that scripts/ wrappers are documented in scripts/README.md; the new helper follows exactly that placement, has a scripts/README.md row, and is exercised by evals/integration/test_observe_mode.sh. The document lists no individual hook libraries, so every statement in it remains accurate.",
+      "limits": "Source and document byte review only. Does not verify validate-source behavior beyond running it locally.",
+      "inputs": [
+        {
+          "path": "src/tools/validate-source-tree.ts",
+          "sha256": "58e36c916f6d3d61fd1c791f5c31fc92c8e22b116cf7fdad9e4021e018d964e1"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/repository-structure.md",
+          "sha256": "688cd5ff585f803059006e2635a691a0a7b7e5a24fc7e084532605e27c8b6336"
+        }
+      ]
     }
   ]
 }

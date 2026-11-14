@@ -134,6 +134,11 @@ flowchart LR
 
 ## Artifact And Evidence Flow
 
+Observe mode (`builder.observe`, [decision](decisions/observe-mode.md)) uses the same evidence
+machinery from the other direction. `src/observe-mode.ts` derives the gate's claims from the
+capture log, trusted Git and the check locks. `src/cli/observe.ts` is its optional
+`flow-agents observe status|verify` query and runner.
+
 ```mermaid
 flowchart TB
   Idea[Idea or request]

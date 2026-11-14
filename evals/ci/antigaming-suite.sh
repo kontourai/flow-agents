@@ -39,6 +39,7 @@ TESTS=(
   "evals/integration/test_canonical_command_laundering.sh"
   "evals/integration/test_reconcile_preflight.sh"
   "evals/integration/test_goal_fit_ghost_session.sh"
+  "evals/integration/test_observe_mode.sh"
 )
 
 fail=0

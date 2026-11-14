@@ -1,3 +1,4 @@
+import { holderBindingRecovery } from "../lib/holder-session-binding.js";
 import * as fs from "node:fs";
 import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
 import { resolveBundle } from "../lib/bundle-store.js";
@@ -7,7 +8,7 @@ import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates, validateDefinition } from "@kontourai/flow";
-import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
+import { definitionObservesEvidence, loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { assertSourceHeadStartable, currentGateVisit, gateRequiresFailureRouteReason, inspectBuilderFlowSession, pinnedRunSourceHead, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
@@ -3066,8 +3067,17 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
     // #1092: record how the reviewer identity was established, and refuse a passing critique whose
     // identity the caller chose when the kit requires more. The gate recomputes from the record.
     const requiredAssurance = declaredCritiqueReviewerAssurance(current.definitionId, current.state.current_step, projectRoot);
+    const recoveryWhere = holderRecoveryWhere(sessionDir, slug);
     if (flagString(parsed.flags, "verdict") === "pass" && requiredAssurance && !reviewerAssuranceMeets(reviewerAssurance, requiredAssurance)) {
-      throw new Error(insufficientReviewerAssuranceMessage(reviewerAssurance, requiredAssurance, `${current.definitionId}/${current.state.current_step}`));
+      throw new Error(insufficientReviewerAssuranceMessage(reviewerAssurance, requiredAssurance, `${current.definitionId}/${current.state.current_step}`, recoveryWhere));
+    }
+    // Observe mode (#1648 fix round): only a HOST runtime session bound to the assignment
+    // establishes the implementer. Process ancestry identifies whatever process ran the claim (an
+    // orchestrator's own process, for example), so a review recorded against it could be the
+    // worker reviewing itself before its own session is known. Refuse; separation is undetermined.
+    if (flagString(parsed.flags, "verdict") === "pass" && definitionObservesEvidence(current.startDefinition ?? current.definition)
+      && !(reviewerAssurance.implementer && typeof reviewerAssurance.implementer.resolved_by === "string" && reviewerAssurance.implementer.resolved_by.startsWith("runtime-session-id:"))) {
+      throw new Error(insufficientReviewerAssuranceMessage({ ...reviewerAssurance, implementer: null }, requiredAssurance ?? "runtime-derived", `${current.definitionId}/${current.state.current_step}`, recoveryWhere));
     }
     const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
     const beforeTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
@@ -4030,12 +4040,22 @@ const INDEPENDENT_REVIEW_REMEDIATION =
   "runtime session id, and FLOW_AGENTS_ACTOR unset). If no independent reviewer runtime is available, the review " +
   "is NOT_VERIFIED: leave the gate blocked and report the gap rather than renaming the implementing process.";
 
-function insufficientReviewerAssuranceMessage(recorded: ReviewerAssurance, required: ReviewerAssuranceLevel, step: string): string {
+/** The assignment values the #1648 recovery command needs, so the refusal prints an exact command. */
+function holderRecoveryWhere(sessionDir: string, slug: string): { artifactRoot: string; slug: string; branch?: string } {
+  let branch: string | undefined;
+  try {
+    const record = JSON.parse(fs.readFileSync(path.join(path.dirname(sessionDir), "assignment", `${slug}.json`), "utf8")) as JsonRecord;
+    if (typeof record.branch === "string" && record.branch) branch = record.branch;
+  } catch { /* the command then shows <branch> for the one value that could not be read */ }
+  return { artifactRoot: path.dirname(path.resolve(sessionDir)), slug, ...(branch ? { branch } : {}) };
+}
+
+function insufficientReviewerAssuranceMessage(recorded: ReviewerAssurance, required: ReviewerAssuranceLevel, step: string, where?: { artifactRoot: string; slug: string; branch?: string }): string {
   if (!recorded.implementer) {
     return `workflow critique cannot record a passing review at ${step}: the implementer's runtime session is not recorded on ` +
       "its assignment (claimed before reviewer assurance was recorded, or from no runtime-derived source), so reviewer " +
-      "separation is undetermined. The assignment holder can record it by re-claiming the assignment from its own runtime " +
-      "session (`flow-agents assignment-provider claim`, same actor). Until then the independent review is NOT_VERIFIED.";
+      "separation is undetermined. This is the normal state of an assignment an orchestrator acquired from its own process " +
+      "(#1648). " + holderBindingRecovery(where) + " Until then the independent review is NOT_VERIFIED.";
   }
   return `workflow critique cannot record a passing review at ${step}: the kit requires ${required} reviewer identity, ` +
     `and this critique has ${describeReviewerAssurance(recorded)}. A self_declared identity such as a ` +

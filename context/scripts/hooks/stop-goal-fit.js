@@ -2896,11 +2896,14 @@ function learningGateOutstandingWarning(root, artifactDir, state) {
   return `${base} learning outstanding — state ${status}/${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>" --waived-by <actor>\`.`;
 }
 
-async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot = root) {
+async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot = root, forcedScope = null) {
   // A validated signed adapter turn owns its exact session independently of
   // ordinary actor routing, which may be stale or retired during continuation.
-  const activeTurnScope = validatedActiveTurnScope(root) || (workspaceRoot !== root ? validatedActiveTurnScope(workspaceRoot) : null);
-  const hookScope = activeTurnScope ? { status: 'none' } : resolveHookWorkflowScope(workspaceRoot);
+  const activeTurnScope = forcedScope ? null : (validatedActiveTurnScope(root) || (workspaceRoot !== root ? validatedActiveTurnScope(workspaceRoot) : null));
+  // forcedScope: observe mode only (#1647) — the Stop's own cwd project names this actor's observe
+  // run, and it disagrees with the per-thread binding; run() re-analyzes that run explicitly.
+  const hookScope = forcedScope ? { status: 'bound', projectRoot: forcedScope.projectRoot, artifactRoot: path.dirname(forcedScope.artifactDir), artifactDir: forcedScope.artifactDir }
+    : activeTurnScope ? { status: 'none' } : resolveHookWorkflowScope(workspaceRoot);
   if (['invalid', 'ambiguous'].includes(hookScope.status)) {
     return {
       warnings: [`workflow state: workflow binding is ${hookScope.status}: ${safeOneLine(hookScope.reason, 500)}. Resolve the selected workflow binding before stopping.`],
@@ -2997,7 +3000,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
   const selectedRunId = path.basename(latestArtifactDir);
   if (fencedRunId === null) {
     try {
-      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId, workspaceRoot));
+      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId, workspaceRoot, forcedScope));
     } catch (error) {
       return {
         warnings: [`workflow recovery fence: ${String(error && error.message || error)}. Canonical workflow artifacts are unavailable until recovery completes.`],
@@ -3113,7 +3116,13 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
   }
   const activeFlowRun = normalizedStatus(canonicalFlow.state?.status) === 'active'
     || (gateState && gateState.flow_run && normalizedStatus(gateState.flow_run.status) === 'active');
-  if (activeFlowRun && !warnings.some(w => /canonical Flow run remains active/.test(w))) {
+  // Observe mode (docs/decisions/observe-mode.md): a run whose pinned, validated definition declares
+  // evidence_mode "observed" is evaluated by the reminder engine in run(), which replaces the
+  // non-releasable "canonical Flow run remains active" block. Every other warning is computed as
+  // before; run() keeps the hard ones hard.
+  const observeRun = Boolean(activeFlowRun && !unsafeActiveCanonical && canonicalFlow.state && canonicalFlow.definition
+    && normalizedStatus(canonicalFlow.state.status) === 'active' && canonicalFlow.definition.evidence_mode === 'observed');
+  if (activeFlowRun && !observeRun && !warnings.some(w => /canonical Flow run remains active/.test(w))) {
     const activeStep = safeOneLine(canonicalFlow.state?.current_step || gateState?.flow_run?.current_step || 'unknown', 80);
     warnings.push(`workflow state: canonical Flow run remains active at step ${activeStep}; complete or explicitly cancel the run before stopping.`);
   }
@@ -3148,6 +3157,8 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
     warnings,
     blocking,
     activeFlowRun,
+    observeRun,
+    observeCanonical: observeRun ? { state: canonicalFlow.state, definition: canonicalFlow.definition } : null,
     activeTurnAuthority: activeTurnAuthority.valid,
     activeTurnIssuedStep: activeTurnAuthority.valid ? activeTurnAuthority.record.issued_step : null,
     activeFlowCurrentStep: canonicalFlow.state?.current_step || null,
@@ -3665,6 +3676,24 @@ async function run(rawInput) {
   // liveness release must always be attempted on a non-terminal Stop, independent of
   // whether goal-fit found anything to warn about).
   releaseOnNonTerminalStop(root, result.latestArtifactDir || null);
+  // #1647, observe mode: the per-thread binding is only a hint. When the Stop's own cwd project
+  // holds this actor's observe run and the binding selected a different run, evaluate the cwd's
+  // run and say so. A cwd with no run of its own keeps the bound run (moving the cwd elsewhere
+  // must not escape the gate).
+  const cwdObserve = observeRunForCwd(inputCwd);
+  if (cwdObserve && path.resolve(result.latestArtifactDir || '') !== cwdObserve.artifactDir) {
+    const other = result.latestArtifactDir ? `${path.basename(result.latestArtifactDir)} (${relative(cwdObserve.projectRoot, result.latestArtifactDir)})` : 'no run';
+    const note = `run resolution: this thread's workflow binding selected ${other}, but this Stop's cwd is in ${cwdObserve.projectRoot}, whose observe run is ${path.basename(cwdObserve.artifactDir)}. Evaluated ${path.basename(cwdObserve.artifactDir)}; the other run is not evaluated by this Stop.`;
+    const scoped = await analyze(cwdObserve.projectRoot, Date.now(), null, workspaceRoot, cwdObserve);
+    if (scoped.observeRun) return observeStop(cwdObserve.projectRoot, input, rawInput, scoped, mode, note);
+  }
+  if (result.observeRun) {
+    const evaluatedRoot = findRepoRoot(path.dirname(path.dirname(path.dirname(result.latestArtifactDir))));
+    const note = path.resolve(findRepoRoot(inputCwd)) !== path.resolve(evaluatedRoot)
+      ? `run resolution: this Stop's cwd (${inputCwd}) is outside the evaluated run's project (${evaluatedRoot}); evaluated the thread's bound run ${path.basename(result.latestArtifactDir)}.`
+      : null;
+    return observeStop(root, input, rawInput, result, mode, note);
+  }
   if (result.warnings.length === 0) {
     clearBlockStreak(root);
     return rawInput;
@@ -3765,6 +3794,89 @@ async function run(rawInput) {
     stderr: `${message}\n${gatePrefix} Stop blocked — ${remediationWarnings.length} evidence gap(s) ${blockTail}` + stopControlLine,
     exitCode: 2,
   };
+}
+
+// ─── Observe mode: the reminder engine at the Stop boundary ─────────────────────────────────
+//
+// docs/decisions/observe-mode.md. The engine (build/src/observe-mode.js) derives the gate's claims
+// from observations and lets Flow decide; this function only maps its decision onto the Stop
+// contract. Hard warnings that analyze() already computed (capture contradiction, tamper,
+// laundering, integrity) stay non-releasable exactly as on the ordinary path. An engine that
+// cannot load fails closed to the same hard class the canonical-active block had.
+async function loadObserveEngine() {
+  const file = path.join(path.resolve(__dirname, '..', '..'), 'build', 'src', 'observe-mode.js');
+  if (!fs.existsSync(file)) throw new Error('build/src/observe-mode.js is missing (run npm run build)');
+  return import(require('node:url').pathToFileURL(file).href);
+}
+
+function recordObserveBoundary(root, result, decision) {
+  try {
+    const file = path.join(root, '.kontourai', 'telemetry', 'observe-boundary.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify({
+      schema: 'flow-agents.observe-boundary', version: '0.1', at: new Date().toISOString(),
+      session: path.basename(result.latestArtifactDir || ''), action: decision.action,
+      latency_ms: decision.latency_ms ?? null, reruns: Array.isArray(decision.reruns) ? decision.reruns.length : 0,
+      reminder: decision.reminder ?? null, gate_status: decision.gate ? decision.gate.status : null,
+      check_inputs_changed: Array.isArray(decision.checkInputsChanged) ? decision.checkInputsChanged : [],
+    })}\n`, 'utf8');
+  } catch { /* best-effort: telemetry must never fail or delay the Stop hook */ }
+}
+
+/** This actor's own observe run in the Stop cwd's project, or null. Never consults per-thread state. */
+function observeRunForCwd(inputCwd) {
+  try {
+    const { actor } = resolveActor(process.env);
+    if (isUnresolvedActor(actor)) return null;
+    const projectRoot = path.resolve(findRepoRoot(inputCwd));
+    const artifactRoot = path.join(projectRoot, '.kontourai', 'flow-agents');
+    const own = readOwnCurrentPointer(artifactRoot, actor);
+    const payload = own && own.payload;
+    if (!payload || own.source !== 'per-actor' || payload.binding_status === 'retired') return null;
+    const artifactDir = path.resolve(artifactRoot, String(payload.artifact_dir || payload.active_slug || ''));
+    if (path.dirname(artifactDir) !== artifactRoot || !fs.existsSync(artifactDir)) return null;
+    const { runIsObserved } = require('./lib/observe-engagement.js');
+    return runIsObserved(projectRoot, path.basename(artifactDir)) ? { projectRoot, artifactDir } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function observeStop(root, input, rawInput, result, mode, resolutionNote = null) {
+  const relPath = result.warningRelPath || relative(root, result.latestArtifactDir || root);
+  const prefix = result.gatePrefix || '[stop-gate]';
+  const hardWarnings = result.warnings.filter(w => isHardStopWarning(w, relPath, false));
+  let decision;
+  try {
+    const engine = await loadObserveEngine();
+    decision = await engine.evaluateObserveRun({
+      projectRoot: root,
+      sessionDir: result.latestArtifactDir,
+      mode: 'boundary',
+      stopHookActive: input.stop_hook_active === true,
+      canonical: result.observeCanonical,
+    });
+  } catch (error) {
+    decision = { action: 'hard', message: `${prefix} observe-mode engine unavailable (fail-closed): ${safeOneLine(error && error.message || error, 400)}` };
+  }
+  recordObserveBoundary(root, result, decision);
+  if (resolutionNote && decision.message) decision = { ...decision, message: `${decision.message}\n⚠ ${resolutionNote}` };
+  if (hardWarnings.length || decision.action === 'hard') {
+    const message = [
+      ...(hardWarnings.length ? [`${prefix} Goal Fit warning:`, ...hardWarnings.flatMap(w => [` - ${w}`, ...(remediationFor(w) ? [remediationFor(w)] : [])])] : []),
+      ...(decision.action === 'hard' ? [decision.message] : []),
+    ].join('\n');
+    if (mode !== 'block') return { stdout: rawInput, stderr: message, exitCode: 0 };
+    const control = `\n${STOP_CONTROL_PREFIX} ${JSON.stringify({ v: 1, terminal: true, code: 'non-releasable-hard-block' })}`;
+    return { stdout: rawInput, stderr: `${message}\n${prefix} Stop blocked — this block is non-releasable and will not clear itself; it needs a real fix or an operator override.${control}`, exitCode: 2 };
+  }
+  clearBlockStreak(root);
+  if (decision.action === 'remind') {
+    return { stdout: rawInput, stderr: decision.message, exitCode: mode === 'block' ? 2 : 0 };
+  }
+  // satisfied or handoff: the Stop is released, and the summary goes to the human. The adapters
+  // turn trailing stdout into the released Stop's user-facing systemMessage.
+  return { stdout: `${rawInput}\n${decision.message}`, stderr: decision.message, exitCode: 0 };
 }
 
 if (require.main === module) {

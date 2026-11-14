@@ -278,6 +278,11 @@ Optional policy or trust-backed readiness evidence for a published change, such 
 
 A reason code for a Gate that cannot be evaluated or cannot pass because a required provider, capability, or setting is missing, invalid, unavailable, or incompatible. Required Configuration Gaps block advancement; optional Configuration Gaps should be recorded as advisory or not verified with remediation.
 
+### Observe Mode
+
+The opt-in observe-and-remind profile of the Builder Kit (`builder.observe`, declared by `evidence_mode: "observed"`). The agent writes the plan and acceptance definition as files and works freely; hooks observe commands, the git diff, and check hashes; at each Stop the harness derives the gate's claims from those observations, reminds the agent of exactly what is unmet, and after a bounded number of reminders hands off to a human with a computed summary. The only expectation the agent records is the distinct-reviewer critique. See [docs/decisions/observe-mode.md](docs/decisions/observe-mode.md).
+_Avoid_: lean flow, reduced-gate flow (observe mode keeps every truth; it changes who records it)
+
 ### Probe
 
 A Builder Kit Alignment Gate that explores context, challenges assumptions, and records aligned decisions before the process continues. A Probe asks one question at a time, recommends an answer, and uses repository context before asking when the answer can be discovered. As understanding crystallizes, a Probe writes it into durable docs in the same motion: a vocabulary delta into this glossary and a decision delta into the Decision Registry, per [context/contracts/probe-docs-write-contract.md](context/contracts/probe-docs-write-contract.md).

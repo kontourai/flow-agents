@@ -72,15 +72,20 @@ test("Builder flow step actions are structured, complete, and operation-aware", 
   assert.deepEqual(result.errors, []);
   // Five flows declare step actions: builder.build (10), its reduced-gate ablation variant
   // builder.build-lean (10), the existing-change review builder.review-existing (4, #1415), the
-  // existing-change delivery builder.deliver-existing (7, #1415 slice 2), and builder.shape (4).
+  // existing-change delivery builder.deliver-existing (7, #1415 slice 2), observe mode's
+  // builder.observe (2: verify and done), and builder.shape (4).
   // Counted per flow rather than in total, so a row moving between flows cannot keep the sum right
   // while changing what each flow declares.
-  assert.equal(result.entries.length, 35);
+  assert.equal(result.entries.length, 37);
   assert.deepEqual(
     Object.fromEntries([...new Set(result.entries.map((entry) => entry.flow_id))].sort().map((flowId) => [flowId, result.entries.filter((entry) => entry.flow_id === flowId).length])),
-    { "builder.build": 10, "builder.build-lean": 10, "builder.deliver-existing": 7, "builder.review-existing": 4, "builder.shape": 4 },
+    { "builder.build": 10, "builder.build-lean": 10, "builder.deliver-existing": 7, "builder.observe": 2, "builder.review-existing": 4, "builder.shape": 4 },
   );
   const action = (flowId, stepId) => result.entries.find((entry) => entry.flow_id === flowId && entry.step_id === stepId);
+  // Observe mode: one working step whose derived expectations name observe-work, and whose only
+  // agent-recorded expectation is the distinct-reviewer critique.
+  assert.deepEqual(action("builder.observe", "verify")?.skills, ["observe-work", "review-work"]);
+  assert.deepEqual(action("builder.observe", "verify")?.expectation_ids, ["acceptance-definition", "implementation-scope", "tests-evidence", "acceptance-criteria", "clean-critique"]);
   assert.deepEqual(action("builder.build", "plan")?.skills, ["plan-work"]);
   // The variant ablates plan-gate, so its plan step demands nothing — the discriminating
   // difference between the two arms, asserted where the producer matrix is pinned.
@@ -89,8 +94,8 @@ test("Builder flow step actions are structured, complete, and operation-aware", 
   assert.deepEqual(action("builder.build-lean", "design-probe")?.skills, []);
   assert.deepEqual(action("builder.build-lean", "design-probe")?.expectation_ids, []);
   // #1415: neither existing-change route (review-existing, deliver-existing) adds an implementation
-  // step, so this list is unchanged.
-  assert.deepEqual(result.entries.filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`), ["builder.build/execute", "builder.build-lean/execute"]);
+  // step. Observe mode's builder.observe adds exactly its one working step, verify.
+  assert.deepEqual(result.entries.filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`), ["builder.build/execute", "builder.build-lean/execute", "builder.observe/verify"]);
   assert.deepEqual(action("builder.review-existing", "existing-change")?.skills, ["review-existing"]);
   assert.deepEqual(action("builder.review-existing", "existing-change")?.expectation_ids, ["pre-existing-implementation"]);
   assert.deepEqual(action("builder.deliver-existing", "existing-change")?.skills, ["review-existing"]);
@@ -365,16 +370,17 @@ test("Builder skill roles form one complete role and producer matrix", async () 
   const result = parseKitSkillRoles(manifest, "kits/builder/kit.json");
 
   assert.deepEqual(result.errors, []);
-  assert.equal(result.entries.length, 18);
+  assert.equal(result.entries.length, 19);
   assert.deepEqual(Object.fromEntries([...new Set(result.entries.map((entry) => entry.role))].map((role) => [role, result.entries.filter((entry) => entry.role === role).length])), {
     entrypoint: 2,
     profile: 2,
-    step: 11,
+    step: 12,
     "shared-primitive": 1,
     extension: 2,
   });
   assert.deepEqual(result.entries.find((entry) => entry.skill_id === "builder.review-work")?.expectation_ids, ["clean-critique"]);
   assert.deepEqual(result.entries.find((entry) => entry.skill_id === "builder.verify-work")?.expectation_ids, ["acceptance-criteria", "tests-evidence", "policy-compliance"]);
+  assert.deepEqual(result.entries.find((entry) => entry.skill_id === "builder.observe-work")?.expectation_ids, ["acceptance-definition", "implementation-scope", "tests-evidence", "acceptance-criteria"]);
   assert.deepEqual(await validateKitRepository("kits/builder"), []);
 });
 

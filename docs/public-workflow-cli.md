@@ -440,7 +440,15 @@ matches the implementer's or any session that has held the claim, and
 session, so it is still `same-session`. A claim recorded without a runtime
 session (claimed before this was recorded, or from no runtime-derived source)
 leaves separation undetermined, and a passing critique is refused until the
-holder re-claims the assignment from its own runtime session. The shape follows the producer–verifier relation
+holder re-claims the assignment from its own runtime session. That is the normal
+state of an assignment an orchestrator acquired from its own process (#1648). The
+refusal names the exact recovery: from the worker's own runtime session, as the
+same actor, run `flow-agents assignment-provider claim --artifact-root <root>
+--subject-id <slug> --artifact-dir <slug> --branch <branch>`. In an observe run
+the worker's first command under Flow Agents hooks, its Stop, or `flow-agents
+observe verify` performs that re-claim automatically. The session is always
+derived from the calling process's own runtime environment and is never an input.
+The shape follows the producer–verifier relation
 proposed in [hachure-org/spec#37](https://github.com/hachure-org/spec/issues/37).
 Neither source is receipt-backed, so the relation is never `independent`.
 
@@ -466,6 +474,24 @@ another session. No Flow Agents runtime issues an authenticated delegation
 credential or an externally attested reviewer identity today, so nothing
 records or computes either. A policy that requires one must keep that
 assurance `NOT_VERIFIED`.
+
+## Observe mode
+
+`builder.observe` is the opt-in observe-and-remind profile
+([decision](decisions/observe-mode.md)). The agent starts once, then writes
+`<slug>--plan-work.md` (`## Expected Modified Files`) and `acceptance.json` (each criterion's
+`{"kind":"command","excerpt":...}` evidence ref is its check), and commits its work. It submits
+no evidence. A separate reviewer session records `workflow critique`. The Stop hook does the rest.
+
+```bash
+flow-agents workflow start --flow builder.observe --task-slug <slug> --criterion "<criterion>"
+flow-agents observe status [--session-dir <dir>] [--json]   # optional, read-only: what is left
+flow-agents observe verify [--session-dir <dir>]            # optional: run locked checks with no Stop budget
+```
+
+`observe status` locks nothing, runs nothing, and never counts as a reminder. `observe verify`
+runs the locked checks that have no result at the current commit through the writer-observed
+runner. Use it for suites slower than the Stop hook's budget, and always on hosts that do not re-run checks at Stop (Kiro and unknown hosts): there the Stop uses the latest `observe verify` result for the current commit and lock.
 
 ## Review and verify an existing change
 

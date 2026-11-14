@@ -34,6 +34,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [memory-claim-routing](./memory-claim-routing.md) | current | Memory claim routing |
 | [memory-dream-run](./memory-dream-run.md) | current | Memory dream run |
 | [model-routing](./model-routing.md) | current | Model routing |
+| [observe-mode](./observe-mode.md) | current | Observe Mode |
 | [portable-host-integration](./portable-host-integration.md) | current | Portable host integration boundary |
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
 | [published-package-contents](./published-package-contents.md) | current | Published package contents and host memory entries |

@@ -166,9 +166,9 @@ test("the derived canonical run set is exactly what the declaring kit binds", ()
   // runnable as before, because nothing about it is special-cased. `builder.review-existing` and
   // `builder.deliver-existing` (#1415) joined the same way: kit declarations with complete
   // producer bindings. `builder.publish-existing`, like `builder.publish-learn`, is a composed
-  // child, not a runnable flow.
-  assert.deepEqual(canonicalRunFlowIds(), ["builder.build", "builder.build-lean", "builder.deliver-existing", "builder.review-existing", "builder.shape"]);
-  for (const flowId of ["builder.build", "builder.build-lean", "builder.deliver-existing", "builder.review-existing", "builder.shape"]) {
+  // child, not a runnable flow. `builder.observe` (observe mode) joined the same way.
+  assert.deepEqual(canonicalRunFlowIds(), ["builder.build", "builder.build-lean", "builder.deliver-existing", "builder.observe", "builder.review-existing", "builder.shape"]);
+  for (const flowId of ["builder.build", "builder.build-lean", "builder.deliver-existing", "builder.observe", "builder.review-existing", "builder.shape"]) {
     assert.equal(isCanonicalRunFlowId(flowId), true, `${flowId} must be canonically runnable`);
     assert.equal(canonicalRunFlowRefusal(flowId), null, `${flowId} must have no run refusal`);
   }

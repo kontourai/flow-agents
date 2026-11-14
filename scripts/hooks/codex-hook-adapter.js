@@ -94,6 +94,10 @@ function successOutput(event, additionalContext = '') {
       },
     };
   }
+  if (event === 'Stop' && context) {
+    // Observe mode: a released Stop's summary for the human (see claude-hook-adapter.js).
+    return { continue: true, systemMessage: context };
+  }
   if (event === 'UserPromptSubmit' || event === 'Stop') {
     return { continue: true };
   }

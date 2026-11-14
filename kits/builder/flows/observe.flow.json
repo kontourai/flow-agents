@@ -1,0 +1,93 @@
+{
+  "id": "builder.observe",
+  "version": "1.0",
+  "description": "OBSERVE-AND-REMIND PROFILE of Builder (opt-in; builder.build stays the default). One working step (verify: the agent works there while the harness verifies) and one gate whose expectations are predicates over observed evidence, not agent submissions. The agent writes the plan (<slug>--plan-work.md) and the acceptance definition (acceptance.json, each criterion mapped to the command that proves it) as files and then works freely. Hooks capture commands and the git diff; at each Stop the harness locks the acceptance checks by content hash, re-runs any locked check that has no confirming observation at the current commit through the writer-observed runner, derives the scope from git diff against the plan's declared files, and evaluates this gate from claims it derives from those observations. Unmet expectations come back to the agent as a short, capped reminder; after the cap the Stop is handed to a human with a computed summary. The only agent-recorded expectation is clean-critique, which keeps the distinct-reviewer rule of builder.build. See docs/decisions/observe-mode.md.",
+  "evidence_mode": "observed",
+  "source_binding": {
+    "base": "recorded-at-start"
+  },
+  "phase_map": {
+    "planning": "verify",
+    "execution": "verify",
+    "verification": "verify",
+    "evidence": "verify"
+  },
+  "steps": [
+    { "id": "verify", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "observe-gate": {
+      "step": "verify",
+      "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "acceptance-definition",
+          "kind": "trust.bundle",
+          "observed_by": "acceptance-lock",
+          "required": true,
+          "description": "acceptance.json defines at least one criterion, every criterion maps to a command check or is an explicit accepted gap, and the checks are locked by content hash and unchanged since the lock.",
+          "bundle_claim": {
+            "claimType": "builder.observe.acceptance-definition",
+            "subjectType": "artifact",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
+          "id": "implementation-scope",
+          "kind": "trust.bundle",
+          "observed_by": "git-scope",
+          "required": true,
+          "description": "Every file changed since the run's base commit is declared in the plan's Expected Modified Files or carries a one-line scope reason, and the worktree is committed so the checks bind to a revision.",
+          "bundle_claim": {
+            "claimType": "builder.execute.scope",
+            "subjectType": "change",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
+          "id": "tests-evidence",
+          "kind": "trust.bundle",
+          "observed_by": "locked-test-checks",
+          "required": true,
+          "description": "Every locked check has a passing observation at the current commit, from the capture log or the writer-observed re-run.",
+          "bundle_claim": {
+            "claimType": "builder.verify.tests",
+            "subjectType": "flow-step",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
+          "id": "acceptance-criteria",
+          "kind": "trust.bundle",
+          "observed_by": "locked-criterion-checks",
+          "required": true,
+          "description": "Every acceptance criterion is proven by its locked check's passing observation at the current commit.",
+          "bundle_claim": {
+            "claimType": "workflow.acceptance.criterion",
+            "subjectType": "flow-step",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
+          "id": "clean-critique",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A distinct reviewer recorded a current clean critique of the delivered change (judgment record; the only expectation the agent path records).",
+          "bundle_claim": {
+            "claimType": "workflow.critique.review",
+            "subjectType": "workflow-critique",
+            "accepted_statuses": ["verified"]
+          }
+        }
+      ]
+    }
+  }
+}
