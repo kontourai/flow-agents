@@ -45,8 +45,10 @@ export function bindHolderRuntimeSession(sessionDir: string): HolderSessionBindi
   const record = readLocalRecord(artifactRoot, slug);
   if (!record || record.status !== "claimed" || typeof record.actor_key !== "string" || !record.actor_key) return { status: "no-assignment" };
   const runtimeSession = resolveRuntimeSessionForHolder(record.actor_key);
-  if (!runtimeSession) {
-    // Either this process is not the holder, or it has no runtime-derived session to offer.
+  // Only a HOST runtime session (a Claude Code, Codex, ... session id) binds the worker. Process
+  // ancestry is runtime-derived but identifies whatever process happened to run the hook (an
+  // orchestrator's own process, for example), so it never counts as the holder's binding.
+  if (!runtimeSession || !runtimeSession.source.startsWith("runtime-session-id:")) {
     return { status: "no-runtime-session" };
   }
   const held = Array.isArray(record.runtime_session_refs) ? record.runtime_session_refs : record.runtime_session_ref ? [record.runtime_session_ref] : [];

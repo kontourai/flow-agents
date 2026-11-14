@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { evaluateGate } from "@kontourai/flow";
 import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot, type GitWorktreeSnapshot } from "./lib/review-workspace-snapshot.js";
-import { execTrustedGitSync, isExactLowercaseCommitSha } from "./lib/trusted-git.js";
+import { assertTrustedGitAncestor, execTrustedGitSync, isExactLowercaseCommitSha } from "./lib/trusted-git.js";
 import { runObservedCommand } from "./lib/observed-command.js";
 import { bindHolderRuntimeSession, holderBindingRecovery, type HolderSessionBinding } from "./lib/holder-session-binding.js";
 import { appendWriterObservedCommands, inferExecutedTestCount, testExecutionProof, WRITER_OBSERVATION_SOURCE } from "./cli/workflow-sidecar.js";
@@ -35,6 +35,20 @@ const DEFAULT_VERIFY_BUDGET_MS = 20000;
 /** Claude Code and Codex adapters kill a hook at 30 s; the re-run budget must leave headroom. */
 const MAX_VERIFY_BUDGET_MS = 25000;
 const MAX_LISTED = 6;
+/** Package-script indirection deeper than this is refused (unverifiable), never truncated. */
+export const MAX_SCRIPT_DEPTH = 5;
+/** Bounded output: at most this many fact lines in a reminder, and this many characters per line. */
+const MAX_REMINDER_FACTS = 12;
+const MAX_HANDOFF_ITEMS = 25;
+const MAX_FACT_CHARS = 600;
+/**
+ * Hosts whose Stop hook deadline is known. The Stop-time re-run must finish well inside it, so the
+ * budget is min(configured, deadline - STOP_RESERVE_MS). An unknown host gets no Stop-time re-run:
+ * a check killed by the host produces no reminder at all, which is worse than asking for
+ * `flow-agents observe verify`.
+ */
+const HOST_STOP_DEADLINE_MS: Record<string, number> = { "claude-code": 30000, codex: 30000, kiro: 5000 };
+const STOP_RESERVE_MS = 8000;
 const MAX_LOCKED_DIR_FILES = 200;
 const TEST_PROTOCOL_RUNNERS = new Set(["node --test", "go test", "cargo test"]);
 
@@ -253,8 +267,9 @@ export function readAcceptance(sessionDir: string): AcceptanceFile {
 
 export type LockedFile = { path: string; sha256: string | null };
 export type LockedScript = { name: string; sha256: string | null };
-export type LockedCheck = { criterion_id: string; command: string; command_sha256: string; files: LockedFile[]; scripts: LockedScript[] };
-export type Ledger = { file: string; status: "absent" | "ok" | "broken"; locks: Map<string, LockedCheck>; digest: string | null };
+export type LockedCheck = { criterion_id: string; command: string; command_sha256: string; files: LockedFile[]; scripts: LockedScript[]; unverifiable?: string | null };
+/** `reset`: the ledger file exists but is empty; locks were written and then wiped. */
+export type Ledger = { file: string; status: "absent" | "ok" | "broken" | "reset"; locks: Map<string, LockedCheck>; digest: string | null };
 
 function hashFile(projectRoot: string, rel: string): string | null {
   try {
@@ -264,38 +279,75 @@ function hashFile(projectRoot: string, rel: string): string | null {
   }
 }
 
-/** Package scripts a command invokes directly: `npm test`, `npm run x`, `pnpm x`, `yarn x`. */
-function invokedPackageScripts(command: string): string[] {
-  const match = /^\s*(npm|pnpm|yarn)\s+(?:run(?:-script)?\s+)?([A-Za-z0-9:_.-]+)/.exec(command);
-  if (!match) return [];
-  const name = match[2]!;
-  if (["install", "ci", "i", "add", "exec", "dlx", "x"].includes(name)) return [];
-  return [name];
-}
-
 function packageScripts(projectRoot: string): AnyObj {
   const pkg = readJson(path.join(projectRoot, "package.json"));
   return pkg && pkg.scripts && typeof pkg.scripts === "object" ? pkg.scripts : {};
 }
 
+const NOT_A_SCRIPT = new Set(["install", "ci", "i", "add", "remove", "exec", "dlx", "x", "create", "init", "publish", "pack", "link", "version"]);
+
 /**
- * The files a check runs, as observable from the definition: path tokens in the command and in
- * the bodies of the package scripts it invokes, plus files the criterion declares. Directories
- * expand to their tracked files. This is what makes a WEAKENED TEST visible: editing the test
- * file changes a locked hash even though the command string is unchanged.
+ * The package script a command segment runs, or null when the segment is not a script invocation:
+ * `npm test`/`npm t`/`npm start`, `npm run[-script] x`, `pnpm [run] x`, `yarn [run] x`.
  */
-function checkFiles(projectRoot: string, command: string, declared: string[]): string[] {
-  const scripts = packageScripts(projectRoot);
-  const texts = [command, ...invokedPackageScripts(command).map((name) => String(scripts[name] ?? ""))];
-  const candidates = new Set<string>(declared);
-  for (const text of texts) {
-    for (const token of text.split(/[\s;&|()<>"']+/)) {
-      const clean = token.replace(/^\.\//, "");
-      if (!clean || clean.startsWith("-") || clean.includes("$") || path.isAbsolute(clean) || clean.split("/").includes("..")) continue;
-      if (!/[./]/.test(clean)) continue;
-      candidates.add(clean);
-    }
+function packageScriptName(segment: string): string | null {
+  const match = /^\s*(npm|pnpm|yarn)\s+(.*)$/.exec(segment);
+  if (!match) return null;
+  const tokens = match[2]!.trim().split(/\s+/).filter((token) => token && !token.startsWith("-"));
+  const [first, second] = tokens;
+  if (!first) return null;
+  if (first === "run" || first === "run-script") return second ?? null;
+  if (match[1] === "npm") {
+    if (first === "t" || first === "tst") return "test";
+    return ["test", "start", "stop", "restart"].includes(first) ? first : null;
   }
+  return NOT_A_SCRIPT.has(first) ? null : first;
+}
+
+const UNRESOLVABLE_SHELL = /\$\(|`|\$\{?[A-Za-z_]|(^|[\s;&|])(?:eval|source|\.)\s/;
+
+type CheckResolution = { files: string[]; scripts: LockedScript[]; unverifiable: string | null };
+
+/**
+ * Everything a check runs that the agent could change, resolved TRANSITIVELY: every package-script
+ * body it reaches through npm/pnpm/yarn script indirection and `&&`/`;`/`|` chains (with any
+ * pre/post scripts), and the files and directories its leaf commands name, plus files the criterion
+ * declares. A weakened nested test or an edited nested script then changes a locked hash.
+ * Resolution REFUSES rather than truncates: an undefined script, a script cycle, indirection deeper
+ * than MAX_SCRIPT_DEPTH, or shell expansion that cannot be read statically makes the lock
+ * `unverifiable`, which the engine reports instead of passing.
+ */
+export function resolveCheck(projectRoot: string, command: string, declared: string[]): CheckResolution {
+  const scripts = packageScripts(projectRoot);
+  const scriptHashes = new Map<string, string | null>();
+  const candidates = new Set<string>(declared);
+  let unverifiable: string | null = null;
+  const visit = (text: string, depth: number, stack: string[]): void => {
+    if (unverifiable) return;
+    if (UNRESOLVABLE_SHELL.test(text)) { unverifiable = `${quoted(text, 80)} uses shell expansion that cannot be resolved statically`; return; }
+    for (const segment of text.split(/&&|\|\||;|\|/)) {
+      const name = packageScriptName(segment);
+      if (name === null) {
+        for (const token of segment.split(/[\s()<>"']+/)) {
+          const clean = token.replace(/^\.\//, "");
+          if (!clean || clean.startsWith("-") || path.isAbsolute(clean) || clean.split("/").includes("..")) continue;
+          if (!/[./]/.test(clean)) continue;
+          candidates.add(clean);
+        }
+        continue;
+      }
+      if (depth >= MAX_SCRIPT_DEPTH) { unverifiable = `package-script indirection is deeper than ${MAX_SCRIPT_DEPTH} levels (${[...stack, name].join(" → ")})`; return; }
+      if (stack.includes(name)) { unverifiable = `package script cycle (${[...stack, name].join(" → ")})`; return; }
+      if (typeof scripts[name] !== "string") { unverifiable = `package script "${name}" is not defined in package.json`; return; }
+      for (const hook of [`pre${name}`, name, `post${name}`]) {
+        if (typeof scripts[hook] !== "string") continue;
+        scriptHashes.set(hook, sha256(scripts[hook]));
+        visit(String(scripts[hook]), depth + 1, [...stack, name]);
+        if (unverifiable) return;
+      }
+    }
+  };
+  visit(command, 0, []);
   const files = new Set<string>();
   for (const candidate of candidates) {
     const abs = path.join(projectRoot, candidate);
@@ -303,23 +355,29 @@ function checkFiles(projectRoot: string, command: string, declared: string[]): s
     try { stat = fs.statSync(abs); } catch { continue; }
     if (stat.isFile()) files.add(candidate);
     else if (stat.isDirectory()) {
-      try {
-        for (const tracked of zList(git(projectRoot, ["ls-files", "-z", "--", candidate])).slice(0, MAX_LOCKED_DIR_FILES)) files.add(tracked);
-      } catch { /* untracked directory: its files are not locked */ }
+      let tracked: string[] = [];
+      try { tracked = zList(git(projectRoot, ["ls-files", "-z", "--", candidate])); } catch { /* untracked directory */ }
+      if (tracked.length > MAX_LOCKED_DIR_FILES && !unverifiable) unverifiable = `${candidate} holds more than ${MAX_LOCKED_DIR_FILES} tracked files; name the test files the check runs`;
+      for (const file of tracked.slice(0, MAX_LOCKED_DIR_FILES)) files.add(file);
     }
   }
-  return [...files].sort();
+  return {
+    files: [...files].sort(),
+    scripts: [...scriptHashes].map(([name, sha]) => ({ name, sha256: sha })).sort((a, b) => a.name.localeCompare(b.name)),
+    unverifiable,
+  };
 }
 
 function lockFor(projectRoot: string, criterion: Criterion): LockedCheck {
   const command = criterion.command!;
-  const scripts = packageScripts(projectRoot);
+  const resolved = resolveCheck(projectRoot, command, criterion.declaredFiles);
   return {
     criterion_id: criterion.id,
     command,
     command_sha256: sha256(command),
-    files: checkFiles(projectRoot, command, criterion.declaredFiles).map((rel) => ({ path: rel, sha256: hashFile(projectRoot, rel) })),
-    scripts: invokedPackageScripts(command).map((name) => ({ name, sha256: typeof scripts[name] === "string" ? sha256(scripts[name]) : null })),
+    files: resolved.files.map((rel) => ({ path: rel, sha256: hashFile(projectRoot, rel) })),
+    scripts: resolved.scripts,
+    unverifiable: resolved.unverifiable,
   };
 }
 
@@ -327,7 +385,8 @@ export function readLedger(sessionDir: string): Ledger {
   const file = path.join(sessionDir, OBSERVE_LEDGER_FILE);
   let raw = "";
   try { raw = fs.readFileSync(file, "utf8"); } catch { return { file, status: "absent", locks: new Map(), digest: null }; }
-  if (!raw.trim()) return { file, status: "absent", locks: new Map(), digest: null };
+  // The engine never writes an empty ledger: an existing file with no records was wiped.
+  if (!raw.trim()) return { file, status: "reset", locks: new Map(), digest: null };
   const verdict = chain().verifyCommandLogRaw(raw);
   const records = raw.split("\n").filter((line) => line.trim()).map((line) => { try { return JSON.parse(line); } catch { return null; } });
   // Every ledger record is written chained; an unchained or unparseable record is tamper.
@@ -362,7 +421,7 @@ function appendLedger(ledger: Ledger, record: AnyObj): boolean {
 
 /** Lock every criterion check not yet locked. Locks are first-write-wins and never rewritten. */
 function extendLocks(projectRoot: string, acceptance: AcceptanceFile, ledger: Ledger, now: Date): Ledger {
-  if (ledger.status === "broken" || !acceptance.valid) return ledger;
+  if (ledger.status === "broken" || ledger.status === "reset" || !acceptance.valid) return ledger;
   const fresh = acceptance.criteria.filter((criterion) => criterion.command && !ledger.locks.has(criterion.id)).map((criterion) => lockFor(projectRoot, criterion));
   if (fresh.length === 0) return ledger;
   if (!appendLedger(ledger, { type: "lock", at: now.toISOString(), acceptance_sha256: acceptance.sha256, checks: fresh })) return ledger;
@@ -557,16 +616,42 @@ function currentGate(definition: AnyObj, step: string): [string, AnyObj] | null 
   return null;
 }
 
-function currentCritiques(bundle: AnyObj | null, snapshot: GitWorktreeSnapshot | null): { current: AnyObj | null; latest: AnyObj | null } {
+/** A host runtime session (not process ancestry, not a coordination label): the only holder binding observe mode accepts. */
+export function isHostRuntimeSessionSource(source: unknown): boolean {
+  return typeof source === "string" && source.startsWith("runtime-session-id:");
+}
+
+/**
+ * Why a critique of the current tree does not count, or null when it does. Re-derived at every
+ * boundary against the assignment's CURRENT held sessions, so a binding recorded later
+ * invalidates a review that turns out to be self-review (#1648 fix round):
+ *  - the reviewer's session has held this assignment (same-session, possibly learned after the review);
+ *  - the implementer was not bound to a host runtime session when the review was recorded
+ *    (separation was undetermined then, so the review cannot be independent).
+ */
+function critiqueStanding(critique: AnyObj, heldRefs: string[]): string | null {
+  const assurance = critique.metadata?.reviewer_assurance;
+  const reviewer = assurance?.reviewer?.session_ref;
+  if (typeof reviewer === "string" && heldRefs.includes(reviewer)) return "its reviewer session has held this assignment, so it is self-review";
+  const implementer = assurance?.implementer;
+  if (!implementer || !isHostRuntimeSessionSource(implementer.resolved_by)) {
+    return "it was recorded before the worker's host runtime session was bound to the assignment, so reviewer separation was undetermined";
+  }
+  return null;
+}
+
+function currentCritiques(bundle: AnyObj | null, snapshot: GitWorktreeSnapshot | null, heldRefs: string[]): { current: AnyObj | null; latest: AnyObj | null; refused: string | null } {
   const claims = Array.isArray(bundle?.claims) ? bundle!.claims as AnyObj[] : [];
   const critiques = claims
     .filter((claim) => claim.claimType === "workflow.critique.review" && claim.metadata?.origin === "critique")
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const latest = critiques.at(-1) ?? null;
-  if (!latest || !snapshot) return { current: null, latest };
+  if (!latest || !snapshot) return { current: null, latest, refused: null };
   const target = latest.metadata?.review_target?.workspace_snapshot;
-  const current = target && target.digest === snapshot.digest && target.head_sha === snapshot.head_sha && latest.value === "pass" ? latest : null;
-  return { current, latest };
+  const onTree = target && target.digest === snapshot.digest && target.head_sha === snapshot.head_sha && latest.value === "pass";
+  if (!onTree) return { current: null, latest, refused: null };
+  const refused = critiqueStanding(latest, heldRefs);
+  return { current: refused ? null : latest, latest, refused };
 }
 
 // ─── Derived bundle and Flow evaluation ─────────────────────────────────────────────────
@@ -632,19 +717,67 @@ function buildBundle(slug: string, gate: AnyObj, metByKind: Map<string, { met: b
 
 // ─── Reminder state ─────────────────────────────────────────────────────────────────────
 
-type ReminderState = { window: number; last_unmet_digest: string | null; file_hashes: Record<string, string | null> };
+/**
+ * `locks` records every criterion lock ever seen (criterion id → lock entry digest) and only grows,
+ * so a ledger that later loses or rewrites a lock is detected as a reset even after re-locking.
+ */
+type ReminderState = { present: boolean; window: number; last_unmet_digest: string | null; file_hashes: Record<string, string | null>; locks: Record<string, string> };
 
 function readReminderState(sessionDir: string): ReminderState {
   const raw = readJson(path.join(sessionDir, OBSERVE_STATE_FILE));
   return {
+    present: raw !== null,
     window: Number.isSafeInteger(raw?.window) && raw!.window >= 0 ? raw!.window : 0,
     last_unmet_digest: typeof raw?.last_unmet_digest === "string" ? raw.last_unmet_digest : null,
     file_hashes: raw?.file_hashes && typeof raw.file_hashes === "object" ? raw.file_hashes : {},
+    locks: raw?.locks && typeof raw.locks === "object" && !Array.isArray(raw.locks) ? raw.locks : {},
   };
 }
 
-function writeReminderState(sessionDir: string, state: ReminderState): void {
-  try { fs.writeFileSync(path.join(sessionDir, OBSERVE_STATE_FILE), `${JSON.stringify(state)}\n`); } catch { /* best effort: losing it only resets the window */ }
+/** Returns the write error, or null. The caller fails closed: an unsaved count cannot bound reminders. */
+function writeReminderState(sessionDir: string, state: Omit<ReminderState, "present">): string | null {
+  try {
+    fs.writeFileSync(path.join(sessionDir, OBSERVE_STATE_FILE), `${JSON.stringify(state)}\n`);
+    return null;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code ?? (error as Error).message;
+  }
+}
+
+function lockEntryDigest(lock: LockedCheck): string {
+  return sha256(canonicalJson(lock));
+}
+
+function clip(text: string, max = MAX_FACT_CHARS): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function boundedLines(items: string[], max: number, more: string): string[] {
+  const lines = items.slice(0, max).map((item) => ` - ${clip(item)}`);
+  if (items.length > max) lines.push(` - … and ${items.length - max} more (${more})`);
+  return lines;
+}
+
+/** The host this process runs under: adapters stamp it; otherwise the shared runtime detector. */
+function hostRuntimeFor(env: NodeJS.ProcessEnv): string {
+  const stamped = String(env.FLOW_AGENTS_HOOK_RUNTIME || "").trim();
+  if (stamped) return stamped;
+  try {
+    const engagement = requireCjs(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../scripts/hooks/lib/observe-engagement.js")) as { hostRuntime: (env: NodeJS.ProcessEnv) => string };
+    return engagement.hostRuntime(env);
+  } catch {
+    return "unknown";
+  }
+}
+
+/** The Stop-time re-run budget for this host, or null when no check can run inside its Stop deadline. */
+export function stopBudgetFor(host: string, configuredMs: number): { budgetMs: number | null; deadlineMs: number | null; why: string } {
+  const deadline = HOST_STOP_DEADLINE_MS[host] ?? null;
+  if (configuredMs < 1000) return { budgetMs: null, deadlineMs: deadline, why: `Stop-time re-runs are disabled (FLOW_AGENTS_OBSERVE_VERIFY_BUDGET_MS=${configuredMs})` };
+  if (deadline === null) return { budgetMs: null, deadlineMs: null, why: `the Stop hook does not run checks on ${host} (its Stop deadline is unknown)` };
+  const budget = Math.min(configuredMs, deadline - STOP_RESERVE_MS);
+  if (budget < 1000) return { budgetMs: null, deadlineMs: deadline, why: `the Stop hook does not run checks on ${host} (its Stop deadline is ${Math.round(deadline / 1000)} s)` };
+  return { budgetMs: budget, deadlineMs: deadline, why: "" };
 }
 
 // ─── The evaluation ─────────────────────────────────────────────────────────────────────
@@ -658,6 +791,10 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   const slug = path.basename(sessionDir);
   const facts: Fact[] = [];
   const hard: string[] = [];
+  // Conditions under which the reminder loop cannot be trusted to stay bounded or honest: always
+  // released as an immediate handoff, never as a pass (fix round for #1649).
+  const forcedHandoff: string[] = [];
+  let reruns: RerunNote[] = [];
   const push = (key: string, expectation: string | null, status: FactStatus, text: string) => facts.push({ key, expectation, status, text });
 
   const canonical = input.canonical ?? readCanonical(projectRoot, slug);
@@ -687,25 +824,43 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   const acceptance = readAcceptance(sessionDir);
   let ledger = readLedger(sessionDir);
   if (ledger.status === "broken") hard.push(`observe ledger integrity check FAILED (${path.relative(projectRoot, ledger.file)}): the check locks were edited or reordered. Restore it or ask an operator; locks are never rewritten.`);
+  const priorState = readReminderState(sessionDir);
+  if (ledger.status === "reset") forcedHandoff.push(`the observe ledger ${path.relative(projectRoot, ledger.file)} exists but is empty: its check locks were wiped, so they cannot be trusted or re-created`);
   if (input.mode !== "status") ledger = extendLocks(projectRoot, acceptance, ledger, now());
+  // A lock seen before must still be in the ledger, byte-for-byte. Deleting or truncating the ledger
+  // and re-locking a weakened check is caught here as long as the reminder state survives.
+  const lostLocks = Object.entries(priorState.locks).filter(([id, digest]) => {
+    const current = ledger.locks.get(id);
+    return !current || lockEntryDigest(current) !== digest;
+  }).map(([id]) => id);
+  if (lostLocks.length) forcedHandoff.push(`the observe ledger lost or rewrote locks it held before (${listWithMore(lostLocks)}): it was deleted, truncated or reset, so the current locks cannot be trusted`);
 
   const accRel = path.relative(projectRoot, acceptance.path);
   const planRel = path.relative(projectRoot, plan.path);
   if (!acceptance.valid) push("acceptance", "acceptance-lock", "unmet", `${accRel}: ${acceptance.error}. Define criteria, each with a command evidence_ref ({"kind":"command","excerpt":"<check>"}) or status "accepted_gap" with notes.`);
 
+  // The recorded base must be an ancestor of HEAD: `git diff` happily compares unrelated trees, so
+  // replacing history with an unrelated root would otherwise satisfy scope.
+  let baseIsAncestor = false;
+  if (base && head) {
+    try { assertTrustedGitAncestor(projectRoot, base, head); baseIsAncestor = true; } catch { baseIsAncestor = false; }
+  }
   const scopeExcluded = [path.relative(projectRoot, path.dirname(sessionDir)).split(path.sep).join("/")];
   const changed = base ? changedSinceBase(projectRoot, base, scopeExcluded) : [];
   const fileHashes: Record<string, string | null> = {};
   for (const file of changed.slice(0, 500)) fileHashes[file] = hashFile(projectRoot, file);
 
   const definitionIssues: string[] = [];
+  const gapIds: string[] = [];
   const lockedChecks: LockedCheck[] = [];
   const checkEdits: string[] = [];
   for (const criterion of acceptance.criteria) {
     const cite = `${accRel}:${criterion.id}`;
     const locked = ledger.locks.get(criterion.id);
     if (criterion.status === "accepted_gap") {
-      if (criterion.notes) push(`gap:${criterion.id}`, "locked-criterion-checks", "gap", `${cite} accepted gap${locked ? " (accepted after its check was locked)" : ""}: ${criterion.notes}`);
+      // An agent-declared gap is a judgment for a HUMAN, never a truth the harness can treat as met.
+      gapIds.push(criterion.id);
+      if (criterion.notes) push(`gap:${criterion.id}`, "locked-criterion-checks", "gap", `criterion ${cite} not demonstrated${locked ? " (marked a gap after its check was locked)" : ""}; agent reason: ${criterion.notes}`);
       else { definitionIssues.push(criterion.id); push(`gap:${criterion.id}`, "acceptance-lock", "unmet", `${cite} is marked accepted_gap without notes: give the one-line reason.`); }
       continue;
     }
@@ -728,12 +883,31 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
       if (reason) push(`edit:${criterion.id}:${file.path}`, "acceptance-lock", "attention", `${file.path}, a locked check file of ${criterion.id}, changed after the lock. Reason given: ${reason}`);
       else push(`edit:${criterion.id}:${file.path}`, "acceptance-lock", "unmet", `${file.path}, a locked check file of ${cite}, changed after the lock (possible weakened test). Revert it, or add "- \`${file.path}\`: <why>" under ## Check Changes in ${planRel}; the human sees that reason either way.`);
     }
-    const scripts = packageScripts(projectRoot);
-    for (const script of locked.scripts) {
-      const nowHash = typeof scripts[script.name] === "string" ? sha256(scripts[script.name]) : null;
-      if (nowHash === script.sha256) continue;
-      checkEdits.push(`package.json script "${script.name}" (check of ${criterion.id})`);
-      push(`edit:${criterion.id}:script:${script.name}`, "acceptance-lock", "unmet", `package.json script "${script.name}", run by the locked check of ${cite}, changed after the lock. Revert it.`);
+    if (locked.unverifiable) {
+      push(`unverifiable:${criterion.id}`, "acceptance-lock", "unmet", `${cite} locked check ${quoted(locked.command)} cannot be locked statically: ${locked.unverifiable}. Use a check whose scripts and test files can be resolved (a direct command, or package scripts at most ${MAX_SCRIPT_DEPTH} deep), or this needs a human.`);
+    }
+    // Re-resolve the locked command against today's package.json: every script it now reaches,
+    // directly or nested, must be a locked script with an unchanged body.
+    const nowResolved = resolveCheck(projectRoot, locked.command, criterion.declaredFiles);
+    const scriptsNow = new Map(nowResolved.scripts.map((script) => [script.name, script.sha256]));
+    const scriptNames = new Set([...locked.scripts.map((script) => script.name), ...scriptsNow.keys()]);
+    for (const name of scriptNames) {
+      const before = locked.scripts.find((script) => script.name === name)?.sha256;
+      const after = scriptsNow.get(name);
+      if (before !== undefined && before === after) continue;
+      const what = before === undefined ? "was added to" : after === undefined ? "was removed from" : "changed in";
+      checkEdits.push(`package.json script "${name}" ${what} the check of ${criterion.id}`);
+      push(`edit:${criterion.id}:script:${name}`, "acceptance-lock", "unmet", `package.json script "${name}" ${what} the locked check of ${cite} after the lock (nested scripts included). Revert it.`);
+    }
+    if (!locked.unverifiable && nowResolved.unverifiable) {
+      push(`unverifiable-now:${criterion.id}`, "acceptance-lock", "unmet", `${cite} locked check ${quoted(locked.command)} can no longer be resolved statically: ${nowResolved.unverifiable}. Revert the package.json change.`);
+    }
+    const lockedPaths = new Set(locked.files.map((file) => file.path));
+    for (const added of nowResolved.files.filter((file) => !lockedPaths.has(file))) {
+      const reason = plan.checkChangeReasons.get(added);
+      checkEdits.push(`${added} now runs as part of the check of ${criterion.id}${reason ? `: ${reason}` : ""}`);
+      if (reason) push(`edit:${criterion.id}:${added}`, "acceptance-lock", "attention", `${added} was added to the locked check of ${criterion.id} after the lock. Reason given: ${reason}`);
+      else push(`edit:${criterion.id}:${added}`, "acceptance-lock", "unmet", `${added} now runs as part of the locked check of ${cite} but was not part of it at the lock. Remove it, or add "- \`${added}\`: <why>" under ## Check Changes in ${planRel}.`);
     }
   }
   for (const [id, locked] of ledger.locks) {
@@ -745,6 +919,7 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
 
   // Scope.
   if (!base) push("scope:base", "git-scope", "unmet", "the run has no recorded base commit (params.source_base); scope cannot be derived. Start a new builder.observe run.");
+  else if (head && !baseIsAncestor) push("scope:ancestry", "git-scope", "unmet", `scope: the run's recorded base ${short(base)} is not an ancestor of HEAD ${short(head)}: history was replaced or rewritten, so the diff no longer describes this run's changes. Restore history that contains ${short(base)}, or start a new run.`);
   if (!plan.present) push("plan", "git-scope", "unmet", `${planRel} is missing: write it with an "## Expected Modified Files" list.`);
   else if (!plan.expectedDeclared) push("plan", "git-scope", "unmet", `${planRel} has no "## Expected Modified Files" section.`);
   const outside = changed.filter((file) => !declaredCovers(plan.expected, file));
@@ -760,10 +935,13 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   }
 
   // Path layer, observed: bounded hook-triggered re-run, then the fold.
-  let reruns: RerunNote[] = [];
-  if (input.mode !== "status" && snapshot?.worktree_clean && hard.length === 0) {
-    reruns = await rerunLockedChecks(projectRoot, sessionDir, lockedChecks, snapshot, input.mode === "boundary" ? settings.verifyBudgetMs : null, now);
+  const host = hostRuntimeFor(input.env ?? process.env);
+  const stopBudget = stopBudgetFor(host, settings.verifyBudgetMs);
+  const canRerun = input.mode === "verify" || (input.mode === "boundary" && stopBudget.budgetMs !== null);
+  if (canRerun && snapshot?.worktree_clean && hard.length === 0) {
+    reruns = await rerunLockedChecks(projectRoot, sessionDir, lockedChecks.filter((lock) => !lock.unverifiable), snapshot, input.mode === "boundary" ? stopBudget.budgetMs : null, now);
   }
+  const noStopRerun = input.mode === "boundary" && stopBudget.budgetMs === null;
   const log = readCommandLog(sessionDir);
   if (log.status === "broken") hard.push("command-log integrity check FAILED for the observe run: observations cannot be trusted.");
 
@@ -773,6 +951,7 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   for (const check of lockedChecks) {
     const criterion = acceptance.criteria.find((entry) => entry.id === check.criterion_id);
     if (!criterion || criterion.status === "accepted_gap") continue;
+    if (check.unverifiable) continue;
     const cite = `${accRel}:${check.criterion_id}`;
     const capable = testCapable(check.command, projectRoot);
     if (capable) testCapableCount += 1;
@@ -796,7 +975,8 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
     // same refusal the CLI's tests-evidence writer applies to a failing outcome.
     if (observed.result === "fail") why = `locked check ${quoted(check.command)} FAILS at ${short(head)} (exit ${observed.exitCode ?? "?"}${observed.source === "postToolUse-capture" ? ", captured" : ", run by the observed runner"}); you stopped as if done. Fix it and commit; a failure at a commit stays a failure.`;
     else if (!snapshot.worktree_clean) why = `locked check ${quoted(check.command)} has no result for a committed tree (${lastText}).`;
-    else if (rerun?.outcome === "budget-exceeded" || rerun?.outcome === "skipped-budget") why = `locked check ${quoted(check.command)} did not finish within the Stop budget (${settings.verifyBudgetMs} ms); run \`flow-agents observe verify\` (${lastText}).`;
+    else if (rerun?.outcome === "budget-exceeded" || rerun?.outcome === "skipped-budget") why = `locked check ${quoted(check.command)} did not finish within the Stop budget (${stopBudget.budgetMs ?? 0} ms on ${host}); run \`flow-agents observe verify\` (${lastText}).`;
+    else if (noStopRerun && !check.unverifiable) why = `locked check ${quoted(check.command)} has no result for this commit and lock, and ${stopBudget.why}: run \`flow-agents observe verify\` (${lastText}).`;
     else if (rerun?.outcome === "error") why = `locked check ${quoted(check.command)} could not be run (${rerun.detail ?? "error"}).`;
     else why = `locked check ${quoted(check.command)} has no result at ${short(head)} (${lastText}).`;
     push(`result:${check.criterion_id}`, "locked-criterion-checks", "unmet", `${cite} ${why}`);
@@ -807,10 +987,18 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
 
   // Judgment record: the distinct-reviewer critique.
   const trustBundle = readJson(path.join(sessionDir, "trust.bundle"));
-  const critique = currentCritiques(trustBundle, snapshot && snapshot.worktree_clean ? snapshot : null);
   const assignment = readJson(path.join(path.dirname(sessionDir), "assignment", `${slug}.json`));
-  const holderSessionMissing = Boolean(assignment) && !(typeof assignment!.runtime_session_ref === "string" && assignment!.runtime_session_ref);
-  if (!critique.current && holderSessionMissing) {
+  const heldRefs = [
+    ...(Array.isArray(assignment?.runtime_session_refs) ? assignment!.runtime_session_refs.filter((ref: unknown): ref is string => typeof ref === "string") : []),
+    ...(typeof assignment?.runtime_session_ref === "string" ? [assignment.runtime_session_ref] : []),
+  ];
+  const critique = currentCritiques(trustBundle, snapshot && snapshot.worktree_clean ? snapshot : null, heldRefs);
+  // Only a HOST runtime session counts as the holder's binding: process ancestry (for example from
+  // an orchestrator's own process) never does.
+  const holderSessionMissing = Boolean(assignment) && !(typeof assignment!.runtime_session_ref === "string" && assignment!.runtime_session_ref && isHostRuntimeSessionSource(assignment!.runtime_session_source));
+  if (!critique.current && critique.refused) {
+    push("review", null, "unmet", `review: the critique of ${short(head)} does not count: ${critique.refused}. A separate reviewer session must record \`workflow critique\` again${holderSessionMissing ? " after the worker's host session is bound" : ""}.`);
+  } else if (!critique.current && holderSessionMissing) {
     push("review", null, "unmet", `review: the worker's runtime session is not recorded on the assignment (an orchestrator acquired the claim from its own process), so no passing review can be recorded yet${holderBinding?.status === "no-runtime-session" ? "; this Stop could not record it because it is not running in the holder's runtime session" : ""}. ${holderBindingRecovery({ artifactRoot: path.dirname(sessionDir), slug, branch: typeof assignment!.branch === "string" ? assignment!.branch : undefined })}`);
   } else if (!critique.current) {
     const reviewed = critique.latest?.metadata?.review_target?.workspace_snapshot?.head_sha;
@@ -824,13 +1012,15 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   for (const [file, reason] of plan.scopeReasons) if (changed.includes(file)) push(`scope-reason:${file}`, null, "attention", `scope reason for ${file}: ${reason}`);
   for (const issue of settings.issues) push(`setting:${issue}`, null, "attention", issue);
 
+  for (const reason of forcedHandoff) push(`integrity:${reason.slice(0, 40)}`, "acceptance-lock", "unmet", `observe integrity: ${reason}. This needs a human.`);
+
   // Derive claims and let Flow decide.
   const unmet = (expectation: string) => facts.some((fact) => fact.expectation === expectation && fact.status === "unmet");
   const metByKind = new Map<string, { met: boolean; summary: string }>([
-    ["acceptance-lock", { met: acceptance.valid && ledger.status === "ok" && ledger.locks.size > 0 && definitionIssues.length === 0 && !unmet("acceptance-lock"), summary: `locked ${ledger.locks.size} check(s), digest ${ledger.digest ?? "none"}` }],
-    ["git-scope", { met: Boolean(base) && plan.expectedDeclared && unexplained.length === 0 && Boolean(snapshot?.worktree_clean), summary: `${changed.length} changed since ${short(base)}; ${outside.length - unexplained.length} with scope reasons` }],
+    ["acceptance-lock", { met: acceptance.valid && ledger.status === "ok" && forcedHandoff.length === 0 && ledger.locks.size > 0 && definitionIssues.length === 0 && !unmet("acceptance-lock"), summary: `locked ${ledger.locks.size} check(s), digest ${ledger.digest ?? "none"}` }],
+    ["git-scope", { met: Boolean(base) && baseIsAncestor && plan.expectedDeclared && unexplained.length === 0 && Boolean(snapshot?.worktree_clean), summary: `${changed.length} changed since ${short(base)}; ${outside.length - unexplained.length} with scope reasons` }],
     ["locked-test-checks", { met: testMet > 0 && !unmet("locked-criterion-checks") && !unmet("locked-test-checks"), summary: `${testMet} passing locked test check(s) at ${short(head)}` }],
-    ["locked-criterion-checks", { met: lockedChecks.length > 0 && !unmet("locked-criterion-checks") && !unmet("acceptance-lock") && criteriaMet > 0, summary: `${criteriaMet} criterion check(s) pass at ${short(head)}` }],
+    ["locked-criterion-checks", { met: lockedChecks.length > 0 && gapIds.length === 0 && !unmet("locked-criterion-checks") && !unmet("acceptance-lock") && criteriaMet > 0, summary: `${criteriaMet} criterion check(s) pass at ${short(head)}${gapIds.length ? `; ${gapIds.length} accepted gap(s) not demonstrated: ${gapIds.join(", ")}` : ""}` }],
   ]);
   let gate = { id: gateEntry?.[0] ?? "?", status: "unavailable", missing: [] as string[] };
   let engineDefect: string | null = null;
@@ -850,12 +1040,13 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
     }
   }
   const anyUnmet = facts.some((fact) => fact.status === "unmet");
-  if (!engineDefect && gate.status !== "pass" && !anyUnmet && hard.length === 0) {
+  if (!engineDefect && gate.status !== "pass" && !anyUnmet && gapIds.length === 0 && hard.length === 0) {
     engineDefect = `every observed fact is met but Flow refused ${gate.id} (${gate.status}; missing ${gate.missing.join(", ") || "none"})`;
   }
   if (engineDefect) push("engine", null, "unmet", `observe-mode engine defect: ${engineDefect}. This needs a human.`);
 
-  return finish(hard.length ? "hard" : (gate.status === "pass" && !anyUnmet && !engineDefect) ? "satisfied" : "unmet" as any, hard, head, base, ledger.digest, checkEdits, gate);
+  // Defense in depth: a pass is reported only when Flow passed AND nothing is unmet AND no agent-declared gap exists.
+  return finish(hard.length ? "hard" : (gate.status === "pass" && !anyUnmet && gapIds.length === 0 && !engineDefect) ? "satisfied" : "unmet" as any, hard, head, base, ledger.digest, checkEdits, gate);
 
   function finish(kind: "hard" | "satisfied" | "unmet", hardIssues: string[], headSha: string | null, baseSha: string | null, digest: string | null, edits: string[], gateResult: { id: string; status: string; missing: string[] }): ObserveDecision {
     const label = `[${String(canonical?.definition?.id ?? "builder.observe")}/${gateResult.id}]`;
@@ -869,42 +1060,56 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
     if (kind === "hard") {
       return decision("hard", [`${label} observe mode integrity failure:`, ...hardIssues.map((issue) => ` - ${issue}`)].join("\n"), 0);
     }
+    const lockMap = { ...priorState.locks };
+    for (const [id, lock] of ledger.locks) if (!(id in lockMap)) lockMap[id] = lockEntryDigest(lock);
     if (kind === "satisfied") {
-      if (input.mode === "boundary") writeReminderState(sessionDir, { window: 0, last_unmet_digest: null, file_hashes: {} });
-      const lines = [`${label} All observed truths are met at ${short(headSha)}; the work may stop.`, ...attention.map((fact) => ` - ${fact.text}`), ` - ${external}`, tail];
+      const lines = [`${label} All observed truths are met at ${short(headSha)}; the work may stop.`, ...boundedLines(attention.map((fact) => fact.text), MAX_HANDOFF_ITEMS, "flow-agents observe status lists all"), ` - ${external}`, tail];
+      if (input.mode === "boundary") {
+        const error = writeReminderState(sessionDir, { window: 0, last_unmet_digest: null, file_hashes: {}, locks: lockMap });
+        if (error) lines.splice(1, 0, ` - (attention) the observe reminder state could not be saved (${error}); later Stops will hand off until it can be.`);
+      }
       return decision("satisfied", lines.join("\n"), 0);
     }
     const unmetFacts = facts.filter((fact) => fact.status === "unmet");
-    const actionable = unmetFacts.filter((fact) => fact.key !== "engine");
+    const gaps = facts.filter((fact) => fact.status === "gap");
+    const actionable = unmetFacts.filter((fact) => fact.key !== "engine" && !fact.key.startsWith("integrity:"));
     const digestNow = sha256(canonicalJson(unmetFacts.map((fact) => fact.text)));
-    const prior = readReminderState(sessionDir);
-    const changedSince = Object.keys(fileHashes).filter((file) => prior.file_hashes[file] !== undefined && prior.file_hashes[file] !== fileHashes[file]);
-    const count = prior.window + 1;
-    let handoffReason: string | null = null;
-    if (input.mode !== "boundary") handoffReason = null;
-    else if (actionable.length === 0) handoffReason = "only items that need a human remain";
-    else if (input.stopHookActive === true && prior.last_unmet_digest === digestNow) handoffReason = "no progress since the last reminder";
-    else if (count >= settings.maxReminders) handoffReason = `reminder cap reached (${settings.maxReminders} unmet stops)`;
+    const changedSince = Object.keys(fileHashes).filter((file) => priorState.file_hashes[file] !== undefined && priorState.file_hashes[file] !== fileHashes[file]);
+    const count = priorState.window + 1;
     if (input.mode !== "boundary") {
-      const lines = [`${label} ${unmetFacts.length} unmet:`, ...unmetFacts.map((fact) => ` - ${fact.text}`), ...attention.map((fact) => ` - (attention) ${fact.text}`), tail];
-      return decision("remind", lines.join("\n"), prior.window);
+      const lines = [`${label} ${unmetFacts.length} unmet${gaps.length ? `, ${gaps.length} accepted gap(s) for a human` : ""}:`, ...boundedLines(unmetFacts.map((fact) => fact.text), MAX_HANDOFF_ITEMS, "fix these first"), ...boundedLines(attention.map((fact) => `(attention) ${fact.text}`), MAX_HANDOFF_ITEMS, "more attention items"), tail];
+      return decision("remind", lines.join("\n"), priorState.window);
+    }
+    let handoffReason: string | null = null;
+    if (forcedHandoff.length) handoffReason = "the observe records cannot be trusted (see Unmet)";
+    else if (actionable.length === 0 && gaps.length) handoffReason = "every remaining item is an accepted gap the agent declared; a human must decide";
+    else if (actionable.length === 0) handoffReason = "only items that need a human remain";
+    // Loop safety from the runtime's own continuation signal, independent of persisted state: a
+    // continuation whose reminder state is missing cannot prove progress, so it hands off.
+    else if (input.stopHookActive === true && !priorState.present) handoffReason = "this Stop continues a refused Stop, but the reminder state is missing, so progress cannot be checked";
+    else if (input.stopHookActive === true && priorState.last_unmet_digest === digestNow) handoffReason = "no progress since the last reminder";
+    else if (count >= settings.maxReminders) handoffReason = `reminder cap reached (${settings.maxReminders} unmet stops)`;
+    if (!handoffReason) {
+      const error = writeReminderState(sessionDir, { window: count, last_unmet_digest: digestNow, file_hashes: fileHashes, locks: lockMap });
+      // Fail closed: without a saved count the cap cannot bound the reminders.
+      if (error) handoffReason = `the reminder state could not be saved (${error}), so the reminder cap cannot be enforced`;
     }
     if (handoffReason) {
-      writeReminderState(sessionDir, { window: 0, last_unmet_digest: null, file_hashes: fileHashes });
+      const persisted = writeReminderState(sessionDir, { window: 0, last_unmet_digest: null, file_hashes: fileHashes, locks: lockMap });
       const lines = [
         `${label} Handing off to you: ${handoffReason}. Task ${slug} at ${short(headSha)}.`,
-        `Unmet (${unmetFacts.length}):`, ...unmetFacts.map((fact) => ` - ${fact.text}`),
-        ...(attention.length ? ["Needs your call:", ...attention.map((fact) => ` - ${fact.text}`)] : []),
-        ...(edits.length ? ["Locked-check edits:", ...edits.map((edit) => ` - ${edit}`)] : []),
+        ...(unmetFacts.length ? [`Unmet (${unmetFacts.length}):`, ...boundedLines(unmetFacts.map((fact) => fact.text), MAX_HANDOFF_ITEMS, "flow-agents observe status lists all")] : []),
+        ...(attention.length ? ["Needs your call:", ...boundedLines(attention.map((fact) => fact.text), MAX_HANDOFF_ITEMS, "flow-agents observe status lists all")] : []),
+        ...(edits.length ? ["Locked-check edits:", ...boundedLines(edits, MAX_HANDOFF_ITEMS, "flow-agents observe status lists all")] : []),
         ` - ${external}`,
+        ...(persisted ? [` - the observe reminder state could not be saved (${persisted}).`] : []),
         tail,
       ];
       return decision("handoff", lines.join("\n"), count);
     }
-    writeReminderState(sessionDir, { window: count, last_unmet_digest: digestNow, file_hashes: fileHashes });
     const lines = [
       `${label} Not done yet: ${unmetFacts.length} unmet (reminder ${count} of ${settings.maxReminders - 1}; then this goes to a human).`,
-      ...unmetFacts.map((fact) => ` - ${fact.text}`),
+      ...boundedLines(actionable.map((fact) => fact.text), MAX_REMINDER_FACTS, "flow-agents observe status lists all"),
       ...(changedSince.length ? [`Changed since the last reminder: ${listWithMore(changedSince)}.`] : []),
       `${tail}. Optional: flow-agents observe status`,
     ];

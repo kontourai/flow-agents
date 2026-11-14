@@ -40,9 +40,15 @@ function git(cwd, args) {
   return result.stdout.trim();
 }
 
+/**
+ * The worker: a coordination label (FLOW_AGENTS_ACTOR) inside its OWN host runtime session. Observe
+ * mode binds the implementer only to a host session, never to process ancestry, so the fixture
+ * gives the worker one explicitly instead of inheriting whatever session the test runner has.
+ */
+const HOLDER_SESSION = "observe-holder-session";
 function holderEnv(extra = {}) {
-  const env = { ...process.env, FLOW_AGENTS_ACTOR: HOLDER, FLOW_AGENTS_GOAL_FIT_MODE: "block", FLOW_AGENTS_HOOK_RUNTIME: "claude-code", ...extra };
-  for (const name of ["CODEX_THREAD_ID", "CODEX_SESSION_ID", "FLOW_AGENTS_OBSERVE_MAX_REMINDERS", "FLOW_AGENTS_OBSERVE_VERIFY_BUDGET_MS", "FLOW_AGENTS_STOP_MAX_BLOCKS"]) {
+  const env = { ...process.env, FLOW_AGENTS_ACTOR: HOLDER, FLOW_AGENTS_GOAL_FIT_MODE: "block", FLOW_AGENTS_HOOK_RUNTIME: "claude-code", CLAUDE_CODE_SESSION_ID: HOLDER_SESSION, ...extra };
+  for (const name of ["CLAUDECODE", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID", "FLOW_AGENTS_OBSERVE_MAX_REMINDERS", "FLOW_AGENTS_OBSERVE_VERIFY_BUDGET_MS", "FLOW_AGENTS_STOP_MAX_BLOCKS"]) {
     if (!(name in extra)) delete env[name];
   }
   return env;
@@ -72,7 +78,7 @@ function workflow(fx, args, actor = HOLDER) {
   fx.calls.push({ actor, verb: args[0] });
   const env = actor === HOLDER ? holderEnv() : (() => {
     const base = { ...process.env };
-    for (const name of ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID"]) delete base[name];
+    for (const name of ["FLOW_AGENTS_ACTOR", "CLAUDECODE", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID"]) delete base[name];
     return { ...base, CLAUDE_CODE_SESSION_ID: actor };
   })();
   const result = spawnSync(process.execPath, [CLI, "workflow", ...args], { cwd: fx.project, encoding: "utf8", env });
@@ -232,7 +238,7 @@ test("target: skipped verification, self-review relabel and false done stay caug
   // Skipped verification: nothing ran the check, and the hook is given no budget to run it.
   const skipped = stop(fx, { env: { FLOW_AGENTS_OBSERVE_VERIFY_BUDGET_MS: "0" } });
   assert.equal(skipped.status, 2);
-  assert.match(skipped.stderr, /acceptance\.json:negatives locked check `node --test checks\/add\.test\.mjs` did not finish within the Stop budget \(0 ms\)/);
+  assert.match(skipped.stderr, /acceptance\.json:negatives locked check `node --test checks\/add\.test\.mjs` has no result for this commit and lock, and Stop-time re-runs are disabled \(FLOW_AGENTS_OBSERVE_VERIFY_BUDGET_MS=0\): run `flow-agents observe verify`/);
   // Self-review relabel: the implementer renames itself to review; the critique writer refuses.
   const relabel = workflow(fx, ["critique", "--session-dir", fx.sessionDir, "--id", "relabel", "--verdict", "pass", "--summary", "self", "--artifact-ref", "src/add.mjs",
     "--lane-json", JSON.stringify({ id: "code-review", status: "pass", summary: "x", evidence_refs: [{ kind: "artifact", file: "src/add.mjs", summary: "x" }] })], HOLDER);
@@ -505,6 +511,243 @@ test("orchestrator-acquired claim: the worker's first observed activity binds IT
   assert.equal(review.status, 0, review.output);
   const raw = JSON.stringify({ cwd: fx.project, hook_event_name: "Stop" });
   const done = spawnSync(process.execPath, [STOP_HOOK], { cwd: fx.project, input: raw, encoding: "utf8", env: workerEnv() });
+  assert.equal(done.status, 0, done.stderr);
+  assert.match(done.stdout, /All observed truths are met/);
+});
+
+// ─── Fix round for #1649 (independent review findings) ───────────────────────────────────
+
+const statusJson = (fx, env = holderEnv()) => {
+  const result = spawnSync(process.execPath, [CLI, "observe", "status", "--session-dir", fx.sessionDir, "--json"], { cwd: fx.project, encoding: "utf8", env });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+};
+const derivedClaim = (fx, claimType) => JSON.parse(fs.readFileSync(path.join(fx.sessionDir, "observe.bundle.json"), "utf8")).claims.find((claim) => claim.claimType === claimType);
+const derivedVerified = (fx, claimType) => {
+  const bundle = JSON.parse(fs.readFileSync(path.join(fx.sessionDir, "observe.bundle.json"), "utf8"));
+  const claim = bundle.claims.find((entry) => entry.claimType === claimType);
+  return bundle.events.some((event) => event.claimId === claim.id && event.status === "verified");
+};
+const GAP = { id: "perf", description: "fast on huge input", status: "accepted_gap", notes: "needs a benchmark host we do not have", evidence_refs: [] };
+const PASSING = { id: "negatives", description: "add handles negatives", status: "pending", evidence_refs: [{ kind: "command", excerpt: CHECK }] };
+
+test("P1: a passing criterion plus an agent-declared accepted gap is a handoff, never 'all met', and the criterion claim is not verified", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  writeAcceptance(fx, { criteria: [PASSING, GAP] });
+  assert.equal(critique(fx).status, 0);
+  const result = stop(fx);
+  assert.equal(result.status, 0, "the gap is routed to a human: the Stop is released as a handoff");
+  assert.doesNotMatch(result.released, /All observed truths are met/);
+  assert.match(result.released, /Handing off to you: every remaining item is an accepted gap the agent declared; a human must decide/);
+  assert.match(result.released, /criterion \.kontourai\/flow-agents\/demo\/acceptance\.json:perf not demonstrated; agent reason: needs a benchmark host we do not have/);
+  assert.equal(derivedClaim(fx, "workflow.acceptance.criterion").value, "fail");
+  assert.equal(derivedVerified(fx, "workflow.acceptance.criterion"), false, "a gap never derives a verified acceptance claim");
+  assert.notEqual(statusJson(fx).gate.status, "pass", "Flow does not pass the gate");
+});
+
+test("P1: a required criterion cannot be satisfied by an agent-declared gap alone", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  writeAcceptance(fx, { criteria: [{ ...GAP, id: "negatives", notes: "could not make it work" }] });
+  assert.equal(critique(fx).status, 0);
+  const result = stop(fx);
+  assert.doesNotMatch(result.released + result.stderr, /All observed truths are met/);
+  assert.match(result.released + result.stderr, /acceptance\.json:negatives not demonstrated; agent reason: could not make it work/);
+  assert.equal(derivedVerified(fx, "workflow.acceptance.criterion"), false);
+  assert.notEqual(statusJson(fx).gate.status, "pass");
+});
+
+/** A project whose check reaches its test only through nested package scripts. */
+function nestedScripts(fx, scripts) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(fx.project, "package.json"), "utf8"));
+  pkg.scripts = scripts;
+  fs.writeFileSync(path.join(fx.project, "package.json"), `${JSON.stringify(pkg)}\n`);
+}
+
+test("P1: nested package scripts are locked transitively: a weakened nested test is caught", () => {
+  const fx = makeProject();
+  start(fx);
+  writePlan(fx, { scopeChanges: ["- `package.json`: test scripts"] });
+  nestedScripts(fx, { test: "npm run test:unit", "test:unit": "node --test checks/add.test.mjs" });
+  writeAcceptance(fx, { command: "npm test" });
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+  commit(fx, "feature");
+  assert.equal(stop(fx).status, 2, "first stop locks (review missing)");
+  const lock = JSON.parse(fs.readFileSync(path.join(fx.sessionDir, "observe-ledger.jsonl"), "utf8").trim().split("\n")[0]).checks[0];
+  assert.deepEqual(lock.scripts.map((script) => script.name), ["test", "test:unit"]);
+  assert.ok(lock.files.some((file) => file.path === "checks/add.test.mjs"), "the nested leaf's test file is locked");
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), WEAK_TEST);
+  fs.writeFileSync(path.join(fx.project, "src/add.mjs"), BROKEN_IMPL);
+  commit(fx, "weaken nested");
+  assert.equal(critique(fx).status, 0);
+  const result = stop(fx);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /checks\/add\.test\.mjs, a locked check file of .*acceptance\.json:negatives, changed after the lock \(possible weakened test\)/);
+});
+
+test("P1: an edited nested script body is caught", () => {
+  const fx = makeProject();
+  start(fx);
+  writePlan(fx, { scopeChanges: ["- `package.json`: test scripts"] });
+  nestedScripts(fx, { test: "npm run test:unit", "test:unit": "node --test checks/add.test.mjs" });
+  writeAcceptance(fx, { command: "npm test" });
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+  commit(fx, "feature");
+  assert.equal(stop(fx).status, 2);
+  nestedScripts(fx, { test: "npm run test:unit", "test:unit": "node -e 0" });
+  commit(fx, "neuter nested script");
+  assert.equal(critique(fx).status, 0);
+  const result = stop(fx);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /package\.json script "test:unit" changed in the locked check of .*acceptance\.json:negatives after the lock/);
+});
+
+test("P1: script indirection deeper than the bound is refused as unverifiable, never truncated", () => {
+  const fx = makeProject();
+  start(fx);
+  writePlan(fx, { scopeChanges: ["- `package.json`: test scripts"] });
+  nestedScripts(fx, { a: "npm run b", b: "npm run c", c: "npm run d", d: "npm run e", e: "npm run f", f: "npm run g", g: "node --test checks/add.test.mjs" });
+  writeAcceptance(fx, { command: "npm run a" });
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+  commit(fx, "deep");
+  assert.equal(critique(fx).status, 0);
+  const result = stop(fx);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /locked check `npm run a` cannot be locked statically: package-script indirection is deeper than 5 levels \(a → b → c → d → e → f\)/);
+});
+
+test("P1: first-command self-review after an orchestrator's session-less observation is refused, and a review exposed as self-review by a later binding stops counting (#1648)", () => {
+  // The reviewer's exact reproduction: orchestrator-acquired claim (no runtime session), the
+  // orchestrator's process observes a command, then the WORKER's first command is a critique from
+  // its own runtime session.
+  const fx = makeProject();
+  const started = spawnSync(process.execPath, [CLI, "workflow", "start", "--artifact-root", path.join(fx.project, ".kontourai/flow-agents"), "--flow", "builder.observe", "--task-slug", SLUG, "--criterion", "add handles negatives"],
+    { cwd: fx.project, encoding: "utf8", env: orchestratorEnv() });
+  assert.equal(started.status, 0, started.stderr);
+  asOrchestratorAcquiredClaim(fx);
+  writePlan(fx);
+  writeAcceptance(fx);
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+  commit(fx, "feature");
+  assert.equal(capture(fx, orchestratorEnv()).status, 0);
+  assert.equal(readAssignment(fx).runtime_session_ref, undefined, "process ancestry from an orchestrator's capture never binds the holder");
+  const selfFirst = critique(fx, "observe-worker-session");
+  assert.notEqual(selfFirst.status, 0, "the worker's first command cannot review its own work before its session is known");
+  assert.match(selfFirst.output, /implementer's runtime session is not recorded on its assignment/);
+
+  // A claim the CLI recorded with process ancestry is not a holder binding either.
+  const fx2 = makeProject();
+  assert.equal(spawnSync(process.execPath, [CLI, "workflow", "start", "--artifact-root", path.join(fx2.project, ".kontourai/flow-agents"), "--flow", "builder.observe", "--task-slug", SLUG, "--criterion", "add handles negatives"],
+    { cwd: fx2.project, encoding: "utf8", env: orchestratorEnv() }).status, 0);
+  assert.match(String(readAssignment(fx2).runtime_session_source), /ancestry|process/, "the CLI start recorded a process-ancestry identity");
+  writePlan(fx2);
+  writeAcceptance(fx2);
+  fs.writeFileSync(path.join(fx2.project, "checks/add.test.mjs"), GOOD_TEST);
+  commit(fx2, "feature");
+  const ancestryReview = critique(fx2, "observe-worker-session");
+  assert.notEqual(ancestryReview.status, 0, "an ancestry-bound implementer leaves separation undetermined in observe mode");
+  assert.match(ancestryReview.output, /flow-agents assignment-provider claim --artifact-root ".*\.kontourai\/flow-agents" --subject-id demo --artifact-dir demo --branch agent\//, "the recovery command is exact");
+
+  // Re-evaluation on binding: the claim is held by another host session S1, the worker W reviews
+  // (distinct at that moment), then W's first observed command binds W. The review must stop counting.
+  const fx3 = makeProject();
+  const s1 = { ...orchestratorEnv(), CLAUDE_CODE_SESSION_ID: "orchestrator-agent-session", FLOW_AGENTS_HOOK_RUNTIME: "claude-code" };
+  assert.equal(spawnSync(process.execPath, [CLI, "workflow", "start", "--artifact-root", path.join(fx3.project, ".kontourai/flow-agents"), "--flow", "builder.observe", "--task-slug", SLUG, "--criterion", "add handles negatives"],
+    { cwd: fx3.project, encoding: "utf8", env: s1 }).status, 0);
+  writePlan(fx3);
+  writeAcceptance(fx3);
+  fs.writeFileSync(path.join(fx3.project, "checks/add.test.mjs"), GOOD_TEST);
+  commit(fx3, "feature");
+  assert.equal(critique(fx3, "observe-worker-session").status, 0, "at review time the worker looked distinct from the holder");
+  const bindW = capture(fx3, workerEnv());
+  assert.match(bindW.stderr, /recorded this worker's runtime session/);
+  const raw = JSON.stringify({ cwd: fx3.project, hook_event_name: "Stop" });
+  const after = spawnSync(process.execPath, [STOP_HOOK], { cwd: fx3.project, input: raw, encoding: "utf8", env: workerEnv() });
+  assert.equal(after.status, 2, after.stderr);
+  assert.match(after.stderr, /review: the critique of [0-9a-f]{7} does not count: its reviewer session has held this assignment, so it is self-review/);
+});
+
+test("P2: a recorded base that is not an ancestor of HEAD is refused", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  const tree = git(fx.project, ["rev-parse", "HEAD^{tree}"]);
+  const orphan = git(fx.project, ["commit-tree", tree, "-m", "unrelated root"]);
+  git(fx.project, ["reset", "-q", "--hard", orphan]);
+  assert.equal(critique(fx).status, 0);
+  const result = stop(fx);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /scope: the run's recorded base [0-9a-f]{7} is not an ancestor of HEAD [0-9a-f]{7}/);
+});
+
+test("P2: an unwritable reminder state fails closed to an immediate handoff instead of an endless 'reminder 1'", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  fs.mkdirSync(path.join(fx.sessionDir, "observe-state.json"));
+  const result = stop(fx);
+  assert.equal(result.status, 0);
+  assert.match(result.released, /Handing off to you: the reminder state could not be saved \(EISDIR\), so the reminder cap cannot be enforced/);
+});
+
+test("P2: a continuation with missing reminder state hands off (stop_hook_active loop safety without persisted state)", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  assert.equal(stop(fx).status, 2);
+  fs.rmSync(path.join(fx.sessionDir, "observe-state.json"));
+  const result = stop(fx, { stopHookActive: true });
+  assert.equal(result.status, 0);
+  assert.match(result.released, /Handing off to you: this Stop continues a refused Stop, but the reminder state is missing/);
+});
+
+test("P2: an emptied or replaced ledger is a reset: handed off, never a pass, even after re-locking a weakened check", () => {
+  for (const reset of ["empty", "delete"]) {
+    const fx = makeProject();
+    honestPrefix(fx);
+    assert.equal(critique(fx).status, 0);
+    assert.equal(stop(fx).status, 0, "locked and satisfied");
+    const ledger = path.join(fx.sessionDir, "observe-ledger.jsonl");
+    if (reset === "empty") fs.writeFileSync(ledger, "");
+    else fs.rmSync(ledger);
+    writeAcceptance(fx, { command: "node --test checks/empty.test.mjs" });
+    fs.writeFileSync(path.join(fx.project, "checks/empty.test.mjs"), "import test from 'node:test';\ntest('nothing', () => {});\n");
+    commit(fx, "weaken via relock");
+    assert.equal(critique(fx).status, 0);
+    const result = stop(fx);
+    assert.doesNotMatch(result.released + result.stderr, /All observed truths are met/, reset);
+    assert.match(result.released, reset === "empty" ? /observe ledger .* exists but is empty/ : /observe ledger lost or rewrote locks it held before \(negatives\)/, reset);
+  }
+});
+
+test("P2: reminder output is bounded for large acceptance files", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  writeAcceptance(fx, { criteria: [PASSING, ...Array.from({ length: 40 }, (_, index) => ({ id: `c${index}`, description: `criterion ${index}`, status: "pending", evidence_refs: [] }))] });
+  const result = stop(fx);
+  assert.equal(result.status, 2);
+  const factLines = result.stderr.split("\n").filter((line) => line.startsWith(" - "));
+  assert.ok(factLines.length <= 13, `at most 12 facts plus one overflow line, got ${factLines.length}`);
+  assert.match(result.stderr, / - … and \d+ more \(flow-agents observe status lists all\)/);
+});
+
+test("P2: on a host whose Stop deadline is too short (Kiro, 5 s) nothing is re-run at Stop; the reminder says to run observe verify, and its result is used", () => {
+  const fx = makeProject();
+  start(fx);
+  writePlan(fx);
+  fs.writeFileSync(path.join(fx.project, "checks/slow.test.mjs"), "import test from 'node:test';\ntest('slow', async () => { await new Promise((resolve) => setTimeout(resolve, 7000)); });\n");
+  writeAcceptance(fx, { command: "node --test checks/slow.test.mjs" });
+  commit(fx, "slow check");
+  const kiro = { FLOW_AGENTS_HOOK_RUNTIME: "kiro" };
+  const raw = JSON.stringify({ cwd: fx.project, hook_event_name: "Stop" });
+  // The host kills a Stop hook at 5 s; the hook must finish inside it with a reminder, not be killed.
+  const result = spawnSync(process.execPath, [STOP_HOOK], { cwd: fx.project, input: raw, encoding: "utf8", env: holderEnv(kiro), timeout: 5000 });
+  assert.equal(result.error, undefined, `the Stop hook was killed by the simulated Kiro deadline: ${result.error}`);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /has no result for this commit and lock, and the Stop hook does not run checks on kiro \(its Stop deadline is 5 s\): run `flow-agents observe verify`/);
+  const verify = spawnSync(process.execPath, [CLI, "observe", "verify", "--session-dir", fx.sessionDir], { cwd: fx.project, encoding: "utf8", env: holderEnv(kiro) });
+  assert.equal(verify.status, 0, verify.stderr);
+  assert.equal(critique(fx).status, 0);
+  const done = spawnSync(process.execPath, [STOP_HOOK], { cwd: fx.project, input: raw, encoding: "utf8", env: holderEnv(kiro), timeout: 5000 });
+  assert.equal(done.error, undefined);
   assert.equal(done.status, 0, done.stderr);
   assert.match(done.stdout, /All observed truths are met/);
 });
