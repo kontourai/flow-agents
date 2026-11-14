@@ -585,6 +585,59 @@ test("an edited nested package script is disclosed (package.json), not blocked",
   assert.match(released.released, /checkInputsChanged \(\d+\):[\s\S]* - package\.json/);
 });
 
+test("a changed snapshot outside the test directories is disclosed as a check input", () => {
+  const fx = makeProject();
+  fs.mkdirSync(path.join(fx.project, "src/__snapshots__"));
+  fs.writeFileSync(path.join(fx.project, "src/__snapshots__/add.snap"), "negatives: -5\n");
+  commit(fx, "snapshot");
+  honestPrefix(fx);
+  assert.equal(critique(fx).status, 0);
+  assert.equal(stop(fx).status, 0);
+  writePlan(fx, { scopeChanges: ["- `src/__snapshots__/add.snap`: expected values"] });
+  fs.writeFileSync(path.join(fx.project, "src/__snapshots__/add.snap"), "negatives: 5\n");
+  commit(fx, "weaken snapshot");
+  assert.equal(critique(fx).status, 0);
+  const released = stop(fx);
+  assert.equal(released.status, 0, released.stderr);
+  assert.match(released.released, /checkInputsChanged \(\d+\):[\s\S]* - src\/__snapshots__\/add\.snap/);
+});
+
+test("a lock taken over uncommitted edits discloses those paths even after they are reverted to the base content", () => {
+  const fx = makeProject();
+  start(fx);
+  writePlan(fx);
+  writeAcceptance(fx);
+  // Strengthen the test WITHOUT committing; this Stop is unmet (uncommitted) but establishes the lock.
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+  assert.equal(stop(fx).status, 2);
+  // Revert the test to its base bytes and break the implementation: no diff to base or to the lock commit.
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), WEAK_TEST);
+  fs.writeFileSync(path.join(fx.project, "src/add.mjs"), BROKEN_IMPL);
+  commit(fx, "weaken");
+  assert.equal(critique(fx).status, 0);
+  const released = stop(fx);
+  assert.equal(released.status, 0, released.stderr);
+  assert.match(released.released, /checkInputsChanged \(\d+\):[\s\S]* - checks\/add\.test\.mjs/);
+});
+
+test("a lock point that is no longer in the repository is reported, not silently skipped", () => {
+  const fx = makeProject();
+  honestPrefix(fx);
+  assert.equal(critique(fx).status, 0);
+  assert.equal(stop(fx).status, 0);
+  const lockCommit = git(fx.project, ["rev-parse", "HEAD"]);
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), WEAK_TEST);
+  fs.writeFileSync(path.join(fx.project, "src/add.mjs"), BROKEN_IMPL);
+  git(fx.project, ["commit", "-qa", "--amend", "-m", "feature (amended)"]);
+  git(fx.project, ["reflog", "expire", "--expire=now", "--all"]);
+  git(fx.project, ["gc", "-q", "--prune=now"]);
+  assert.notEqual(spawnSync("git", ["cat-file", "-e", lockCommit], { cwd: fx.project }).status, 0, "the lock commit was pruned");
+  assert.equal(critique(fx).status, 0);
+  const released = stop(fx);
+  assert.equal(released.status, 0, released.stderr);
+  assert.match(released.released, new RegExp(`lock point ${lockCommit.slice(0, 7)}[0-9a-f]* is no longer in this repository`));
+});
+
 /** Honest projects: the criterion is met when its literal command exits 0, whatever runs the tests. */
 const HONEST_SHAPES = [
   { name: "bare node --test", command: "node --test" },

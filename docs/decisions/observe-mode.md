@@ -74,15 +74,24 @@ The lean flow is not a substitute. It is blocked by #1645 and enforces fewer gat
    current commit and lock, on hosts that do not re-run at Stop). An edited command is reported as
    a changed check and never runs in place of the locked one.
 
-   **We do not prove a check was not weakened. We make sure a human sees every change to its
-   inputs.** At Stop the harness computes `checkInputsChanged`: every file changed since the run's
+   **We do not prove a check was not weakened. We make sure a human sees every change to the files
+   that conventionally hold a check's inputs.** The list is path-based: an assertion moved into an
+   arbitrary module that the test imports (a helper outside the test-shaped paths below) is not
+   listed, nor are a symlink's target or a submodule's contents. That limit is inherent to computing
+   inputs from paths rather than from what the command executes. At Stop the harness computes `checkInputsChanged`: every file changed since the run's
    base or since a lock point (committed, uncommitted, or untracked) that is
    - test-shaped (`test/`, `tests/`, `__tests__/`, `spec/`, `e2e/`, `checks/`, `*.test.*`,
-     `*.spec.*`, `test_*.py`, `*_test.*`),
+     `*.spec.*`, `test_*.py`, `*_test.*`, snapshots `__snapshots__/`, `*.snap`, and fixtures
+     `fixtures/`, `__fixtures__/`, `__mocks__/`, `testdata/`),
    - a check-configuration file (`package.json` for its scripts, Makefile, justfile, Taskfile,
      `pyproject.toml`, `setup.cfg`, `tox.ini`, `pytest.ini`, `conftest.py`, `noxfile.py`, vitest,
      vite, jest, playwright and cypress configs, mocha and nyc rc files, `tsconfig*.json`), or
    - named literally by a locked command.
+
+   A lock taken while the worktree had uncommitted edits records those paths, and they are listed
+   too, because a later diff cannot recover the bytes the lock saw. If a lock point's commit is no
+   longer in the repository (history rewritten and pruned), the release carries an attention item
+   saying the changes since that lock cannot be listed.
 
    Lockfiles are excluded; dependency changes are reviewed elsewhere. The set never blocks and
    never triggers a reminder. It goes into the release message, the handoff, `observe status`, the
@@ -255,8 +264,8 @@ existing catch still applies**:
   the same chain primitives, so an in-place edit to a lock record breaks the chain.
 - **Locked-command edit.** The engine runs the locked command string, never an edited one, and
   reports the edit.
-- **Changed check inputs.** Not blocked, and not claimed to be caught. Every changed test or
-  check-config file is computed into `checkInputsChanged` on the release and handoff, so the human
+- **Changed check inputs.** Not blocked, and not claimed to be caught. Every changed test-shaped,
+  snapshot, fixture or check-config file is computed into `checkInputsChanged` on the release and handoff, so the human
   reviewer looks at exactly those diffs.
 - **Same-session review.** `workflow critique` refuses it at write time, unchanged.
 - **What depends on the human.** Scope, false done, skipped verification and self-review are

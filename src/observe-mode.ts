@@ -260,7 +260,7 @@ export function readAcceptance(sessionDir: string): AcceptanceFile {
 // ─── Check locks (the observe ledger) ───────────────────────────────────────────────────
 
 /** A lock pins the literal command string. What the command runs is judged by its exit code, not by static analysis. */
-export type LockedCheck = { criterion_id: string; command: string; command_sha256: string; locked_at_commit?: string | null };
+export type LockedCheck = { criterion_id: string; command: string; command_sha256: string; locked_at_commit?: string | null; dirty_at_lock?: string[] };
 /** `reset`: the ledger file exists but is empty; locks were written and then wiped. */
 export type Ledger = { file: string; status: "absent" | "ok" | "broken" | "reset"; locks: Map<string, LockedCheck>; digest: string | null };
 
@@ -272,8 +272,10 @@ function hashFile(projectRoot: string, rel: string): string | null {
   }
 }
 
-function lockFor(criterion: Criterion, head: string | null): LockedCheck {
-  return { criterion_id: criterion.id, command: criterion.command!, command_sha256: sha256(criterion.command!), locked_at_commit: head };
+// A lock taken over uncommitted edits cannot be diffed back to later, so the dirty paths at lock time
+// are recorded and disclosed whenever they are check inputs.
+function lockFor(criterion: Criterion, head: string | null, dirty: string[]): LockedCheck {
+  return { criterion_id: criterion.id, command: criterion.command!, command_sha256: sha256(criterion.command!), locked_at_commit: head, ...(dirty.length ? { dirty_at_lock: dirty } : {}) };
 }
 
 // ─── Check-input disclosure ─────────────────────────────────────────────────────────────
@@ -288,6 +290,8 @@ const TEST_SHAPED = [
   /\.(test|spec)\.[^/]+$/i,
   /(^|\/)test_[^/]*\.py$/i,
   /_test\.(py|go|rb|exs?)$/i,
+  /(^|\/)(__snapshots__|__fixtures__|__mocks__|fixtures?|testdata)\//i,
+  /\.(snap|snapshot)$/i,
 ];
 const CHECK_CONFIG = [
   /(^|\/)package\.json$/,
@@ -355,9 +359,14 @@ function appendLedger(ledger: Ledger, record: AnyObj): boolean {
 }
 
 /** Lock every criterion check not yet locked. Locks are first-write-wins and never rewritten. */
-function extendLocks(acceptance: AcceptanceFile, ledger: Ledger, now: Date, head: string | null): Ledger {
+function extendLocks(acceptance: AcceptanceFile, ledger: Ledger, now: Date, head: string | null, projectRoot: string): Ledger {
   if (ledger.status === "broken" || ledger.status === "reset" || !acceptance.valid) return ledger;
-  const fresh = acceptance.criteria.filter((criterion) => criterion.command && !ledger.locks.has(criterion.id)).map((criterion) => lockFor(criterion, head));
+  const pending = acceptance.criteria.filter((criterion) => criterion.command && !ledger.locks.has(criterion.id));
+  if (pending.length === 0) return ledger;
+  let dirty: string[] = [];
+  // Tracked edits against HEAD plus untracked files (porcelain output is not parsed: the git helper trims it).
+  if (head) { try { dirty = changedSinceBase(projectRoot, head, []); } catch { /* an unreadable worktree records no dirty paths */ } }
+  const fresh = pending.map((criterion) => lockFor(criterion, head, dirty));
   if (fresh.length === 0) return ledger;
   if (!appendLedger(ledger, { type: "lock", at: now.toISOString(), acceptance_sha256: acceptance.sha256, checks: fresh })) return ledger;
   return readLedger(path.dirname(ledger.file));
@@ -752,7 +761,7 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   if (ledger.status === "broken") hard.push(`observe ledger integrity check FAILED (${path.relative(projectRoot, ledger.file)}): the check locks were edited or reordered. Restore it or ask an operator; locks are never rewritten.`);
   const priorState = readReminderState(sessionDir);
   if (ledger.status === "reset") forcedHandoff.push(`the observe ledger ${path.relative(projectRoot, ledger.file)} exists but is empty: its check locks were wiped, so they cannot be trusted or re-created`);
-  if (input.mode !== "status") ledger = extendLocks(acceptance, ledger, now(), head);
+  if (input.mode !== "status") ledger = extendLocks(acceptance, ledger, now(), head, projectRoot);
   // A lock seen before must still be in the ledger, byte-for-byte. Deleting or truncating the ledger
   // and re-locking a weakened check is caught here as long as the reminder state survives.
   const lostLocks = Object.entries(priorState.locks).filter(([id, digest]) => {
@@ -818,8 +827,10 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   // Compared against the base AND against each lock point: a test strengthened after the run
   // started and weakened back after the lock leaves no base diff, but it does leave a lock diff.
   const sinceLocks = new Set<string>(changed);
+  for (const lock of lockedChecks) for (const file of lock.dirty_at_lock ?? []) sinceLocks.add(file);
   for (const commit of new Set(lockedChecks.map((lock) => lock.locked_at_commit).filter((sha): sha is string => isExactLowercaseCommitSha(sha)))) {
-    try { for (const file of changedSinceBase(projectRoot, commit, scopeExcluded)) sinceLocks.add(file); } catch { /* an unreachable lock commit adds nothing; the base diff still applies */ }
+    try { for (const file of changedSinceBase(projectRoot, commit, scopeExcluded)) sinceLocks.add(file); }
+    catch { push(`lock-diff:${commit}`, null, "attention", `the lock point ${short(commit)} is no longer in this repository (history rewritten or pruned), so changes to check inputs since that lock cannot be listed. Review the check files by hand.`); }
   }
   inputsChanged = checkInputsChanged([...sinceLocks].sort(), lockedChecks.map((lock) => lock.command));
   const outside = changed.filter((file) => !declaredCovers(plan.expected, file));
@@ -830,7 +841,7 @@ export async function evaluateObserveRun(input: ObserveInput): Promise<ObserveDe
   if (unexplained.length > MAX_LISTED) push("scope:more", "git-scope", "unmet", `scope: ${unexplained.length - MAX_LISTED} more unexplained files (flow-agents observe status lists them).`);
   if (!snapshot) push("committed", "git-scope", "unmet", "the Git worktree could not be captured; nothing can be bound to a revision.");
   else if (!snapshot.worktree_clean) {
-    const dirty = (() => { try { return zList(git(projectRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])).map((entry) => entry.slice(3)); } catch { return []; } })();
+    const dirty = (() => { try { return head ? changedSinceBase(projectRoot, head, scopeExcluded) : []; } catch { return []; } })();
     push("committed", "git-scope", "unmet", `uncommitted changes (${listWithMore(dirty.slice(0, 20))}): commit them so the checks can bind to a revision.`);
   }
 
