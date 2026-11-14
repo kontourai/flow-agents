@@ -364,8 +364,10 @@ function extendLocks(acceptance: AcceptanceFile, ledger: Ledger, now: Date, head
   const pending = acceptance.criteria.filter((criterion) => criterion.command && !ledger.locks.has(criterion.id));
   if (pending.length === 0) return ledger;
   let dirty: string[] = [];
-  // Tracked edits against HEAD plus untracked files (porcelain output is not parsed: the git helper trims it).
-  if (head) { try { dirty = changedSinceBase(projectRoot, head, []); } catch { /* an unreadable worktree records no dirty paths */ } }
+  // Only dirty CHECK INPUTS are kept (outside the session directory), so the ledger stays small and
+  // unrelated edits are never recorded. Porcelain output is not parsed: the git helper trims it.
+  const excluded = [path.relative(projectRoot, path.dirname(path.dirname(ledger.file))).split(path.sep).join("/")];
+  if (head) { try { dirty = checkInputsChanged(changedSinceBase(projectRoot, head, excluded), pending.map((criterion) => criterion.command!)); } catch { /* an unreadable worktree records no dirty paths */ } }
   const fresh = pending.map((criterion) => lockFor(criterion, head, dirty));
   if (fresh.length === 0) return ledger;
   if (!appendLedger(ledger, { type: "lock", at: now.toISOString(), acceptance_sha256: acceptance.sha256, checks: fresh })) return ledger;

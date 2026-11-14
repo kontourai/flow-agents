@@ -88,8 +88,8 @@ The lean flow is not a substitute. It is blocked by #1645 and enforces fewer gat
      vite, jest, playwright and cypress configs, mocha and nyc rc files, `tsconfig*.json`), or
    - named literally by a locked command.
 
-   A lock taken while the worktree had uncommitted edits records those paths, and they are listed
-   too, because a later diff cannot recover the bytes the lock saw. If a lock point's commit is no
+   A lock taken while the worktree had uncommitted edits records the uncommitted paths that are
+   check inputs, and they stay listed, because a later diff cannot recover the bytes the lock saw. If a lock point's commit is no
    longer in the repository (history rewritten and pruned), the release carries an attention item
    saying the changes since that lock cannot be listed.
 

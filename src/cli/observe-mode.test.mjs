@@ -28,6 +28,7 @@ const HOLDER = "observe-holder";
 const REVIEWER = "observe-reviewer";
 const CHECK = "node --test checks/add.test.mjs";
 const SLUG = "demo";
+const LEDGER_FILE = "observe-ledger.jsonl";
 
 const GOOD_TEST = "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { add } from '../src/add.mjs';\ntest('adds', () => assert.equal(add(2, 3), 5));\ntest('negatives', () => assert.equal(add(-2, -3), -5));\n";
 const WEAK_TEST = "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { add } from '../src/add.mjs';\ntest('adds', () => assert.equal(add(2, 3), 5));\n";
@@ -618,6 +619,22 @@ test("a lock taken over uncommitted edits discloses those paths even after they 
   const released = stop(fx);
   assert.equal(released.status, 0, released.stderr);
   assert.match(released.released, /checkInputsChanged \(\d+\):[\s\S]* - checks\/add\.test\.mjs/);
+});
+
+test("a dirty-tree lock records only dirty check inputs: not unrelated edits, not session artifacts", () => {
+  const fx = makeProject();
+  fs.writeFileSync(path.join(fx.project, ".gitignore"), "");
+  commit(fx, "track session artifacts");
+  start(fx);
+  writePlan(fx);
+  writeAcceptance(fx);
+  fs.writeFileSync(path.join(fx.project, "checks/add.test.mjs"), GOOD_TEST);
+  fs.writeFileSync(path.join(fx.project, "src/unrelated.mjs"), "export const x = 1;\n");
+  fs.writeFileSync(path.join(fx.sessionDir, "excluded.test.mjs"), "// session artifact\n");
+  assert.equal(stop(fx).status, 2);
+  const ledger = fs.readFileSync(path.join(fx.sessionDir, LEDGER_FILE), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const recorded = ledger.filter((record) => record.type === "lock").flatMap((record) => record.checks.flatMap((check) => check.dirty_at_lock ?? []));
+  assert.deepEqual([...new Set(recorded)], ["checks/add.test.mjs"]);
 });
 
 test("a lock point that is no longer in the repository is reported, not silently skipped", () => {
