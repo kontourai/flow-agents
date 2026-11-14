@@ -32,8 +32,9 @@ This step produces two artifacts, as files the gate reads: `<slug>--plan-work.md
    list (paths, directories ending in `/`, or globs). Put anything you cannot decide under
    `## Open Questions`; those go to the human, they never block you.
 3. Edit `acceptance.json`: give every criterion a command evidence ref that proves it,
-   `{"kind": "command", "excerpt": "<runnable command>"}`, and optionally `"file"` naming the test it
-   runs. At least one check must be a real test run. A criterion that no command can prove is
+   `{"kind": "command", "excerpt": "<runnable command>"}`. Any command your project already uses
+   works (`npm test`, `pnpm -r test`, `make test`, `pytest`, …): the criterion is met when it exits
+   0. A criterion that no command can prove is
    `"status": "accepted_gap"` with `"notes"` explaining why. A gap never passes: the Stop hands it
    to the human as "not demonstrated".
 4. Work freely. Run whatever you like. Commit your work: checks only count against a committed tree.
@@ -44,11 +45,11 @@ This step produces two artifacts, as files the gate reads: `<slug>--plan-work.md
 
 ## Rules The Hook Enforces
 
-- At the first Stop, each criterion's check is **locked**: its command, every package script it
-  reaches (nested scripts included, at most 5 deep), and the test files those run are hashed. A
-  check that cannot be resolved statically is reported, never passed. Editing a locked check does not change what runs. Editing a
-  locked test file is reported. Revert it, or give a one-line reason under `## Check Changes`.
-  The human sees that reason.
+- At the first Stop, each criterion's command string is **locked**. Editing it does not change
+  what runs; the edit is reported.
+- Changed tests and check configuration are never blocked, but every one is listed as
+  `checkInputsChanged` on the release for the human reviewer. Observe mode does not certify that a
+  check was not weakened.
 - A file changed outside `## Expected Modified Files` needs a one-line reason under
   `## Scope Changes`, as `` - `path`: reason ``.
 - The hook re-runs a locked check that has no result at the current commit, within a time

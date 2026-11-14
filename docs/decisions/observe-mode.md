@@ -53,7 +53,7 @@ targets. Each target has a scripted test in `src/cli/observe-mode.test.mjs`:
 
 | Baseline finding (11.0.0) | Observe-mode target |
 | --- | --- |
-| **Native catch 3/5.** Skipped verification, self-review relabel and false done are caught. A weakened test and an out-of-scope edit are not. With a reviewer that passes without looking, both reached `pr-open`, and the Stop text was identical to an honest run's. | Catch all five natively, from observations, without relying on the reviewer. A weakened test is caught by the locked check-file hash: the weakened check passes when re-run, so only the lock catches it. An out-of-scope edit is caught by the `git diff` scope. False done is caught by the boundary's own re-run of the locked check ("check X fails; you stopped as if done"). That is the same refusal the CLI's tests-evidence writer applies to a failing outcome. |
+| **Native catch 3/5.** Skipped verification, self-review relabel and false done are caught. A weakened test and an out-of-scope edit are not. With a reviewer that passes without looking, both reached `pr-open`, and the Stop text was identical to an honest run's. | Four are caught natively, from observations, without relying on the reviewer. An out-of-scope edit is caught by the `git diff` scope. False done is caught by the boundary's own re-run of the locked check ("check X fails; you stopped as if done"), the same refusal the CLI's tests-evidence writer applies to a failing outcome. Skipped verification leaves no result for the commit. Self-review relabel is refused by the critique writer. **A weakened test is disclosed, not caught.** A weakened check still exits 0, and observe mode does not claim to prove it was not weakened. Instead every changed test or check-config file is computed into `checkInputsChanged` and put in front of the human on the release. In 11.0.0 the same weakened run produced Stop text identical to an honest run's. |
 | **8 agent workflow-CLI calls** on the honest path (start, two pickup-probe submissions, plan, scope, critique, tests-evidence, merge-readiness), 72–82% mechanics-only wall share, 14–25 s per run. | `start` plus the review record. Everything else is derived. |
 | **Per-call latency.** Each call is a fresh Node process. Help takes 0.75 s median; a successful call takes 1.1–3.8 s median. Every `next_action` adds an `npm exec --yes --prefix $(mktemp -d) … workflow status` sync, 29 s cold and 1.5 s warm (#1646). | One process per boundary, with no workflow CLI spawned. An observation already recorded at the current commit is reused, never re-run. Boundary latency is recorded in `.kontourai/telemetry/observe-boundary.jsonl`. Observe-mode `next_action` and steering carry no sync or submission instruction. |
 | **Honest-boundary noise.** At the honest offline terminal (`pr-open`, publication unavailable) the Stop hook still blocks ("canonical Flow run remains active", plus `next_action.external_capability not allowed`). | When every local truth is met, the Stop is released cleanly. Publication and hosted CI appear as attention items for the human, never as a block. |
@@ -68,17 +68,31 @@ The lean flow is not a substitute. It is blocked by #1645 and enforces fewer gat
    (`acceptance.json`) as files. Each criterion names the command that proves it as a `command`
    evidence ref, the shape the Stop hook's backstop already reads. The gate reads these files;
    nothing submits them. At the first boundary that sees a criterion's check, the harness **locks**
-   it in a hash-chained observe ledger. The lock is resolved **transitively**. It covers the command
-   string, every package-script body the command reaches through npm/pnpm/yarn script indirection
-   and `&&`/`;`/`|` chains (including pre/post scripts), and the test files and directories the
-   leaf commands name. Resolution refuses rather than truncates. An undefined script, a script
-   cycle, indirection deeper than 5 levels, or shell expansion that cannot be read statically
-   leaves the check **unverifiable**, and that is reported, never passed. The harness always runs
-   the locked command string, never an edited one. A changed check-file or script byte is
-   different: the harness still runs the command, but the change is reported. A changed script
-   must be reverted. A changed test file must be reverted, or given a reason under
-   `## Check Changes` that the human sees. Optional human plan approval (a checkpoint, like a full
-   spec against a quick one) is off by default and follows in the next PR.
+   its literal command string, by content hash, in a hash-chained observe ledger, together with the
+   commit it was locked at. **The truth for a criterion is the exit status of that locked command**,
+   observed by the writer at Stop (or the latest `flow-agents observe verify` result for the
+   current commit and lock, on hosts that do not re-run at Stop). An edited command is reported as
+   a changed check and never runs in place of the locked one.
+
+   **We do not prove a check was not weakened. We make sure a human sees every change to its
+   inputs.** At Stop the harness computes `checkInputsChanged`: every file changed since the run's
+   base or since a lock point (committed, uncommitted, or untracked) that is
+   - test-shaped (`test/`, `tests/`, `__tests__/`, `spec/`, `e2e/`, `checks/`, `*.test.*`,
+     `*.spec.*`, `test_*.py`, `*_test.*`),
+   - a check-configuration file (`package.json` for its scripts, Makefile, justfile, Taskfile,
+     `pyproject.toml`, `setup.cfg`, `tox.ini`, `pytest.ini`, `conftest.py`, `noxfile.py`, vitest,
+     vite, jest, playwright and cypress configs, mocha and nyc rc files, `tsconfig*.json`), or
+   - named literally by a locked command.
+
+   Lockfiles are excluded; dependency changes are reviewed elsewhere. The set never blocks and
+   never triggers a reminder. It goes into the release message, the handoff, `observe status`, the
+   derived bundle (`check_inputs_changed` on the acceptance-definition claim) and the boundary
+   telemetry record. It is computed, never asserted by the agent. One mechanism covers a weakened
+   test, an edited nested script, and an edited test configuration. `package.json` is included,
+   despite being broad, because its `scripts` are where a check gets neutered.
+
+   Optional human plan approval (a checkpoint, like a full spec against a quick one) is off by
+   default and follows in the next PR.
 2. **Path: the agent works freely.** Orchestration (multi-agent work, ordering) belongs to the
    host, Station, or an external recipe, not to Builder. The flow has one working step, `verify`: the agent works there and the harness verifies.
    Phases are inferred from observed activity: planning, editing, checking, review. The agent does
@@ -102,7 +116,7 @@ the canonical run's `params.source_base`. Scope is diffed against that commit.
 | `pickup-probe-readiness`, `probe-decisions-or-accepted-gaps` | **Removed.** They fold into the plan file. Questions under `## Open Questions` become attention items in the handoff, never gates. | A gated probe record | An unanswerable question goes to the human anyway. Gating on it only delayed that. |
 | `implementation-plan` | **Removed as a submission.** The plan file is read for `## Expected Modified Files`. | A recorded plan claim | The plan's operative content (files, acceptance) is consumed directly by derivations. |
 | `implementation-scope` | **Derived.** `git diff` from `params.source_base` to the worktree, compared with the declared files or globs. An extra file needs a one-line reason under `## Scope Changes`, a judgment record. The worktree must also be committed. | Nothing. #1249: the old claim carried no file set, so it could not see this defect class. | The derivation is exactly the defect class's input. |
-| `tests-evidence` | **Observed.** At least one locked check is a recognised test command (`testExecutionProof`). It has a passing observation at the current commit, from the capture log or the hook-triggered writer re-run. | Nothing | Same observation sources and fold as `record-gate-claim`. |
+| `tests-evidence` | **Observed.** Every locked check's literal command exits 0 at the current commit, from the capture log or the hook-triggered writer re-run. Nothing tries to recognise what kind of test a command is. | A claim that a command "is a real test run" | Recognition was wrong on 7 of 8 honest projects measured (vitest, pnpm workspaces, `make`, `pytest`, `CI=1 npm test` …) and still leaked on dishonest ones. What a check proves is disclosed through `checkInputsChanged` and judged by the human reviewer. |
 | `acceptance-criteria` | **Derived.** Each criterion's locked check has a passing observation at the current commit. A required criterion can never be satisfied by an agent-declared gap: any `accepted_gap` makes the derived acceptance claim unverified. | Criteria whose proof is not a command | Such a criterion is an explicit `accepted_gap` (with `notes`). It goes to the human as a handoff, never to a pass. |
 | `clean-critique` | **Judgment record, kept.** `workflow critique` from a separate reviewer session. Same-session and self-declared reviewers are still refused (#1643). | Nothing | Review cannot be observed. #1644's authenticated reviewer remains open. |
 | `merge-readiness`, `ci-merge-readiness`, learning | **Not in this flow yet.** | Publication and learning gates | They follow with the publish boundary (PR series below). |
@@ -142,15 +156,17 @@ Stop's `systemMessage` (Claude Code; Codex uses the same field).
 
 **Loop safety.** When `stop_hook_active` is true and the unmet set is identical to the previous
 reminder's, the agent made no progress on a reminder it has already seen. The engine hands off
-immediately instead of spending the rest of the budget. That check does not depend only on saved
-state: a continuation Stop with no reminder state also hands off, because progress cannot be shown.
-Hosts without the signal stay bounded by the cap and by the adapter backstop.
+immediately instead of spending the rest of the budget. Hosts without the signal stay bounded by
+the cap and by the adapter backstop.
 
-**Fail-closed state.** The reminder count is the cap. If the reminder state cannot be saved, the
-Stop is released as an immediate handoff that says so; it never becomes an endless "reminder 1".
-The state also keeps every lock it has seen, a record that only grows. A ledger that exists but is
-empty, or that has lost or rewritten a lock the state recorded, is a **reset**. A reset is handed
-off and never passes, even after a weakened check is re-locked.
+**Fail-closed state.** These checks run **before** the satisfied release, so an otherwise-met run
+whose bookkeeping cannot be trusted is a handoff, never "all met":
+- a continuation Stop (`stop_hook_active`) with no reminder state;
+- a reminder state that cannot be saved;
+- a ledger that exists but is empty, or that has lost or rewritten a lock the state recorded.
+
+The reminder state keeps every lock it has seen, a record that only grows, so a reset is caught
+even after a check is re-locked.
 
 **Bounded verification.** The engine re-runs a locked check only when no observation at the
 current commit confirms or refutes it and the worktree is clean. It uses the writer-observed
@@ -210,16 +226,15 @@ binds its own session on its first observed activity:
 **Refusals (fix round for #1649).** Each of these is reported and never passes:
 
 - Any accepted gap: handed off to the human, and the acceptance claim stays unverified.
-- A check that cannot be locked statically: undefined script, cycle, indirection deeper than 5,
-  or unresolvable shell expansion.
-- A nested script or nested test file changed after the lock. A test file may instead carry a
-  `## Check Changes` reason, which the human sees.
+- A locked command string changed after the lock.
 - A critique recorded before the holder's host session was bound.
 - A critique whose reviewer session has held the assignment.
 - A recorded base that is not an ancestor of HEAD.
-- An unsavable reminder state: immediate handoff.
-- A continuation Stop with no reminder state: immediate handoff.
+- An unsavable reminder state: immediate handoff, satisfied or not.
+- A continuation Stop with no reminder state: immediate handoff, satisfied or not.
 - An emptied or lock-losing ledger: immediate handoff.
+
+Changed check inputs are **not** a refusal: they are disclosed (above).
 
 ## Anti-gaming posture
 
@@ -229,7 +244,8 @@ was retired (`trust-reconcile.md`). The attention-routing positioning is unratif
 record does not depend on it. Observe mode routes what it cannot settle to a human, and **every
 existing catch still applies**:
 
-- **Backstop re-run.** Locked checks are re-run by the harness, not reported by the agent.
+- **Backstop re-run.** Locked checks are re-run by the harness, not reported by the agent. The
+  criterion's truth is that run's exit code.
 - **Claim against capture.** An observed failure is sticky from either source (writer-observed
   fold). The existing `capturedFailReconciliation` and `captureCrossReference` hard blocks still
   run in observe mode.
@@ -237,13 +253,15 @@ existing catch still applies**:
   never treated as proof.
 - **Log-chain tamper.** A broken `command-log.jsonl` chain still blocks. The observe ledger uses
   the same chain primitives, so an in-place edit to a lock record breaks the chain.
-- **Locked-check edit.** The engine runs the locked command string, never an edited one. Edited
-  check-file or script bytes are run but reported: a script edit until it is reverted, and a
-  test-file edit until it is reverted or given a reason the human sees. The handoff lists them.
+- **Locked-command edit.** The engine runs the locked command string, never an edited one, and
+  reports the edit.
+- **Changed check inputs.** Not blocked, and not claimed to be caught. Every changed test or
+  check-config file is computed into `checkInputsChanged` on the release and handoff, so the human
+  reviewer looks at exactly those diffs.
 - **Same-session review.** `workflow critique` refuses it at write time, unchanged.
-- **Reviewer independence of the catches.** No observe catch depends on the reviewer's content
-  judgment. The baseline showed a reviewer that passes without looking. The lock, the re-run and
-  the diff do not.
+- **What depends on the human.** Scope, false done, skipped verification and self-review are
+  caught without the reviewer's content judgment. A weakened test is not caught: it is disclosed,
+  and the human (or the CI that re-runs the suite) has to look.
 
 Residuals, accepted and disclosed:
 
@@ -260,7 +278,9 @@ Residuals, accepted and disclosed:
   without a recorded result, until the agent runs `observe verify`. Until then the handoff says the
   check was not verified.
 
-No new shell-parsing rule is added (ADR 0018). Integrity rides existing primitives.
+Under ADR 0018, observe mode parses no shell semantics to decide whether a check passes. The
+exit code decides. The disclosure splits locked commands into whitespace-separated tokens only to
+add literally named paths to a list the human reads; it can widen what is shown, never what passes.
 
 ## Migration and coexistence
 
