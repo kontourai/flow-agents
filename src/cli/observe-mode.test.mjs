@@ -433,7 +433,7 @@ function workerEnv() {
 const assignmentFile = (fx) => path.join(fx.project, ".kontourai/flow-agents/assignment", `${SLUG}.json`);
 const readAssignment = (fx) => JSON.parse(fs.readFileSync(assignmentFile(fx), "utf8"));
 /**
- * Station's AssignmentClaimService writes the claim through the assignment library from its own
+ * An orchestrator's claim service writes the claim through the assignment library from its own
  * server process and records NO runtime session (#1648). A CLI `start` from a test process cannot
  * reproduce that (a session-less CLI still resolves a process-ancestry identity), so the fixture
  * takes the claim the run created and gives it exactly that writer's shape: no runtime-session fields.
