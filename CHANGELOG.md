@@ -1,5 +1,12 @@
 # Changelog
 
+## [11.1.0](https://github.com/kontourai/flow-agents/compare/v11.0.0...v11.1.0) (2026-11-14)
+
+
+### Features
+
+* **builder:** observe mode, where evidence is observed by hooks, unmet facts are reminded and then handed off, and check input changes are disclosed ([#1649](https://github.com/kontourai/flow-agents/issues/1649)) ([9e0412c](https://github.com/kontourai/flow-agents/commit/9e0412c6d3435717f00929da376094e2a9ba3f77))
+
 ## [11.0.0](https://github.com/kontourai/flow-agents/compare/v10.0.0...v11.0.0) (2026-11-13)
 
 
