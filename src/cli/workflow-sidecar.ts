@@ -15,7 +15,7 @@ import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json
 import { ensureSafeDirectory } from "../lib/fs.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
-import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
+import { updateStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
 import { execTrustedGitSync, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
@@ -57,11 +57,14 @@ import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.
 import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 import { decideTakeover } from "../lib/assignment-model.js";
+import { phases, statuses, writeJson } from "../lib/workflow-sidecar-vocabulary.js";
+
+// Defined in lib/workflow-sidecar-vocabulary so hosts can import them without this module's graph;
+// re-exported here as the same bindings.
+export { phases, statuses, writeJson };
 
 type AnyObj = Record<string, any>;
 
-export const statuses = new Set(["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "canceled", "accepted", "archived"]);
-export const phases = ["idea", "backlog", "pickup", "planning", "execution", "verification", "goal_fit", "evidence", "release", "learning", "done"];
 export const checkKinds = new Set(["build", "types", "lint", "test", "command", "security", "diff", "browser", "runtime", "policy", "external"]);
 export const checkStatuses = new Set(["pass", "fail", "not_verified", "skip"]);
 export const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
@@ -79,14 +82,6 @@ function readRegularFileNoFollow(file: string, label: string): Buffer {
   } finally {
     fs.closeSync(fd);
   }
-}
-export function writeJson(file: string, payload: AnyObj): void {
-  if (path.basename(file) === "state.json") {
-    writeStateJson(file, payload);
-    return;
-  }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
 function quarantineTrustBundle(file: string): void {

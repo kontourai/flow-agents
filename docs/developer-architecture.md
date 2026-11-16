@@ -189,6 +189,20 @@ import {
 
 This is the same code the CLI runs; importing it does not execute the CLI. The sidecar JSON Schemas under `schemas/` remain the normative shape.
 
+The package root loads the whole sidecar writer, including `@kontourai/flow` and the Builder runtime. A host that needs only a few of these bindings at startup can import a subpath instead. Each subpath is a small entry module under `src/subpaths/` that re-exports exactly what the package root exports from the same source module, values and types, so its bindings are the root's own and helpers the root does not export stay private. `src/cli/light-host-subpaths.test.mjs` pins each subpath's runtime exports, checks each against the root's binding of the same name, compiles a consumer of every exported type, and imports each subpath in a fresh process to check which modules it loads.
+
+| Subpath | Exports | Loads |
+| --- | --- | --- |
+| `@kontourai/flow-agents/local-artifact-root` | The artifact-root and telemetry-directory helpers the root exports, including `flowAgentsArtifactRoot` and `KONTOURAI_DIR` | Node built-ins and the trusted Git helper |
+| `@kontourai/flow-agents/run-correlation` | The run-correlation constants, functions, `RunCorrelationValidationError` and types the root exports | Node built-ins |
+| `@kontourai/flow-agents/host-workflow-binding` | `bindHostWorkflowSession`, `retireHostWorkflowSession`, `validateHostWorkflowAuthority`, `buildUnsignedHostWorkflowAuthority`, `hostWorkflowAuthorityPayload` and their types | Node built-ins and `run-correlation` |
+| `@kontourai/flow-agents/workflow-sidecar-vocabulary` | `statuses`, `phases`, `writeJson` | Node built-ins and the state-file lock |
+| `@kontourai/flow-agents/narrative-retained-reader` | `readGroundedNarrative` and its types | The narrative modules |
+| `@kontourai/flow-agents/survey-flow-gate-adapter` | `createSurveyFlowGateAdapter`, `continuePausedFlowGateFromSurvey`, `SurveyFlowGateInputError` and their types | `@kontourai/survey` and `@kontourai/flow` |
+| `@kontourai/flow-agents/survey-flow-gate-review-work` | `discoverSurveyGateReviewWork`, `publishSurveyGateReviewWork`, `bindSurveyGateReviewItem` and their types | `@kontourai/survey` and `@kontourai/flow` |
+
+`cli/workflow-sidecar` and the package root re-export `statuses`, `phases` and `writeJson` from `workflow-sidecar-vocabulary`, so a caller that compares them by identity sees the same Set, array and function from every entry.
+
 **Future direction:** Durable workflow state should converge toward Kontour Resource Contracts with versioned identity, desired state, observed status, and condition summaries. That convergence should preserve local files and provider-backed records as first-class surfaces.
 
 ## Knowledge learning lifecycle

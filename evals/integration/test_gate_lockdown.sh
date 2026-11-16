@@ -335,11 +335,15 @@ fi
 
 echo ""
 echo "--- AC1.9: CLI writes current.json via fs (not Write/Edit tool) — safe to block tool path ---"
-# Verify writeJson in workflow-sidecar.ts is a direct fs.writeFileSync call (not via agent tool)
+# Verify writeJson (the workflow-sidecar-vocabulary module's binding, which workflow-sidecar.ts imports)
+# is a direct fs.writeFileSync call (not via agent tool)
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
-const hasWriteJson = /function writeJson.*fs\.mkdirSync.*fs\.writeFileSync/s.test(src);
+const vocab = fs.readFileSync(require('path').join('$ROOT', 'src', 'lib', 'workflow-sidecar-vocabulary.ts'), 'utf8');
+const importsWriteJson = /import \{[^}]*\bwriteJson\b[^}]*\} from ['\"]\.\.\/lib\/workflow-sidecar-vocabulary\.js['\"]/.test(src);
+const ownWriteJson = /function writeJson\b/.test(src);
+const hasWriteJson = importsWriteJson && !ownWriteJson && /function writeJson.*fs\.mkdirSync.*fs\.writeFileSync/s.test(vocab);
 const calledByWriteCurrent = /writeCurrent.*writeJson.*current\.json/s.test(src);
 const calledByAdvanceState = /advanceState.*writeJson/s.test(src);
 if (!hasWriteJson) { console.error('ERROR: writeJson not found as fs.writeFileSync'); process.exit(1); }
@@ -500,9 +504,11 @@ echo "--- AC1.22: CLI sidecar uses fs for state/trust files (not Write/Edit tool
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
-const okState = /path\.basename\(file\) === ['\"]state\.json['\"][\s\S]*writeStateJson\(file, payload\)/.test(src);
+// writeJson lives in the workflow-sidecar-vocabulary module; workflow-sidecar.ts imports that binding.
+const vocab = fs.readFileSync(require('path').join('$ROOT', 'src', 'lib', 'workflow-sidecar-vocabulary.ts'), 'utf8');
+const okState = /path\.basename\(file\) === ['\"]state\.json['\"][\s\S]*writeStateJson\(file, payload\)/.test(vocab);
 const okBundle = /writeTrustBundleAtomically\(path\.join\(dir,\s*['\"]trust\.bundle['\"]\)/.test(src);
-const okWriteJson = /function writeJson[\s\S]*?fs\.writeFileSync\(file,/.test(src);
+const okWriteJson = /import \{[^}]*\bwriteJson\b[^}]*\} from ['\"]\.\.\/lib\/workflow-sidecar-vocabulary\.js['\"]/.test(src) && /function writeJson[\s\S]*?fs\.writeFileSync\(file,/.test(vocab);
 const okAtomicBundleWriter = /function writeTrustBundleAtomically[\s\S]*fs\.writeFileSync\(descriptor,[\s\S]*fs\.renameSync\(temporary, file\)/.test(src);
 if (!okState) { console.error('ERROR: locked state.json writer route not found'); process.exit(1); }
 if (!okBundle) { console.error('ERROR: writeTrustBundleAtomically(trust.bundle) not found'); process.exit(1); }

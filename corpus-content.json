@@ -193,6 +193,24 @@
           "sha256": "688cd5ff585f803059006e2635a691a0a7b7e5a24fc7e084532605e27c8b6336"
         }
       ]
+    },
+    {
+      "id": "light-subpaths-public-workflow-cli",
+      "reviewedAt": "2026-11-16T15:04:29Z",
+      "note": "src/cli/workflow-sidecar.ts no longer defines statuses, phases and writeJson; it imports them from src/lib/workflow-sidecar-vocabulary.ts and re-exports the same bindings, with unchanged values and an unchanged writeJson body (state.json still goes through writeStateJson). No command, flag, output, exit code or sidecar shape changes. This document describes the public workflow CLI's commands, outputs and gates and does not name these module bindings or where they are defined, so every statement in it remains accurate. The new package subpaths are documented in docs/developer-architecture.md.",
+      "limits": "Source and document byte review only. Does not verify runtime behaviour beyond src/cli/light-host-subpaths.test.mjs, and does not review other documents that cover these files.",
+      "inputs": [
+        {
+          "path": "src/cli/workflow-sidecar.ts",
+          "sha256": "045eb8297fec0f60416295709e6efdbb716c1e4630777ece5e970c7b72c1be0d"
+        }
+      ],
+      "outputs": [
+        {
+          "path": "docs/public-workflow-cli.md",
+          "sha256": "dd62e34954e6504611b4db5325f9a6a597023aea2933b2bf8b3898b6d5570286"
+        }
+      ]
     }
   ]
 }
