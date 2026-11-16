@@ -23,7 +23,7 @@ CHECKS=(
   "Codex PR review action|node --test evals/ci/codex-pr-review-action.test.mjs"
   "Installed kit execution unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/kit-execution.test.mjs src/cli/installed-kit-run-binding.test.mjs"
   "Host adapter unit tests|node --test --import ./src/cli/unit-test-state.mjs integrations/codex-host/test/host-adapters.test.mjs integrations/codex-host/test/provider-budget.test.mjs"
-  "Public API unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/public-api.test.mjs"
+  "Public API unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/public-api.test.mjs src/cli/light-host-subpaths.test.mjs"
   "Delegation rounds public contract|node --test --import ./src/cli/unit-test-state.mjs src/cli/delegation-group-rounds.test.mjs src/cli/delegation-flow-runtime.test.mjs"
   "Workspace Kit verification|node --test --import ./src/cli/unit-test-state.mjs src/cli/workspace-kit.test.mjs src/cli/workspace-artifact.test.mjs src/cli/kit-help.test.mjs src/cli/kit-install-drift.test.mjs src/cli/kit-registry-portability.test.mjs"
   "Codex governance hook unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/codex-governance-hook.test.mjs"
