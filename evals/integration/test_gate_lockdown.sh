@@ -335,12 +335,12 @@ fi
 
 echo ""
 echo "--- AC1.9: CLI writes current.json via fs (not Write/Edit tool) — safe to block tool path ---"
-# Verify writeJson (lib/workflow-sidecar-vocabulary.ts, the binding workflow-sidecar.ts imports)
+# Verify writeJson (the workflow-sidecar-vocabulary module's binding, which workflow-sidecar.ts imports)
 # is a direct fs.writeFileSync call (not via agent tool)
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
-const vocab = fs.readFileSync('$ROOT/src/lib/workflow-sidecar-vocabulary.ts', 'utf8');
+const vocab = fs.readFileSync(require('path').join('$ROOT', 'src', 'lib', 'workflow-sidecar-vocabulary.ts'), 'utf8');
 const importsWriteJson = /import \{[^}]*\bwriteJson\b[^}]*\} from ['\"]\.\.\/lib\/workflow-sidecar-vocabulary\.js['\"]/.test(src);
 const ownWriteJson = /function writeJson\b/.test(src);
 const hasWriteJson = importsWriteJson && !ownWriteJson && /function writeJson.*fs\.mkdirSync.*fs\.writeFileSync/s.test(vocab);
@@ -504,8 +504,8 @@ echo "--- AC1.22: CLI sidecar uses fs for state/trust files (not Write/Edit tool
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
-// writeJson lives in lib/workflow-sidecar-vocabulary.ts; workflow-sidecar.ts imports that binding.
-const vocab = fs.readFileSync('$ROOT/src/lib/workflow-sidecar-vocabulary.ts', 'utf8');
+// writeJson lives in the workflow-sidecar-vocabulary module; workflow-sidecar.ts imports that binding.
+const vocab = fs.readFileSync(require('path').join('$ROOT', 'src', 'lib', 'workflow-sidecar-vocabulary.ts'), 'utf8');
 const okState = /path\.basename\(file\) === ['\"]state\.json['\"][\s\S]*writeStateJson\(file, payload\)/.test(vocab);
 const okBundle = /writeTrustBundleAtomically\(path\.join\(dir,\s*['\"]trust\.bundle['\"]\)/.test(src);
 const okWriteJson = /import \{[^}]*\bwriteJson\b[^}]*\} from ['\"]\.\.\/lib\/workflow-sidecar-vocabulary\.js['\"]/.test(src) && /function writeJson[\s\S]*?fs\.writeFileSync\(file,/.test(vocab);
