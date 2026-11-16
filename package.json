@@ -66,32 +66,32 @@
       "import": "./build/src/narrative/retained-process-projection.js"
     },
     "./local-artifact-root": {
-      "types": "./build/src/lib/local-artifact-root.d.ts",
-      "import": "./build/src/lib/local-artifact-root.js"
+      "types": "./build/src/subpaths/local-artifact-root.d.ts",
+      "import": "./build/src/subpaths/local-artifact-root.js"
     },
     "./run-correlation": {
-      "types": "./build/src/run-correlation.d.ts",
-      "import": "./build/src/run-correlation.js"
+      "types": "./build/src/subpaths/run-correlation.d.ts",
+      "import": "./build/src/subpaths/run-correlation.js"
     },
     "./host-workflow-binding": {
-      "types": "./build/src/lib/host-workflow-binding.d.ts",
-      "import": "./build/src/lib/host-workflow-binding.js"
+      "types": "./build/src/subpaths/host-workflow-binding.d.ts",
+      "import": "./build/src/subpaths/host-workflow-binding.js"
     },
     "./workflow-sidecar-vocabulary": {
-      "types": "./build/src/lib/workflow-sidecar-vocabulary.d.ts",
-      "import": "./build/src/lib/workflow-sidecar-vocabulary.js"
+      "types": "./build/src/subpaths/workflow-sidecar-vocabulary.d.ts",
+      "import": "./build/src/subpaths/workflow-sidecar-vocabulary.js"
     },
     "./survey-flow-gate-adapter": {
-      "types": "./build/src/survey-flow-gate-adapter.d.ts",
-      "import": "./build/src/survey-flow-gate-adapter.js"
+      "types": "./build/src/subpaths/survey-flow-gate-adapter.d.ts",
+      "import": "./build/src/subpaths/survey-flow-gate-adapter.js"
     },
     "./survey-flow-gate-review-work": {
-      "types": "./build/src/survey-flow-gate-review-work.d.ts",
-      "import": "./build/src/survey-flow-gate-review-work.js"
+      "types": "./build/src/subpaths/survey-flow-gate-review-work.d.ts",
+      "import": "./build/src/subpaths/survey-flow-gate-review-work.js"
     },
     "./narrative-retained-reader": {
-      "types": "./build/src/narrative/retained-reader.d.ts",
-      "import": "./build/src/narrative/retained-reader.js"
+      "types": "./build/src/subpaths/narrative-retained-reader.d.ts",
+      "import": "./build/src/subpaths/narrative-retained-reader.js"
     },
     "./package.json": "./package.json",
     "./schemas/*.json": "./schemas/*.json",

@@ -32,40 +32,59 @@ function importInChild(specifier) {
 
 const heavy = ["build/src/index.js", "build/src/cli/workflow-sidecar.js", "build/src/builder-flow-runtime.js", "build/src/lib/flow-resolver.js", "build/src/cli/assignment-provider.js"];
 
-// The entries a host imports at startup: no dependency package at all, and none of the heavy modules.
+// Each subpath's runtime exports, pinned here rather than derived, so widening one is a reviewed change.
+// They match what the package root exports from the same source module.
 const light = [
-  ["local-artifact-root", "build/src/lib/local-artifact-root.js", ["flowAgentsArtifactRoot", "KONTOURAI_DIR"]],
-  ["run-correlation", "build/src/run-correlation.js", ["readRunCorrelation", "validateRunCorrelationEnvelope", "validateRunCorrelationPresence"]],
-  ["host-workflow-binding", "build/src/lib/host-workflow-binding.js", ["bindHostWorkflowSession"]],
+  ["local-artifact-root", "build/src/lib/local-artifact-root.js", ["DURABLE_FLOW_AGENTS_DIR", "FLOW_AGENTS_RUNTIME_DIR", "FLOW_AGENTS_RUNTIME_SUBDIR", "KONTOURAI_DIR", "LEGACY_TELEMETRY_DIR", "defaultArtifactRootForRead", "defaultCodexHome", "defaultTelemetryDirForRead", "defaultTelemetryDirsForRead", "durableFlowAgentsRoot", "durableInstallRecordPath", "firstExistingPath", "flowAgentsArtifactRoot", "legacyTelemetryDataDir", "telemetryDataDir"]],
+  ["run-correlation", "build/src/run-correlation.js", ["CREDENTIAL_PATTERN_SOURCES", "RUNTIME_CORRELATION_IDENTITY_DECLARATIONS", "RUN_CORRELATION_IDENTITY_KEYS", "RUN_CORRELATION_IDENTITY_STATUSES", "RUN_CORRELATION_SCHEMA_VERSION", "RunCorrelationValidationError", "attachRunCorrelation", "containsSensitiveCredential", "createRunCorrelationEnvelope", "readRunCorrelation", "runtimeCorrelationIdentityDeclaration", "validateRunCorrelationEnvelope", "validateRunCorrelationPresence"]],
+  ["host-workflow-binding", "build/src/lib/host-workflow-binding.js", ["bindHostWorkflowSession", "buildUnsignedHostWorkflowAuthority", "hostWorkflowAuthorityPayload", "retireHostWorkflowSession", "validateHostWorkflowAuthority"]],
   ["workflow-sidecar-vocabulary", "build/src/lib/workflow-sidecar-vocabulary.js", ["phases", "statuses", "writeJson"]],
   ["narrative-retained-reader", "build/src/narrative/retained-reader.js", ["readGroundedNarrative"]],
 ];
 
-for (const [subpath, file, names] of light) {
-  test(`@kontourai/flow-agents/${subpath} loads its own module without the sidecar graph or any dependency package`, () => {
-    const { loaded, own, exports } = importInChild(`@kontourai/flow-agents/${subpath}`);
-    assert.ok(own.includes(file), `${subpath} resolves to ${file}; loaded ${own.join(", ")}`);
-    for (const name of names) assert.ok(exports.includes(name), `${subpath} exports ${name}`);
-    for (const module of heavy) assert.ok(!own.includes(module), `${subpath} must not load ${module}`);
-    const packages = loaded.filter((url) => url.includes("/node_modules/"));
-    assert.deepEqual(packages, [], `${subpath} must not load dependency packages`);
-  });
-}
-
-// The entries a host imports on demand. They need Survey and Flow by design, but not the sidecar or the root barrel.
+// Entries a host imports on demand. They need Survey and Flow by design, but not the sidecar or the root barrel.
 const onDemand = [
-  ["survey-flow-gate-adapter", "build/src/survey-flow-gate-adapter.js", ["createSurveyFlowGateAdapter"]],
-  ["survey-flow-gate-review-work", "build/src/survey-flow-gate-review-work.js", ["discoverSurveyGateReviewWork"]],
+  ["survey-flow-gate-adapter", "build/src/survey-flow-gate-adapter.js", ["SurveyFlowGateInputError", "continuePausedFlowGateFromSurvey", "createSurveyFlowGateAdapter"]],
+  ["survey-flow-gate-review-work", "build/src/survey-flow-gate-review-work.js", ["bindSurveyGateReviewItem", "discoverSurveyGateReviewWork", "publishSurveyGateReviewWork"]],
 ];
 
-for (const [subpath, file, names] of onDemand) {
-  test(`@kontourai/flow-agents/${subpath} loads without the root barrel or the sidecar graph`, () => {
-    const { own, exports } = importInChild(`@kontourai/flow-agents/${subpath}`);
-    assert.ok(own.includes(file), `${subpath} resolves to ${file}`);
-    for (const name of names) assert.ok(exports.includes(name), `${subpath} exports ${name}`);
-    for (const module of heavy) assert.ok(!own.includes(module), `${subpath} must not load ${module}`);
+function assertEntry(subpath, source, names) {
+  const result = importInChild(`@kontourai/flow-agents/${subpath}`);
+  const entry = `build/src/subpaths/${subpath}.js`;
+  assert.ok(result.own.includes(entry), `${subpath} resolves to ${entry}; loaded ${result.own.join(", ")}`);
+  assert.ok(result.own.includes(source), `${subpath} re-exports ${source}`);
+  assert.deepEqual([...result.exports].sort(), [...names].sort(), `${subpath} exports exactly its pinned list`);
+  for (const module of heavy) assert.ok(!result.own.includes(module), `${subpath} must not load ${module}`);
+  return result;
+}
+
+for (const [subpath, source, names] of light) {
+  test(`@kontourai/flow-agents/${subpath} exports its pinned list without the sidecar graph or any dependency package`, () => {
+    const { loaded } = assertEntry(subpath, source, names);
+    assert.deepEqual(loaded.filter((url) => url.includes("/node_modules/")), [], `${subpath} must not load dependency packages`);
   });
 }
+
+for (const [subpath, source, names] of onDemand) {
+  test(`@kontourai/flow-agents/${subpath} exports its pinned list without the root barrel or the sidecar graph`, () => {
+    assertEntry(subpath, source, names);
+  });
+}
+
+test("every subpath export is the package root's own binding of the same name", async () => {
+  for (const [subpath, , names] of [...light, ...onDemand]) {
+    const entry = await import(`@kontourai/flow-agents/${subpath}`);
+    for (const name of names) {
+      assert.ok(name in root, `the package root exports ${name}`);
+      assert.equal(entry[name], root[name], `${subpath} ${name}`);
+    }
+  }
+});
+
+test("each subpath carries the package root's types for its module", () => {
+  const run = spawnSync(process.execPath, [path.join(repoRoot, "node_modules/typescript/bin/tsc"), "--ignoreConfig", "--noEmit", "--skipLibCheck", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", path.join(repoRoot, "evals/fixtures/light-host-subpath-types.mts")], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+});
 
 test("the probe sees the heavy graph when it is there: the package root loads the sidecar and @kontourai/flow", () => {
   const { loaded, own } = importInChild("@kontourai/flow-agents");
