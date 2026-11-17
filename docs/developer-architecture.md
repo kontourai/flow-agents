@@ -259,7 +259,9 @@ Corpus store adapter for an authorized memory root. The proposal includes sessio
 transcript and sitting provenance; Corpus owns the pending proposal and its review
 transaction. Staging does not apply a record or establish its review state. The
 repository pins `@kontourai/corpus-store` as a development dependency to exercise
-the integration; the host supplies the adapter at runtime. See the
+the integration; the host supplies the adapter at runtime. A failed proposal call
+can have an unknown outcome: a later list observation is not a created receipt,
+and the owner must reconcile before replay. See the
 [proposal target documentation](../kits/knowledge/docs/README.md) for registration,
 retry and recovery boundaries.
 
