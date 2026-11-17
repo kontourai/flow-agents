@@ -62,8 +62,9 @@ test("real Corpus: a proposeCreate whose reply is lost leaves the proposal, and 
     },
   });
   const host = hostFor(ws, noApplyStore(lossy), await scriptedExtract());
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   assert.equal(fs.existsSync(ws.cursorFile), false);
+  assert.deepEqual(ws.reports().at(-1).receipts, [], "a later observation is not a creation receipt");
   assert.equal((await store.listProposals()).length, 1, "the proposal exists although the caller never saw its id");
 
   const retry = await runDream(host, runOptions(ws));
@@ -98,7 +99,7 @@ test("real Corpus: two claims in ONE sitting, the first reply lost: the retry pr
     return [a, { ...a, property: "rounding scope", value: "the total" }];
   };
   const host = hostFor(ws, noApplyStore(lossy), await scriptedExtract({ claimsOf }));
-  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   assert.equal((await store.listProposals()).length, 1, "the first proposal exists although its reply was lost");
 
   const retry = await runDream(host, runOptions(ws, { maxSittingsPerRun: 1 }));
@@ -135,7 +136,7 @@ test("real Corpus: a retry whose provenance differs (the transcript root widened
   const store = await realStore(ws);
   const claimsOf = (content) => content.includes("banker's rounding") ? [SCRIPT[0].claims[0], { ...SCRIPT[0].claims[0], property: "rounding scope", value: "the total" }] : [];
   const host = hostFor(ws, noApplyStore(lossyFirstReply(store)), await scriptedExtract({ claimsOf }));
-  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const retry = await runDream(host, runOptions(ws, { maxSittingsPerRun: 1, transcriptRoots: [path.dirname(ws.transcriptRoot)] }));
   assert.equal(retry.status, "success");
   assert.equal((await store.listProposals()).length, 2);
@@ -150,7 +151,7 @@ test("real Corpus: a changed plan for a half-proposed sitting proposes only what
   let plan = [a, mk("rounding scope", "the total")];
   const claimsOf = (content) => content.includes("banker's rounding") ? plan : [];
   const host = hostFor(ws, noApplyStore(lossyFirstReply(store)), await scriptedExtract({ claimsOf }));
-  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws, { maxSittingsPerRun: 1 })), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const [first] = await store.listProposals();
   await store.rejectCreate(first.id, "a-human-reviewer", "not wanted");
 

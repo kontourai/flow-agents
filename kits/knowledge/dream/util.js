@@ -37,6 +37,8 @@ export function wrapDreamFailure(cause, message) {
   if (typeof code === "string") dreamSetOwn(error, "code", code);
   const name = dreamOwnValue(cause, "name");
   if (typeof name === "string") dreamSetOwn(error, "name", name, false);
+  const sittingId = dreamOwnValue(cause, "sittingId");
+  if (typeof sittingId === "string") dreamSetOwn(error, "sittingId", sittingId);
   const proposalId = dreamOwnValue(cause, "proposalId");
   if (typeof proposalId === "string") dreamSetOwn(error, "proposalId", proposalId);
   dreamSetOwn(error, "cause", cause, false);
