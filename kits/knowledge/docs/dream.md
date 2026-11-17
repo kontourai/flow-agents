@@ -64,7 +64,8 @@ lands mid-run.
 The cursor is committed last, and the report is written before it, so any failure leaves
 the cursor where it was and the next run repeats the work. Nothing fallible runs after the
 commit (the follow-up report rewrite is best-effort, and the report already on disk names
-the digest of the cursor it was about to commit). Each earlier step is replay-safe:
+the digest of the cursor it was about to commit). The following reconciliation behavior
+helps avoid duplicates, but does not prove that a lost write response is safe to replay:
 
 - **The plan is the receipt.** Every proposal's body carries the sitting's whole `plan`: the
   ordered claims the run decided to propose, with their agreement and project. It is
@@ -101,7 +102,9 @@ the digest of the cursor it was about to commit). Each earlier step is replay-sa
 - A proposal with this claim id made by a different proposer is refused
   (`DREAM_SEMANTIC_COLLISION`); it is never reused as the run's own.
 - When `proposeCreate` fails, its outcome is indeterminate (the proposal may exist). The
-  run asks the store what landed, lists it in the failed report, and the retry reuses it.
+  run may observe matching proposals during reconciliation, but does not turn that observation
+  into a created receipt or an acknowledgement. The error retains the observation and original
+  failure for the owner; a lost response does not authorize automatic replay.
 - A response that does not deliver the extraction (no tool call, a truncated or malformed
   one) fails the pass. A sitting whose every pass failed fails the run with
   `DREAM_DISTILL_FAILED`; a delivered, empty extraction is a sitting with nothing in it.

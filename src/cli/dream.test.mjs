@@ -101,10 +101,10 @@ test("partial create: a proposeCreate failure mid-sitting is reconciled on retry
   const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: (content) => (content.includes("banker's rounding") ? claimsOf() : []) } });
   t.after(ws.cleanup);
   store.failProposeCreate(1);
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const failed = ws.reports().at(-1);
   assert.equal(failed.status, "failed");
-  assert.equal(failed.receipts.filter((r) => r.disposition === "created").length, 1, "the proposal that landed is in the failed report");
+  assert.equal(failed.receipts.length, 0, "a later observation is not a creation acknowledgement");
   assert.equal((await store.listProposals()).length, 1);
 
   const retry = await runDream(host, runOptions(ws));
@@ -122,7 +122,7 @@ test("a claim a reviewer rejected is not proposed again when the sitting is retr
   const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf } });
   t.after(ws.cleanup);
   store.failProposeCreate(1);
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const [landed] = await store.listProposals();
   await store.rejectCreate(landed.id, "a-human-reviewer", "wrong");
   const retry = await runDream(host, runOptions(ws));
@@ -137,10 +137,10 @@ test("created-before-receipt: the store keeps a proposal whose reply was lost, a
   const { ws, store, extract, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
   t.after(ws.cleanup);
   store.failProposeCreate(0, { after: true });
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const failed = ws.reports().at(-1);
   assert.equal(failed.status, "failed");
-  assert.deepEqual(failed.receipts.map((r) => r.disposition), ["created"], "the failed report reconciles the proposal that the lost reply hid");
+  assert.deepEqual(failed.receipts, [], "a lost response cannot establish a creation receipt");
   assert.equal((await store.listProposals()).length, 1);
 
   const callsBefore = extract.calls.length;
@@ -399,7 +399,7 @@ test("partial replay under changed model output: the stored plan is resumed, wit
   const { ws, store, extract, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: first } });
   t.after(ws.cleanup);
   store.failProposeCreate(1);
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   assert.equal((await store.listProposals()).length, 1);
   const callsBefore = extract.calls.length;
 
@@ -549,7 +549,7 @@ test("a resumed plan is routed against the claims, policy and visibility in forc
   const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
   t.after(ws.cleanup);
   store.failProposeCreate(1);
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const [landed] = await store.listProposals();
   assert.equal(JSON.parse(landed.candidate.body).decision.outcome, "proposed", "when it was drafted nothing conflicted");
 
@@ -629,7 +629,7 @@ test("visibility compares as a set: reordering the audiences resumes the plan in
   const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
   t.after(ws.cleanup);
   store.failProposeCreate(1);
-  await assert.rejects(() => runDream(host, runOptions(ws, { visibility: { kind: "restricted", audiences: ["user:a", "user:b"] } })), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws, { visibility: { kind: "restricted", audiences: ["user:a", "user:b"] } })), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const reworded = await scriptedExtract({ claimsOf: () => [{ quote: "I switched to banker's rounding on the total.", subject: "svc other", subjectType: "service", property: "x", value: "other", posture: "stated" }] });
   const retry = await runDream({ ...host, extract: reworded }, runOptions(ws, { visibility: { kind: "restricted", audiences: ["user:b", "user:a", "user:b"] } }));
   assert.equal(retry.sittings.resumed, 1);
@@ -656,7 +656,7 @@ test("a resumed plan passes the route stage, so a host gate there can stop it", 
   const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
   t.after(ws.cleanup);
   store.failProposeCreate(1);
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   await assert.rejects(() => runDream(host, runOptions(ws, { onStage: (name) => { if (name === "route") throw new Error("gate closed"); } })), /gate closed/);
   assert.equal((await store.listProposals()).length, 1, "the gate stopped the run before it proposed the missing claim");
 });
@@ -668,7 +668,7 @@ test("changing the visibility starts a new plan: a half-proposed sitting is not 
   const { ws, store, extract, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: two } });
   t.after(ws.cleanup);
   store.failProposeCreate(1);
-  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.cause?.cause?.code === "INJECTED");
   const before = extract.calls.length;
   const wider = { kind: "restricted", audiences: ["user:owner", "user:other"] };
   await runDream(host, runOptions(ws, { visibility: wider }));
@@ -1182,4 +1182,80 @@ test("the review backfill and the brief judge one snapshot: a rival another writ
   assert.equal(report.status, "noop");
   assert.equal(report.claims.contested_routed >= 1, true, "the claim the rival contests reached the review queue on the run that found it");
   assert.equal(host.published.at(-1).reviewItems.length >= 1, true);
+});
+
+test("proposal failures retain falsey raw causes without inventing a receipt", async (t) => {
+  for (const raw of [false, 0, null, undefined]) {
+    const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+    t.after(ws.cleanup);
+    let calls = 0;
+    store.proposeCreate = async () => { calls++; throw raw; };
+    let failure, thrown = false;
+    try { await runDream(host, runOptions(ws)); } catch (value) { thrown = true; failure = value; }
+    assert.equal(thrown, true);
+    assert.equal(failure.cause.cause.cause, raw);
+    assert.equal(calls, 1);
+    assert.deepEqual(failure.report.receipts, []);
+    assert.equal(failure.report.cursor.committed, false);
+  }
+});
+
+test("report-clock failure retains the original root-registration failure", async (t) => {
+  const raw = false;
+  let hostFailed = false;
+  const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, host: { registerRoot: () => { hostFailed = true; throw raw; } } });
+  t.after(ws.cleanup);
+  const now = () => { if (hostFailed) throw null; return "2026-11-02T00:00:00.000Z"; };
+  let failure, thrown = false;
+  try { await runDream(host, runOptions(ws, { now })); } catch (value) { thrown = true; failure = value; }
+  assert.equal(thrown, true);
+  assert.equal(failure.cause.cause, raw);
+  assert.equal(failure.secondaryFailures[0].stage, "finished_at");
+  assert.equal(failure.secondaryFailures[0].value, null);
+  assert.equal(failure.report.cursor.committed, false);
+});
+
+test("reconciliation failure remains independent of the proposal failure", async (t) => {
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  t.after(ws.cleanup);
+  let reads = 0;
+  const list = store.listProposals.bind(store);
+  store.listProposals = async (...args) => { if (++reads === 2) throw null; return list(...args); };
+  store.proposeCreate = async () => { throw false; };
+  let failure;
+  try { await runDream(host, runOptions(ws)); assert.fail("expected failure"); } catch (value) { failure = value; }
+  assert.equal(failure.cause.cause.cause, false);
+  assert.equal(failure.cause.dreamReconciliation.failurePresent, true);
+  assert.equal(failure.cause.dreamReconciliation.failure, null);
+  assert.deepEqual(failure.report.receipts, []);
+  assert.equal(failure.report.cursor.committed, false);
+});
+
+test("proposal failure classification does not invoke a hostile code getter", async (t) => {
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  t.after(ws.cleanup);
+  let reads = 0;
+  const raw = Object.defineProperty({}, "code", { get() { reads++; throw null; } });
+  store.proposeCreate = async () => { throw raw; };
+  let failure;
+  try { await runDream(host, runOptions(ws)); assert.fail("expected failure"); } catch (value) { failure = value; }
+  assert.equal(reads, 0);
+  assert.equal(failure.cause.cause.cause, raw);
+  assert.deepEqual(failure.report.receipts, []);
+  assert.equal(failure.report.cursor.committed, false);
+});
+
+test("a replaced Error constructor and Array push cannot hide independent failure facts", async (t) => {
+  let hostFailed = false, constructorCalls = 0;
+  const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, host: { registerRoot: () => { hostFailed = true; globalThis.Error = function () { constructorCalls++; throw 0; }; throw false; } } });
+  t.after(ws.cleanup);
+  const originalError = globalThis.Error, originalPush = Array.prototype.push;
+  const now = () => { if (hostFailed) { Array.prototype.push = function () { throw 0; }; throw null; } return "2026-11-02T00:00:00.000Z"; };
+  let failure, thrown = false;
+  try { await runDream(host, runOptions(ws, { now })); } catch (value) { thrown = true; failure = value; } finally { globalThis.Error = originalError; Array.prototype.push = originalPush; }
+  assert.equal(thrown, true);
+  assert.equal(constructorCalls, 0);
+  assert.equal(failure.cause?.cause, false, `received ${String(failure)}`);
+  assert.equal(failure.secondaryFailures[0].value, null);
+  assert.equal(failure.report.cursor.committed, false);
 });

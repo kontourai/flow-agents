@@ -19,7 +19,7 @@
 
 import { proposeMemory } from "../promote/store-target.js";
 import { MEMORY_CATEGORY, encodeEnvelope, indexProposals, planDigest, titleFor } from "./envelope.js";
-import { dreamError } from "./util.js";
+import { dreamError, dreamSetOwn, wrapDreamFailure } from "./util.js";
 
 /**
  * @param {object} options
@@ -72,8 +72,11 @@ export async function proposeSitting({ residue, plan, decisions, visibilityKey, 
     result = await proposeMemory({ residue, candidates, proposerId, ...host, write: true, requestScope: planDigest(plan), positions: fresh.map(({ position }) => position) });
   } catch (error) {
     // proposeMemory reports the ids it saw, but the failing call is indeterminate: ask the store what landed.
-    const landed = await reconcile(host.store, proposerId, fresh);
-    throw Object.assign(error, { dreamLanded: landed });
+    const observation = await reconcile(host.store, proposerId, fresh);
+    const failure = wrapDreamFailure(error, "Dream proposal operation failed");
+    dreamSetOwn(failure, "dreamLanded", observation.landed, false);
+    dreamSetOwn(failure, "dreamReconciliation", observation.reconciliation, false);
+    throw failure;
   }
   if (result.proposals.length !== candidates.length) {
     throw dreamError("DREAM_PROPOSAL_COUNT", "the store returned a different number of proposals than were requested");
@@ -85,10 +88,10 @@ export async function proposeSitting({ residue, plan, decisions, visibilityKey, 
 async function reconcile(store, proposerId, fresh) {
   try {
     const index = indexProposals(await store.listProposals(), proposerId);
-    return fresh
+    return { landed: fresh
       .filter(({ entry }) => index.byClaim.get(entry.claim.id)?.proposal.proposer_id === proposerId)
-      .map(({ entry }) => ({ claimId: entry.claim.id, proposalId: index.byClaim.get(entry.claim.id).proposal.id }));
-  } catch {
-    return null;
+      .map(({ entry }) => ({ claimId: entry.claim.id, proposalId: index.byClaim.get(entry.claim.id).proposal.id })), reconciliation: { failurePresent: false } };
+  } catch (failure) {
+    return { landed: null, reconciliation: { failurePresent: true, failure } };
   }
 }

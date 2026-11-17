@@ -9,9 +9,44 @@
 import { createHash, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { types } from "node:util";
+
+const DreamError = Error;
+const ownDescriptor = Object.getOwnPropertyDescriptor;
+const defineProperty = Object.defineProperty;
+const createObject = Object.create;
+const hasOwn = Function.call.bind(Object.prototype.hasOwnProperty);
+const isProxy = types.isProxy;
+
+export function dreamSetOwn(target, key, value, enumerable = true) {
+  const descriptor = createObject(null);
+  descriptor.value = value; descriptor.writable = true; descriptor.configurable = true; descriptor.enumerable = enumerable;
+  defineProperty(target, key, descriptor);
+}
+
+export function dreamOwnValue(value, key) {
+  if (value === null || (typeof value !== "object" && typeof value !== "function") || isProxy(value)) return undefined;
+  const descriptor = ownDescriptor(value, key);
+  return descriptor && hasOwn(descriptor, "value") ? descriptor.value : undefined;
+}
+
+export function wrapDreamFailure(cause, message) {
+  const originalMessage = dreamOwnValue(cause, "message");
+  const error = new DreamError(typeof originalMessage === "string" ? originalMessage : message);
+  const code = dreamOwnValue(cause, "code");
+  if (typeof code === "string") dreamSetOwn(error, "code", code);
+  const name = dreamOwnValue(cause, "name");
+  if (typeof name === "string") dreamSetOwn(error, "name", name, false);
+  const sittingId = dreamOwnValue(cause, "sittingId");
+  if (typeof sittingId === "string") dreamSetOwn(error, "sittingId", sittingId);
+  const proposalId = dreamOwnValue(cause, "proposalId");
+  if (typeof proposalId === "string") dreamSetOwn(error, "proposalId", proposalId);
+  dreamSetOwn(error, "cause", cause, false);
+  return error;
+}
 
 export function dreamError(code, message, extra = {}) {
-  return Object.assign(new Error(message), { code }, extra);
+  return Object.assign(new DreamError(message), { code }, extra);
 }
 
 export function sha256(value) {

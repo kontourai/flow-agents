@@ -7,7 +7,8 @@
  *
  * Crash-safety is one rule: the cursor is committed LAST, so a run that fails
  * anywhere leaves it where it was and the next run does the same work again.
- * That is safe because every earlier step is replay-safe:
+ * Reconciliation avoids some duplicates, but a lost write response remains
+ * indeterminate and requires owner reconciliation before any replay:
  *   - a sitting already fully proposed is recognised from the store (all of its
  *     claims are there) and is not distilled again, so a replay spends no model
  *     call and makes no duplicate;
@@ -44,7 +45,7 @@ import { MAX_CLAIM_BYTES, boundFact, fitPlan, indexProposals, verifyEntry, visib
 import { acquireDreamLock } from "./lock.js";
 import { readPurgeGate } from "./purge-gate.js";
 import { proposeSitting } from "./propose.js";
-import { assertAbsolute, dreamError, projectFromCwd, sha256, writePrivateAtomic } from "./util.js";
+import { assertAbsolute, dreamError, dreamOwnValue, dreamSetOwn, projectFromCwd, sha256, wrapDreamFailure, writePrivateAtomic } from "./util.js";
 
 export const DREAM_PROPOSER_ID = "knowledge.dream";
 export const DEFAULT_MAX_SITTINGS_PER_RUN = 10;
@@ -227,6 +228,7 @@ export async function runDream(host, options = {}) {
     cursor: { committed: false },
   };
   let cursorCommitted = false;
+  let releaseAttempted = false;
   const release = dryRun ? () => {} : acquireDreamLock(path.join(dreamDir, "dream.lock"));
   const writeReport = () => writePrivateAtomic(path.join(reportsDir, `${runId}.json`), `${JSON.stringify(report, null, 2)}\n`);
   // Filled in by the caller as model calls return, and written with the report each time it is written.
@@ -392,13 +394,9 @@ export async function runDream(host, options = {}) {
       }
 
       await stage("propose");
-      const result = await proposeSitting({ residue, plan, decisions: decided.map((entry) => entry.decision), visibilityKey: vKey, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true })
-        .catch((error) => {
-          // What landed before the failure is real, and the report must say so.
-          for (const landed of error.dreamLanded ?? []) report.receipts.push({ claim_id: landed.claimId, proposal_id: landed.proposalId, disposition: "created", state: "pending", sitting_id: residue.sittingId, outcome: null });
-          report.claims.created += (error.dreamLanded ?? []).length;
-          throw error;
-        });
+      // A later list observation is not a producer acknowledgement and cannot
+      // establish creation or pending state for a failed proposal call.
+      const result = await proposeSitting({ residue, plan, decisions: decided.map((entry) => entry.decision), visibilityKey: vKey, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true });
       // Account for the store's change before anything else can fail.
       const outcomes = new Map(decided.map((entry) => [entry.claim.id, entry.decision.outcome]));
       for (const item of result.created) report.receipts.push({ claim_id: item.claimId, proposal_id: item.proposalId, disposition: "created", state: "pending", sitting_id: residue.sittingId, outcome: outcomes.get(item.claimId) });
@@ -518,23 +516,28 @@ export async function runDream(host, options = {}) {
     }
     return report;
   } catch (error) {
+    const failure = wrapDreamFailure(error, "Dream run failed");
+    const code = dreamOwnValue(failure, "code");
+    const message = dreamOwnValue(error, "message");
     report.status = "failed";
-    report.error = { code: error.code ?? "DREAM_FAILED", message: String(error.message ?? error).slice(0, 500) };
+    report.error = { code: typeof code === "string" ? code : "DREAM_FAILED", message: typeof message === "string" ? message.slice(0, 500) : "Dream run failed" };
     report.cursor = cursorCommitted ? { ...report.cursor, committed: true } : { committed: false };
-    report.finished_at = now();
-    if (error.briefs) {
-      report.briefs = error.briefs;
-      report.obsolete_briefs_removed = error.removed ?? [];
+    const secondaryFailures = [];
+    try { report.finished_at = now(); } catch (value) { dreamSetOwn(secondaryFailures, "" + secondaryFailures.length, { stage: "finished_at", value }); }
+    const briefs = dreamOwnValue(error, "briefs");
+    if (briefs) {
+      report.briefs = briefs;
+      report.obsolete_briefs_removed = dreamOwnValue(error, "removed") ?? [];
     }
     if (!dryRun) {
-      try {
-        writeReport();
-      } catch {
-        // A failing disk cannot also hold the failure report; the thrown error is the signal.
-      }
+      try { writeReport(); } catch (value) { dreamSetOwn(secondaryFailures, "" + secondaryFailures.length, { stage: "write_report", value }); }
     }
-    throw Object.assign(error, { report });
+    releaseAttempted = true;
+    try { release(); } catch (value) { dreamSetOwn(secondaryFailures, "" + secondaryFailures.length, { stage: "release", value }); }
+    dreamSetOwn(failure, "report", report);
+    dreamSetOwn(failure, "secondaryFailures", secondaryFailures, false);
+    throw failure;
   } finally {
-    release(); // never throws: see acquireDreamLock
+    if (!releaseAttempted) release();
   }
 }
