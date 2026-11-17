@@ -8,6 +8,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import { validate } from "../providers/lib/schema-validate.js";
 import { createHash } from "node:crypto";
+import { dreamOwnValue, dreamSetOwn, wrapDreamFailure } from "../dream/util.js";
 
 const RESIDUE_SCHEMA = JSON.parse(readFileSync(new URL("../schemas/knowledge/residue.schema.json", import.meta.url), "utf8"));
 
@@ -76,11 +77,17 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
       const id = await store.proposeCreate(candidate, proposerId, { agent: proposerId, proposal: 'Create distilled memory candidate' }, { requestKey });
       proposals.push(id);
     } catch (cause) {
-      const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined;
+      const code = dreamOwnValue(cause, 'code');
       const conflict = code === 'REQUEST_KEY_CONFLICT';
       const refused = code === 'MISSING_EVIDENCE';
-      const message = conflict ? 'Corpus request key conflict; reconcile the batch' : refused ? 'Corpus refused the candidate; reconcile the batch before retrying' : 'Corpus proposal outcome is unconfirmed; retry only the identical batch';
-      throw Object.assign(new Error(message, { cause }), { ...(conflict || refused ? { code } : {}), completedProposals: proposals, failedCandidateIndex: index, requestKey });
+      const message = conflict ? 'Corpus request key conflict; reconcile the batch' : refused ? 'Corpus refused the candidate; retain for owner reconciliation' : 'Corpus proposal outcome is unconfirmed; retain for owner reconciliation';
+      const failure = wrapDreamFailure(cause, message);
+      dreamSetOwn(failure, 'message', message, false);
+      if (!conflict && !refused) delete failure.code;
+      dreamSetOwn(failure, 'completedProposals', [...proposals]);
+      dreamSetOwn(failure, 'failedCandidateIndex', index);
+      dreamSetOwn(failure, 'requestKey', requestKey);
+      throw failure;
     }
   }
   return { root: rootName, posture: 'proposed', review_state: 'not_observed', proposals };
