@@ -1,5 +1,13 @@
 # Changelog
 
+## [11.2.1](https://github.com/kontourai/flow-agents/compare/v11.2.0...v11.2.1) (2026-11-23)
+
+
+### Fixes
+
+* **deps:** bump @anthropic-ai/sdk from 1.8.0 to 1.9.0 ([#1657](https://github.com/kontourai/flow-agents/issues/1657)) ([1b852f3](https://github.com/kontourai/flow-agents/commit/1b852f32bf20fffa88a1173e6899b9ba16f9ba2c))
+* preserve Dream proposal failure evidence ([#1655](https://github.com/kontourai/flow-agents/issues/1655)) ([b38631d](https://github.com/kontourai/flow-agents/commit/b38631da5ae5a63d0d38354d6d8c8d7dc093545a))
+
 ## [11.2.0](https://github.com/kontourai/flow-agents/compare/v11.1.0...v11.2.0) (2026-11-16)
 
 
