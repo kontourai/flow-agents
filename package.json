@@ -446,7 +446,7 @@
     "@types/node": "^26.6.6",
     "ajv": "8.20.0",
     "gcp-metadata": "9.2.3",
-    "promptfoo": "^0.125.1",
+    "promptfoo": "^0.126.0",
     "typescript": "^7.0.2",
     "yaml": "2.9.1"
   },
